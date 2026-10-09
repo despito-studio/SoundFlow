@@ -60,6 +60,13 @@ class SoundFlowApp {
         document.querySelectorAll('.nav-item').forEach(btn => {
             btn.addEventListener('click', () => {
                 const view = btn.dataset.view;
+                if (view === 'profile' && (!window.soundFlowAuth || !window.soundFlowAuth.user)) {
+                    this.showToast('Для доступу до вкладки Профіль необхідно увійти в акаунт 🔒');
+                    if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
+                        window.soundFlowAuth.openSignIn();
+                    }
+                    return;
+                }
                 this.switchView(view);
             });
         });
@@ -99,6 +106,17 @@ class SoundFlowApp {
     }
 
     switchView(viewName, playlistId = null) {
+        if (viewName === 'profile') {
+            const isUserLoggedIn = window.soundFlowAuth && window.soundFlowAuth.user;
+            if (!isUserLoggedIn) {
+                this.showToast('Для доступу до вкладки Профіль необхідно увійти в акаунт 🔒');
+                if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
+                    window.soundFlowAuth.openSignIn();
+                }
+                return;
+            }
+        }
+
         this.currentView = viewName;
         this.currentPlaylistId = playlistId;
 
@@ -237,9 +255,95 @@ class SoundFlowApp {
         });
     }
 
+    async handleSecretCommand(cmd) {
+        cmd = cmd.trim();
+        const parts = cmd.split(/\s+/);
+        const action = parts[0].toLowerCase();
+
+        if (action === '/id' || action === '/myid') {
+            const myId = this.profile?.sf_id || 'SF-000000';
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(myId);
+            }
+            this.showToast(`Ваш ID: ${myId} (скопійовано в буфер обміну) 📋`);
+            return true;
+        }
+
+        if (action === '/help' || action === '/cmd') {
+            this.showToast('Команди: /setrole <ID> <роль>, /admin <ID>, /myid, або Ctrl+Shift+R');
+            return true;
+        }
+
+        let targetId = '';
+        let targetRole = '';
+
+        if (action === '/admin') {
+            if (parts.length > 1) {
+                targetId = parts[1].toUpperCase();
+            } else {
+                targetId = this.profile?.sf_id || '';
+            }
+            targetRole = 'admin';
+        } else if (action === '/setrole' || action === '/role') {
+            if (parts.length === 2) {
+                const maybeRole = parts[1].toLowerCase();
+                if (['admin', 'moderator', 'artist', 'listener'].includes(maybeRole)) {
+                    targetId = this.profile?.sf_id || '';
+                    targetRole = maybeRole;
+                } else {
+                    targetId = parts[1].toUpperCase();
+                    targetRole = 'admin';
+                }
+            } else if (parts.length >= 3) {
+                targetId = parts[1].toUpperCase();
+                targetRole = parts[2].toLowerCase();
+            } else {
+                this.showToast('Формат: /setrole <ID> <admin|moderator|artist|listener>');
+                return true;
+            }
+        } else {
+            return false;
+        }
+
+        const validRoles = ['admin', 'moderator', 'artist', 'listener'];
+        if (!validRoles.includes(targetRole)) {
+            this.showToast(`Невідома роль: ${targetRole}. Доступні: admin, moderator, artist, listener`);
+            return true;
+        }
+
+        try {
+            if (window.pywebview && window.pywebview.api) {
+                const res = await window.pywebview.api.set_role_by_id(targetId, targetRole);
+                if (res && res.success) {
+                    if (res.is_current || targetId === this.profile?.sf_id) {
+                        this.profile.role = targetRole;
+                        this.updateProfileUI();
+                    }
+                    this.showToast(`👑 Роль ${targetRole.toUpperCase()} встановлено для ${targetId || 'вас'}! ✨`);
+                } else {
+                    this.showToast(res?.error || `Користувача ${targetId} не знайдено`);
+                }
+            }
+        } catch (err) {
+            console.error('Error executing secret command:', err);
+            this.showToast('Помилка при виконанні команди');
+        }
+        return true;
+    }
+
     async executeSearch(query) {
         query = query.trim();
         if (!query) return;
+
+        // Secret commands handling (e.g. /setrole SF-123456 admin, /admin SF-123456, /myid)
+        if (query.startsWith('/')) {
+            const handled = await this.handleSecretCommand(query);
+            if (handled !== false) {
+                const input = document.getElementById('search-input');
+                if (input) input.value = '';
+                return;
+            }
+        }
 
         this.switchView('search');
 
@@ -505,6 +609,15 @@ class SoundFlowApp {
     async loadLibrary() {
         if (window.pywebview && window.pywebview.api) {
             this.library = await window.pywebview.api.get_library();
+            try {
+                const prof = await window.pywebview.api.get_profile();
+                if (prof) {
+                    this.profile = { ...this.profile, ...prof };
+                    this.updateProfileUI();
+                }
+            } catch (e) {
+                console.warn('Failed to load profile in loadLibrary:', e);
+            }
             this.updateSidebarPlaylists();
             this.updateLikedBadge();
         }
@@ -778,6 +891,61 @@ class SoundFlowApp {
         document.getElementById('btn-close-picker-pl')?.addEventListener('click', () => {
             pickerModal.style.display = 'none';
         });
+
+        // Secret Role Manager Modal
+        const secretModal = document.getElementById('modal-secret-role');
+        document.getElementById('btn-cancel-secret-role')?.addEventListener('click', () => {
+            if (secretModal) secretModal.style.display = 'none';
+        });
+
+        document.getElementById('btn-apply-secret-role')?.addEventListener('click', async () => {
+            const inputId = document.getElementById('input-secret-target-id');
+            const selectRole = document.getElementById('select-secret-target-role');
+            let targetId = inputId ? inputId.value.trim().toUpperCase() : '';
+            if (!targetId && this.profile?.sf_id) {
+                targetId = this.profile.sf_id;
+            }
+            const targetRole = selectRole ? selectRole.value : 'admin';
+
+            if (!targetId) {
+                this.showToast('Вкажіть ID користувача (наприклад: SF-104928)');
+                return;
+            }
+
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    const res = await window.pywebview.api.set_role_by_id(targetId, targetRole);
+                    if (res && res.success) {
+                        if (res.is_current || targetId === this.profile?.sf_id) {
+                            this.profile.role = targetRole;
+                            this.updateProfileUI();
+                        }
+                        this.showToast(`👑 Роль ${targetRole.toUpperCase()} призначено для ${targetId}! ✨`);
+                        if (secretModal) secretModal.style.display = 'none';
+                    } else {
+                        this.showToast(res?.error || `Користувача ${targetId} не знайдено`);
+                    }
+                }
+            } catch (err) {
+                this.showToast('Помилка при призначенні ролі');
+            }
+        });
+    }
+
+    openSecretRoleModal() {
+        const modal = document.getElementById('modal-secret-role');
+        if (!modal) return;
+        const inputId = document.getElementById('input-secret-target-id');
+        const selectRole = document.getElementById('select-secret-target-role');
+        if (inputId) {
+            inputId.value = this.profile?.sf_id || '';
+            inputId.placeholder = this.profile?.sf_id || 'SF-XXXXXX';
+        }
+        if (selectRole) {
+            selectRole.value = 'admin';
+        }
+        modal.style.display = 'flex';
+        inputId?.focus();
     }
 
     openPlaylistPicker(track) {
@@ -822,6 +990,22 @@ class SoundFlowApp {
     // ==========================================
     setupKeyboardShortcuts() {
         window.addEventListener('keydown', (e) => {
+            // Secret Console shortcut: Ctrl + Shift + R
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
+                e.preventDefault();
+                this.openSecretRoleModal();
+                return;
+            }
+
+            // Close secret modal on Escape
+            if (e.key === 'Escape') {
+                const secretModal = document.getElementById('modal-secret-role');
+                if (secretModal && secretModal.style.display !== 'none') {
+                    secretModal.style.display = 'none';
+                    return;
+                }
+            }
+
             // Ignore if active input
             if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
                 if (e.key === 'Escape') {
@@ -881,7 +1065,8 @@ class SoundFlowApp {
     setupProfile() {
         this.profile = {
             name: "FEODAL",
-            role: "admin", // listener | artist | moderator | admin
+            role: "listener", // listener | artist | moderator | admin
+            sf_id: "",
             banner_preset: "beige",
             banner_url: "",
             avatar_url: "assets/icon.png",
@@ -1161,12 +1346,13 @@ class SoundFlowApp {
 
     async setRole(roleName) {
         const isOwner = this.isOwner();
+        const isAdmin = this.profile.role === 'admin';
         const validRoles = ['listener', 'artist', 'moderator'];
-        if (isOwner) {
+        if (isOwner || isAdmin) {
             validRoles.push('admin');
         } else if (roleName === 'admin') {
             roleName = 'listener';
-            this.showToast('Права адміністратора закріплені за власником (FEODAL)');
+            this.showToast('Роль адміністратора призначається через секретну консоль 👑');
         }
 
         if (!validRoles.includes(roleName)) roleName = 'listener';
@@ -1229,10 +1415,23 @@ class SoundFlowApp {
 
     updateProfileUI() {
         const isOwner = this.isOwner();
+        const isAdmin = this.profile.role === 'admin';
 
-        // Enforce: non-owner accounts cannot have admin role
-        if (!isOwner && this.profile.role === 'admin') {
-            this.profile.role = 'listener';
+        // Update Unique User ID badge & copy handler
+        const idEl = document.getElementById('sc-profile-id');
+        if (idEl) {
+            idEl.textContent = this.profile.sf_id || 'SF-000000';
+        }
+        const idBadge = document.getElementById('sc-profile-id-badge');
+        if (idBadge && !idBadge._hasCopyHandler) {
+            idBadge._hasCopyHandler = true;
+            idBadge.addEventListener('click', () => {
+                const myId = this.profile?.sf_id || 'SF-000000';
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(myId);
+                }
+                this.showToast(`ID скопійовано в буфер: ${myId} 📋`);
+            });
         }
 
         const { name, role, avatar_url, followers, following } = this.profile;
@@ -1241,15 +1440,15 @@ class SoundFlowApp {
         const adminTabBtn = document.getElementById('sc-tab-admin');
         const adminRoleOpt = document.getElementById('role-option-admin-btn');
         if (adminTabBtn) {
-            adminTabBtn.style.display = (isOwner && role === 'admin') ? 'inline-flex' : 'none';
+            adminTabBtn.style.display = (isOwner || isAdmin) ? 'inline-flex' : 'none';
             // If non-admin is viewing the admin tab, bounce to 'all'
-            if ((!isOwner || role !== 'admin') && adminTabBtn.classList.contains('active')) {
+            if ((!isOwner && !isAdmin) && adminTabBtn.classList.contains('active')) {
                 const allTab = document.querySelector('.sc-tab-btn[data-tab="all"]');
                 if (allTab) allTab.click();
             }
         }
         if (adminRoleOpt) {
-            adminRoleOpt.style.display = isOwner ? 'flex' : 'none';
+            adminRoleOpt.style.display = (isOwner || isAdmin) ? 'flex' : 'none';
         }
 
         // Friends counter badges

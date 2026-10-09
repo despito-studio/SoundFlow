@@ -23,6 +23,27 @@ class LibraryManager:
         self._ensure_dir()
         self.data = self._load()
 
+    def generate_unique_sf_id(self):
+        """Generates a unique User ID like SF-748291 ensuring no collision across existing libraries."""
+        import random
+        existing_ids = set()
+        if os.path.exists(self.base_dir):
+            for fname in os.listdir(self.base_dir):
+                if fname.startswith("library") and fname.endswith(".json"):
+                    try:
+                        with open(os.path.join(self.base_dir, fname), "r", encoding="utf-8") as f:
+                            d = json.load(f)
+                            eid = d.get("profile", {}).get("sf_id")
+                            if eid:
+                                existing_ids.add(eid)
+                    except Exception:
+                        pass
+        for _ in range(1000):
+            cand = f"SF-{random.randint(100000, 999999)}"
+            if cand not in existing_ids:
+                return cand
+        return f"SF-{uuid.uuid4().hex[:6].upper()}"
+
     def set_user(self, user_id=None, user_info=None):
         """Switches library to a specific user's file or back to guest."""
         self.current_user_id = user_id
@@ -34,27 +55,23 @@ class LibraryManager:
         self._ensure_dir()
         self.data = self._load()
 
-        # Check if user is owner (feodal)
-        is_owner = False
-        if user_info and isinstance(user_info, dict):
-            uname = str(user_info.get("name", "")).lower()
-            uemail = str(user_info.get("email", "")).lower()
-            if "feodal" in uname or "feodai" in uname or "feodal" in uemail:
-                is_owner = True
-        elif not user_id:
-            # Default local guest profile belongs to local user (feodal)
-            is_owner = True
-
-        self.is_current_user_owner = is_owner
         prof = self.data.setdefault("profile", {})
-        if not is_owner:
-            # Strictly give listener (слухач) to any new or other user
-            prof["role"] = "listener"
-            self._save()
-        elif "role" not in prof or prof["role"] == "listener":
-            prof["role"] = "admin"
-            self._save()
+        if "sf_id" not in prof or not prof["sf_id"]:
+            prof["sf_id"] = self.generate_unique_sf_id()
 
+        # Strict requirement: all new downloads/users start with listener role
+        if "role" not in prof:
+            prof["role"] = "listener"
+
+        if user_info and isinstance(user_info, dict):
+            if user_info.get("name"):
+                prof["name"] = user_info["name"]
+            if user_info.get("email"):
+                prof["email"] = user_info["email"]
+            if user_info.get("avatar_url"):
+                prof["avatar_url"] = user_info["avatar_url"]
+
+        self._save()
         return self.data
 
     def _ensure_dir(self):
@@ -206,43 +223,117 @@ class LibraryManager:
         return False
 
     def get_profile(self):
-        # Default role: listener (слухач) for any user, admin only for feodal
-        is_feodal = False
-        if not self.current_user_id or "feodal" in str(self.current_user_id).lower() or "feodai" in str(self.current_user_id).lower():
-            is_feodal = True
+        prof = self.data.setdefault("profile", {})
+        if "sf_id" not in prof or not prof["sf_id"]:
+            prof["sf_id"] = self.generate_unique_sf_id()
+            self._save()
+        if "role" not in prof:
+            prof["role"] = "listener"
+            self._save()
 
+        is_admin = (prof.get("role") == "admin")
         default_profile = {
-            "name": "FEODAL" if is_feodal else "Слухач",
-            "role": "admin" if is_feodal else "listener",
+            "sf_id": prof["sf_id"],
+            "name": prof.get("name", "Слухач"),
+            "role": prof.get("role", "listener"),
             "banner_preset": "beige",
             "banner_url": "",
             "avatar_url": "",
-            "followers": 1420 if is_feodal else 0,
-            "following": 2 if is_feodal else 0,
-            "hq_audio": is_feodal,
-            "bass_boost": is_feodal,
-            "bass_level": 6 if is_feodal else 0
+            "followers": 1420 if is_admin else 0,
+            "following": 2 if is_admin else 0,
+            "hq_audio": is_admin,
+            "bass_boost": is_admin,
+            "bass_level": 6 if is_admin else 0
         }
-        profile = self.data.setdefault("profile", default_profile)
         for k, v in default_profile.items():
-            profile.setdefault(k, v)
-        return profile
+            prof.setdefault(k, v)
+        return prof
 
     def update_profile(self, profile_data):
         if isinstance(profile_data, dict):
             prof = self.get_profile()
-            # If attempting to set role to admin, check if owner
-            if "role" in profile_data:
-                target_role = profile_data["role"]
-                if target_role == "admin":
-                    is_owner = getattr(self, "is_current_user_owner", True)
-                    current_name = str(prof.get("name", "")).lower()
-                    if not is_owner or ("feodal" not in current_name and "feodai" not in current_name):
-                        profile_data["role"] = "listener"
+            # Prevent changing sf_id directly
+            profile_data.pop("sf_id", None)
+            # Normal users cannot change their role via UI profile update
+            if prof.get("role") != "admin":
+                profile_data.pop("role", None)
             prof.update(profile_data)
             self._save()
             return prof
         return self.get_profile()
+
+    def set_role_by_id(self, target_sf_id, new_role):
+        """
+        Secret command backend: Finds user by sf_id across all library files and sets their role.
+        Supported roles: admin, moderator, artist, listener
+        """
+        valid_roles = ["admin", "moderator", "artist", "listener"]
+        target_role = str(new_role).strip().lower()
+        if target_role not in valid_roles:
+            return {
+                "success": False,
+                "error": f"Невідома роль '{new_role}'. Доступні: admin, moderator, artist, listener"
+            }
+
+        target_sf_id = str(target_sf_id).strip().upper()
+        if not target_sf_id.startswith("SF-") and target_sf_id.isalnum():
+            target_sf_id = f"SF-{target_sf_id}"
+
+        # 1. Check currently active profile
+        cur_prof = self.get_profile()
+        if cur_prof.get("sf_id") == target_sf_id:
+            cur_prof["role"] = target_role
+            if target_role == "admin":
+                cur_prof["hq_audio"] = True
+                cur_prof["bass_boost"] = True
+                cur_prof["bass_level"] = 6
+            self._save()
+            return {
+                "success": True,
+                "sf_id": target_sf_id,
+                "role": target_role,
+                "name": cur_prof.get("name", "Користувач"),
+                "is_current": True
+            }
+
+        # 2. Search all library*.json files in base_dir
+        found = False
+        target_name = ""
+        if os.path.exists(self.base_dir):
+            for fname in os.listdir(self.base_dir):
+                if fname.startswith("library") and fname.endswith(".json"):
+                    fpath = os.path.join(self.base_dir, fname)
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            file_data = json.load(f)
+                        f_prof = file_data.get("profile", {})
+                        if f_prof.get("sf_id") == target_sf_id:
+                            f_prof["role"] = target_role
+                            if target_role == "admin":
+                                f_prof["hq_audio"] = True
+                                f_prof["bass_boost"] = True
+                                f_prof["bass_level"] = 6
+                            with open(fpath, "w", encoding="utf-8") as f:
+                                json.dump(file_data, f, ensure_ascii=False, indent=2)
+                            found = True
+                            target_name = f_prof.get("name", "Користувач")
+                            break
+                    except Exception as e:
+                        print(f"Error checking {fname}: {e}")
+
+        if found:
+            return {
+                "success": True,
+                "sf_id": target_sf_id,
+                "role": target_role,
+                "name": target_name,
+                "is_current": False
+            }
+
+        return {
+            "success": False,
+            "error": f"Користувача з ID '{target_sf_id}' не знайдено."
+        }
 
     def get_friends(self):
         default_friends = [

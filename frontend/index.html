@@ -53,13 +53,13 @@
                     </svg>
                     <span data-i18n="nav_history">Історія</span>
                 </button>
-                <button class="nav-item" data-view="profile" id="nav-item-profile">
+                <button class="nav-item" data-view="profile" id="nav-item-profile" style="display: none;">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                         <circle cx="12" cy="7" r="4"></circle>
                     </svg>
                     <span data-i18n="nav_profile">Профіль</span>
-                    <span class="role-badge-pill admin" id="nav-role-badge">ADMIN</span>
+                    <span class="role-badge-pill listener" id="nav-role-badge">СЛУХАЧ</span>
                 </button>
             </nav>
 
@@ -324,7 +324,16 @@
                             <div class="sc-user-meta">
                                 <div class="sc-user-name-row">
                                     <div class="sc-nickname-badge">
-                                        <span id="sc-profile-name">FEODAL</span>
+                                        <span id="sc-profile-name">Слухач</span>
+                                    </div>
+
+                                    <div class="sc-user-id-badge" id="sc-user-id-badge" title="Натисніть, щоб скопіювати ваш унікальний ID">
+                                        <span class="id-label">ID:</span>
+                                        <span class="id-val" id="sc-profile-id">SF-000000</span>
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" class="copy-icon">
+                                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                        </svg>
                                     </div>
 
                                     <!-- ROLE BADGE (where the yellow oval is marked) -->
@@ -865,6 +874,27 @@
             <div class="modal-actions">
                 <button class="btn-secondary" id="btn-cancel-add-friend" data-i18n="modal_btn_cancel">Скасувати</button>
                 <button class="btn-primary" id="btn-submit-add-friend" data-i18n="btn_add_friend">Додати</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: SECRET ROLE MANAGER -->
+    <div class="modal-overlay" id="modal-secret-role" style="display: none;">
+        <div class="modal-card">
+            <h3>👑 Керування Ролями (Secret Console)</h3>
+            <p>Призначення ролі за унікальним ID користувача SoundFlow:</p>
+            <label style="font-size:0.78rem; color:var(--text-muted); margin-bottom:-6px;">ID користувача (наприклад: SF-104928 або залиште порожнім для себе):</label>
+            <input type="text" id="input-secret-target-id" placeholder="SF-XXXXXX" maxlength="15">
+            <label style="font-size:0.78rem; color:var(--text-muted); margin-bottom:-6px;">Оберіть роль для призначення:</label>
+            <select id="select-secret-target-role" style="background:var(--bg-tertiary, #121520); color:var(--text-primary, #fff); border:1px solid var(--border-color, rgba(255,255,255,0.1)); border-radius:6px; padding:8px 10px; font-size:0.85rem; outline:none;">
+                <option value="admin">👑 Адміністратор (admin)</option>
+                <option value="moderator">🛡️ Модератор (moderator)</option>
+                <option value="artist">🎙️ Виконавець (artist)</option>
+                <option value="listener">🎧 Слухач (listener)</option>
+            </select>
+            <div class="modal-actions">
+                <button class="btn-secondary" id="btn-cancel-secret-role">Скасувати</button>
+                <button class="btn-primary" id="btn-apply-secret-role">Застосувати роль</button>
             </div>
         </div>
     </div>

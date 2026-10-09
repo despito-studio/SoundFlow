@@ -219,6 +219,10 @@ class SoundFlowAuth {
                 if (window.soundFlowApp) window.soundFlowApp.showToast('Ви вийшли з акаунта');
             });
 
+            // Show Profile tab in sidebar when logged in
+            const profileNavItem = document.getElementById('nav-item-profile');
+            if (profileNavItem) profileNavItem.style.display = 'flex';
+
             // Bind user library in backend
             if (window.pywebview && window.pywebview.api) {
                 const userInfo = {
@@ -229,15 +233,7 @@ class SoundFlowAuth {
                 await window.pywebview.api.set_user(user.id, userInfo);
                 if (window.soundFlowApp) {
                     await window.soundFlowApp.loadLibrary();
-                    // Enforce role: ONLY feodal gets admin, everyone else gets listener!
-                    const isFeodal = (displayName.toLowerCase().includes('feodal') || 
-                                      displayName.toLowerCase().includes('feodai') ||
-                                      email.toLowerCase().includes('feodal'));
-                    if (isFeodal) {
-                        await window.soundFlowApp.setRole('admin');
-                    } else {
-                        await window.soundFlowApp.setRole('listener');
-                    }
+                    window.soundFlowApp.updateProfileUI();
                     const tWelcome = window.soundFlowI18n ? window.soundFlowI18n.t('toast_welcome', 'Вітаємо') : 'Вітаємо';
                     window.soundFlowApp.showToast(`${tWelcome}, ${displayName}! 👋`);
                 }
@@ -247,12 +243,21 @@ class SoundFlowAuth {
             // Signed out / Guest
             this.renderGuestState();
 
+            // Hide Profile tab in sidebar for guests
+            const profileNavItem = document.getElementById('nav-item-profile');
+            if (profileNavItem) profileNavItem.style.display = 'none';
+
+            // If user is currently on profile view, switch to home
+            if (window.soundFlowApp && window.soundFlowApp.currentView === 'profile') {
+                window.soundFlowApp.switchView('home');
+            }
+
             // Switch to guest library
             if (window.pywebview && window.pywebview.api) {
                 await window.pywebview.api.set_user(null);
                 if (window.soundFlowApp) {
                     await window.soundFlowApp.loadLibrary();
-                    await window.soundFlowApp.setRole('listener');
+                    window.soundFlowApp.updateProfileUI();
                 }
             }
         }

@@ -101,3 +101,9 @@ class AppApi:
     def remove_friend(self, friend_id):
         self.library.remove_friend(friend_id)
         return self.library.get_friends()
+
+    def set_role_by_id(self, target_sf_id, new_role):
+        return self.library.set_role_by_id(target_sf_id, new_role)
+
+    def get_user_sf_id(self):
+        return self.library.get_profile().get("sf_id", "")
