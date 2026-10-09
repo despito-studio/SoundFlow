@@ -8,23 +8,19 @@ import webview.http
 from webview.util import abspath, is_app, is_local_url
 from backend.api import AppApi
 
-# Chromium & WebView2 memory and CPU optimization flags (Optimized for 200-250 MB RAM budget)
+# Chromium & WebView2 memory and CPU optimization flags
 os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
     "--autoplay-policy=no-user-gesture-required "
     "--disable-features=Translate,OptimizationHints,MediaRouter,CalculateNativeWinOcclusion "
     "--renderer-process-limit=1 "
     "--process-per-site "
-    "--js-flags=--max-old-space-size=128 "
     "--disable-gpu-shader-disk-cache "
     "--disable-domain-reliability "
     "--disable-component-update "
-    "--disable-background-networking "
     "--disable-speech-api "
     "--disable-breakpad "
     "--disable-print-preview "
-    "--disable-software-rasterizer "
-    "--memory-pressure-off=false "
-    "--optimize_for_size"
+    "--disable-software-rasterizer"
 )
 
 def _patch_pywebview_http():

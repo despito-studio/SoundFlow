@@ -60,12 +60,30 @@ class SoundFlowPlayer {
             this.updatePlayPauseUI(true);
         });
 
+        this.audio.addEventListener('playing', () => {
+            this.showLoading(false);
+            this.visualizer.start();
+            this.updatePlayPauseUI(true);
+        });
+
+        this.audio.addEventListener('canplay', () => {
+            this.showLoading(false);
+        });
+
+        this.audio.addEventListener('waiting', () => {
+            this.showLoading(true);
+        });
+
         this.audio.addEventListener('pause', () => {
+            this.showLoading(false);
             this.visualizer.stop();
             this.updatePlayPauseUI(false);
         });
 
         this.audio.addEventListener('timeupdate', () => {
+            if (this.isLoading && this.audio.currentTime > 0) {
+                this.showLoading(false);
+            }
             this.onTimeUpdate();
         });
 
@@ -74,6 +92,7 @@ class SoundFlowPlayer {
         });
 
         this.audio.addEventListener('ended', () => {
+            this.showLoading(false);
             this.onTrackEnded();
         });
 
@@ -195,34 +214,43 @@ class SoundFlowPlayer {
             // Ensure volume is applied properly
             this.audio.volume = this.isMuted ? 0 : (this.lastVolume || 0.8);
 
-            // If same stream URL and not forceRefresh, simply replay from start
-            if (this.audio.src === streamUrl && !forceRefresh) {
+            // Cleanly pause existing playback before source assignment
+            try {
+                this.audio.pause();
+            } catch (e) {}
+
+            // Set new stream source
+            if (this.audio.src === streamUrl && !this.audio.error && !forceRefresh) {
                 this.audio.currentTime = 0;
             } else {
                 this.audio.src = streamUrl;
-            }
-
-            try {
-                const playPromise = this.audio.play();
-                if (playPromise !== undefined) {
-                    await playPromise;
-                }
-            } catch (playErr) {
-                if (this.currentRequestId !== reqId) {
-                    return;
-                }
-                if (playErr.name === 'AbortError') {
-                    return;
-                }
-                throw playErr;
-            }
-
-            if (this.currentRequestId !== reqId) {
-                return;
+                this.audio.currentTime = 0;
+                this.audio.load();
             }
 
             this._lastErrorRetried = false;
-            this.showLoading(false);
+
+            // Trigger playback safely without unhandled AbortError rejections
+            try {
+                const playPromise = this.audio.play();
+                if (playPromise !== undefined) {
+                    playPromise.then(() => {
+                        this.showLoading(false);
+                        this.updatePlayPauseUI(true);
+                    }).catch((playErr) => {
+                        if (playErr.name !== 'AbortError') {
+                            console.warn('Playback start error:', playErr);
+                            this.showLoading(false);
+                        }
+                    });
+                }
+            } catch (playErr) {
+                if (playErr.name !== 'AbortError') {
+                    console.warn('Sync play error:', playErr);
+                    this.showLoading(false);
+                }
+            }
+
             this.updateMediaSession(track);
 
             // Record history & notify app
@@ -252,21 +280,32 @@ class SoundFlowPlayer {
     }
 
     async play() {
-        if (this.audio && this.audio.src && !this.audio.src.endsWith('/about:blank') && this.audio.src !== window.location.href) {
+        if (!this.audio) return;
+        const src = this.audio.currentSrc || this.audio.src || '';
+        if (src && !src.endsWith('/about:blank') && src !== window.location.href) {
             try {
                 if (this.audio.ended) {
                     this.audio.currentTime = 0;
                 }
                 const playPromise = this.audio.play();
                 if (playPromise !== undefined) {
-                    await playPromise;
+                    playPromise.then(() => {
+                        this.showLoading(false);
+                        this.updatePlayPauseUI(true);
+                    }).catch(e => {
+                        if (e.name !== 'AbortError') {
+                            console.warn('Play resume error:', e);
+                            this.showLoading(false);
+                            if (this.currentIndex >= 0 && this.currentIndex < this.queue.length) {
+                                this.playTrackAtIndex(this.currentIndex, true);
+                            }
+                        }
+                    });
                 }
             } catch (e) {
-                if (e.name !== 'AbortError') {
-                    console.warn('Play resume error:', e);
-                    if (this.currentIndex >= 0 && this.currentIndex < this.queue.length) {
-                        this.playTrackAtIndex(this.currentIndex, true);
-                    }
+                this.showLoading(false);
+                if (this.currentIndex >= 0 && this.currentIndex < this.queue.length) {
+                    this.playTrackAtIndex(this.currentIndex, true);
                 }
             }
         } else if (this.currentIndex >= 0 && this.currentIndex < this.queue.length) {

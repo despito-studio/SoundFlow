@@ -18,16 +18,18 @@ class MusicEngine:
             "extract_flat": True,
             "skip_download": True,
             "ignoreerrors": True,
+            "socket_timeout": 8,
         }
 
         # Playback extraction options: prioritize progressive HTTP/HTTPS audio and exclude HLS/m3u8
         self.playback_opts = {
             "quiet": True,
             "no_warnings": True,
-            "format": "bestaudio[protocol^=http]/bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+            "format": "bestaudio[protocol^=http][ext=mp3]/bestaudio[protocol^=http][ext=webm]/bestaudio[protocol^=http][ext=m4a]/bestaudio[protocol^=http]/bestaudio/best",
             "noplaylist": True,
             "skip_download": True,
             "ignoreerrors": True,
+            "socket_timeout": 8,
         }
         if self.node_path:
             self.playback_opts["js_runtimes"] = {"node": {"path": self.node_path}}
@@ -216,11 +218,11 @@ class MusicEngine:
                             valid_audio.append(f)
 
                     if valid_audio:
-                        # Prefer audio-only (vcodec == 'none'), then mp3/m4a/opus, then highest bitrate
+                        # Prefer audio-only (vcodec == 'none'), then webm/opus or mp3, then m4a, then highest bitrate
                         valid_audio.sort(
                             key=lambda x: (
                                 1 if x.get("vcodec") == "none" else 0,
-                                1 if x.get("ext") in ("mp3", "m4a") else 0,
+                                2 if x.get("ext") in ("mp3", "webm") else (1 if x.get("ext") == "m4a" else 0),
                                 x.get("abr") or x.get("tbr") or 0
                             ),
                             reverse=True

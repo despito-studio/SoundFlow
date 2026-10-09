@@ -519,11 +519,11 @@ class SoundFlowApp {
             row.addEventListener('click', (e) => {
                 if (e.target.closest('[data-action]')) return;
                 if (this.player.currentTrack && this.player.currentTrack.id === track.id) {
-                    if (this.player.audio) {
+                    if (this.player.audio && !this.player.audio.error && !isNaN(this.player.audio.duration) && this.player.audio.duration > 0) {
                         this.player.audio.currentTime = 0;
                         this.player.play();
                     } else {
-                        this.player.playTrackAtIndex(idx);
+                        this.player.playTrackAtIndex(idx, true);
                     }
                     return;
                 }
@@ -838,11 +838,11 @@ class SoundFlowApp {
 
         // If clicking the track that is already playing, replay it from beginning
         if (this.player.currentTrack && this.player.currentTrack.id === selectedTrack.id) {
-            if (this.player.audio) {
+            if (this.player.audio && !this.player.audio.error && !isNaN(this.player.audio.duration) && this.player.audio.duration > 0) {
                 this.player.audio.currentTime = 0;
                 this.player.play();
             } else {
-                this.player.playTrackAtIndex(this.player.currentIndex);
+                this.player.playTrackAtIndex(this.player.currentIndex, true);
             }
             return;
         }
