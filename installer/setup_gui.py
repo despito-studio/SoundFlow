@@ -178,6 +178,10 @@ class SoundFlowInstaller:
 
             target_exe = os.path.join(target_dir, "SoundFlow.exe")
 
+            # Ensure WebView2 Runtime is available
+            self.update_status("Перевірка компонента WebView2 Runtime...", "WebView2 Runtime", 86)
+            self.ensure_webview2()
+
             # Create uninstaller
             self.update_status("Створення системи видалення...", "uninstall.bat", 88)
             self.create_uninstaller(target_dir)
@@ -199,6 +203,12 @@ class SoundFlowInstaller:
                             desktop_paths.add(exp_desk)
                 except Exception:
                     pass
+                pub_desk = os.environ.get("PUBLIC")
+                if pub_desk:
+                    p = os.path.join(pub_desk, "Desktop")
+                    if os.path.exists(p):
+                        desktop_paths.add(p)
+
                 for dp in desktop_paths:
                     if os.path.exists(dp):
                         self.create_shortcut(target_exe, os.path.join(dp, "SoundFlow.lnk"))
@@ -216,6 +226,36 @@ class SoundFlowInstaller:
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("Помилка встановлення", str(e)))
             self.root.after(0, lambda: self.btn_cancel.config(state=tk.NORMAL))
+
+    def ensure_webview2(self):
+        """Checks if WebView2 Runtime is installed. If not, installs it using bundled or downloaded installer."""
+        try:
+            for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                for subkey in (
+                    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                    r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                ):
+                    try:
+                        with winreg.OpenKey(hive, subkey) as k:
+                            pv, _ = winreg.QueryValueEx(k, "pv")
+                            if pv and pv != "0":
+                                return True
+                    except Exception:
+                        pass
+
+            wv_setup = os.path.join(self.bundle_dir, "MicrosoftEdgeWebview2Setup.exe")
+            if not os.path.exists(wv_setup):
+                import urllib.request
+                url = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+                wv_setup = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "MicrosoftEdgeWebview2Setup.exe")
+                urllib.request.urlretrieve(url, wv_setup)
+
+            if os.path.exists(wv_setup):
+                subprocess.run([wv_setup, "/silent", "/install"], check=False)
+            return True
+        except Exception as e:
+            print("WebView2 installation warning:", e)
+            return False
 
     def update_status(self, status, detail, percent):
         self.root.after(0, lambda: self._apply_status(status, detail, percent))
@@ -244,12 +284,17 @@ class SoundFlowInstaller:
 
             os.makedirs(os.path.dirname(shortcut_path), exist_ok=True)
 
+            esc_shortcut = shortcut_path.replace("'", "''")
+            esc_target = target_path.replace("'", "''")
+            esc_dir = os.path.dirname(target_path).replace("'", "''")
+            esc_icon = icon_file.replace("'", "''")
+
             ps_script = f'''
             $wsh = New-Object -ComObject WScript.Shell
-            $s = $wsh.CreateShortcut('{shortcut_path}')
-            $s.TargetPath = '{target_path}'
-            $s.WorkingDirectory = '{os.path.dirname(target_path)}'
-            $s.IconLocation = '{icon_file},0'
+            $s = $wsh.CreateShortcut('{esc_shortcut}')
+            $s.TargetPath = '{esc_target}'
+            $s.WorkingDirectory = '{esc_dir}'
+            $s.IconLocation = '{esc_icon},0'
             $s.Description = 'SoundFlow Music Player'
             $s.Save()
             '''

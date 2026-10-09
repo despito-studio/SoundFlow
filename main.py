@@ -84,7 +84,36 @@ def _patch_pywebview_http():
 
 _patch_pywebview_http()
 
+def ensure_webview2_runtime():
+    """Ensure WebView2 runtime path or Edge path is found so it never falls back to MSHTML."""
+    try:
+        import winreg
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for subkey in (
+                r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+            ):
+                try:
+                    with winreg.OpenKey(hive, subkey) as k:
+                        pv, _ = winreg.QueryValueEx(k, "pv")
+                        if pv and pv != "0":
+                            return
+                except Exception:
+                    pass
+
+        edge_candidates = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application",
+            r"C:\Program Files\Microsoft\Edge\Application",
+        ]
+        for p in edge_candidates:
+            if os.path.exists(os.path.join(p, "msedge.exe")):
+                webview.settings["WEBVIEW2_RUNTIME_PATH"] = p
+                return
+    except Exception as e:
+        print("ensure_webview2_runtime error:", e)
+
 def run_app():
+    ensure_webview2_runtime()
     # Base directory (supports both script, onefile, and onedir frozen exe)
     if getattr(sys, "frozen", False):
         if hasattr(sys, "_MEIPASS"):

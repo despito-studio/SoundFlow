@@ -2,10 +2,12 @@ import json
 import os
 import time
 import uuid
+import threading
 
 class LibraryManager:
     """Manages favorites, custom playlists, and playback history saved in data/library.json."""
     def __init__(self, data_path=None):
+        self._lock = threading.Lock()
         if data_path:
             self.data_path = data_path
             self.base_dir = os.path.dirname(data_path)
@@ -87,15 +89,19 @@ class LibraryManager:
         }
 
     def _save(self):
-        try:
-            self._ensure_dir()
-            tmp_path = self.data_path + ".tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, self.data_path)
-            return True
-        except Exception as e:
-            print("Error saving library:", e)
+        with self._lock:
+            for attempt in range(5):
+                try:
+                    self._ensure_dir()
+                    tmp_path = self.data_path + f".tmp.{os.getpid()}"
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        json.dump(self.data, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp_path, self.data_path)
+                    return True
+                except Exception as e:
+                    if attempt == 4:
+                        print("Error saving library:", e)
+                    time.sleep(0.05)
             return False
 
     def get_all(self):

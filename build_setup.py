@@ -30,6 +30,7 @@ def main():
     print("=== Step 3: Compiling SoundFlow_Setup.exe with PyInstaller ===")
     setup_script = os.path.join(base_dir, "installer", "setup_gui.py")
 
+    wv_installer = os.path.join(base_dir, "installer", "MicrosoftEdgeWebview2Setup.exe")
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
@@ -38,11 +39,15 @@ def main():
         f"--icon={icon_path}",
         f"--add-data={payload_zip}{os.pathsep}.",
         f"--add-data={icon_path}{os.pathsep}assets",
+    ]
+    if os.path.exists(wv_installer):
+        cmd.append(f"--add-data={wv_installer}{os.pathsep}.")
+    cmd.extend([
         "--distpath", base_dir,  # Output SoundFlow_Setup.exe directly in root of project!
         "--clean",
         "-y",
         setup_script
-    ]
+    ])
 
     print("Running:", " ".join(cmd))
     res = subprocess.run(cmd, cwd=base_dir)
