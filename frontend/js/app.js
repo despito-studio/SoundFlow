@@ -1147,14 +1147,26 @@ class SoundFlowApp {
     }
 
     async fetchAndAppendSimilarTracks(track) {
-        if (!track || !window.pywebview || !window.pywebview.api) return false;
+        const targetTrack = track || this.player?.currentTrack;
+        if (!targetTrack) return false;
 
         try {
-            const currentQueueIds = (this.player.queue || []).map(t => t.id);
-            const historyIds = (this.library.history || []).slice(0, 30).map(t => t.id);
-            const excludeSet = new Set([...currentQueueIds, ...historyIds, track.id]);
+            const currentQueueIds = (this.player?.queue || []).map(t => t.id);
+            const historyIds = (this.library?.history || []).slice(0, 30).map(t => t.id);
+            const excludeSet = new Set([...currentQueueIds, ...historyIds, targetTrack.id]);
 
-            const similar = await window.pywebview.api.get_similar_tracks(track, 8, Array.from(excludeSet));
+            let similar = null;
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.get_similar_tracks) {
+                similar = await window.pywebview.api.get_similar_tracks(targetTrack, 8, Array.from(excludeSet));
+            } else if (typeof fetch !== 'undefined') {
+                const res = await fetch('/api/similar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ track: targetTrack, limit: 8, exclude_ids: Array.from(excludeSet) })
+                });
+                if (res.ok) similar = await res.json();
+            }
+
             if (similar && Array.isArray(similar) && similar.length > 0) {
                 const uniqueNew = similar.filter(t => !excludeSet.has(t.id)).map(t => ({
                     ...t,

@@ -410,7 +410,10 @@ class SoundFlowPlayer {
                 const added = await window.soundFlowApp.fetchAndAppendSimilarTracks(this.currentTrack);
                 this.showLoading(false);
                 if (added && nextIdx < this.queue.length) {
-                    this.playTrackAtIndex(nextIdx);
+                    await this.playTrackAtIndex(nextIdx);
+                    return;
+                } else if (this.queue.length > 0 && this.currentIndex < this.queue.length - 1) {
+                    await this.playTrackAtIndex(this.currentIndex + 1);
                     return;
                 }
                 return;
@@ -419,7 +422,7 @@ class SoundFlowPlayer {
             }
         }
 
-        this.playTrackAtIndex(nextIdx);
+        await this.playTrackAtIndex(nextIdx);
     }
 
     prev() {
@@ -526,7 +529,7 @@ class SoundFlowPlayer {
         this.updateVolumeUI();
     }
 
-    onTrackEnded() {
+    async onTrackEnded() {
         if (this.repeat === 'one') {
             if (this.audio) {
                 this.audio.currentTime = 0;
@@ -537,7 +540,7 @@ class SoundFlowPlayer {
                 });
             }
         } else {
-            this.next();
+            await this.next();
         }
     }
 
@@ -572,7 +575,11 @@ class SoundFlowPlayer {
                     if (this._prefetchedSimilarTrackId !== this.currentTrack?.id) {
                         this._prefetchedSimilarTrackId = this.currentTrack?.id;
                         this.isFetchingSimilar = true;
-                        window.soundFlowApp.fetchAndAppendSimilarTracks(this.currentTrack).finally(() => {
+                        window.soundFlowApp.fetchAndAppendSimilarTracks(this.currentTrack).then((res) => {
+                            if (!res) {
+                                this._prefetchedSimilarTrackId = null;
+                            }
+                        }).finally(() => {
                             this.isFetchingSimilar = false;
                         });
                     }

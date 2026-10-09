@@ -262,12 +262,143 @@ class MusicEngine:
 
         return None
 
+    def _detect_track_language(self, title, artist):
+        """Identifies track language/cultural origin to guarantee language matching."""
+        import re
+        text = f"{artist} {title}".lower()
+
+        # 1. Explicit Ukrainian artist / keyword checks
+        ua_artists = {
+            "sadsvit", "структура щастя", "океан ельзи", "бумбокс", "скрябін", "антитіла",
+            "христина соловій", "пивоваров", "клавдія петрівна", "go_a", "dorofeeva",
+            "the hardkiss", "паліндром", "schmalgauzen", "жадан", "alyona alyona", "kalush",
+            "друга ріка", "мотор'ролла", "латексфауна", "latexfauana", "казака", "kazka",
+            "тіна кароль", "дзідзьо", "dzidzio", "один в каное", "без обмежень"
+        }
+        for a in ua_artists:
+            if a in text:
+                return "ua"
+        if any(c in text for c in "іїєґІЇЄҐ"):
+            return "ua"
+
+        # 2. Explicit Russian artist / keyword checks
+        ru_artists = {
+            "молчат дома", "буерак", "перемотка", "дурной вкус", "дайте танк", "черниковская хата",
+            "электрофорез", "ssshhhiiittt", "увула", "ploho", "кино", "би-2", "сплин", "земфира",
+            "король и шут", "три дня дождя", "нервы", "валентин стрыкало", "kizaru", "shadowraze",
+            "miyagi", "скриптонит", "macan", "пошлая молли", "порнофильмы", "сектор газа",
+            "zxcursed", "og buda", "mayot", "big baby tape", "платина", "oxxxymiron", "моргенштерн",
+            "мукка", "дореволюционный советчик", "петля пристрастия", "двое", "хмурый"
+        }
+        for a in ru_artists:
+            if a in text:
+                return "ru"
+        if any(c in text for c in "ыэъёЫЭЪЁ"):
+            return "ru"
+
+        # 3. Cyrillic frequency check (default Cyrillic without UA characters is RU)
+        cyr = len(re.findall(r'[\u0400-\u04FF]', text))
+        if cyr >= 2:
+            return "ru"
+
+        # 4. Asian languages check
+        if re.search(r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]', text):
+            return "cjk"
+
+        return "en"
+
+    def _detect_track_theme(self, title, artist):
+        """Classifies track into thematic mood categories (depressive/doomer, phonk, rap, rock, lofi, etc.)."""
+        text = f"{artist} {title}".lower()
+
+        phonk_words = {
+            'phonk', 'фонк', 'drift', 'дрифт', 'zxc', 'shadowraze', 'kordhell', 'playaphonk',
+            'interworld', 'gxsder', 'prxjek', 'scarlxrd', 'cowbell', 'aggressive', 'агрессив',
+            'workout', 'gym', 'murder in my mind', 'dvrst', 'zxcursed', 'cursed'
+        }
+        for w in phonk_words:
+            if w in text:
+                return 'phonk'
+
+        depressive_words = {
+            'депрессив', 'грустн', 'печаль', 'тоск', 'домер', 'слез', 'сльоз', 'боль', 'одиночеств',
+            'уныни', 'суицид', 'тяжело', 'устал', 'пост-панк', 'постпанк', 'плакать', 'плачу',
+            'пустота', 'холод', 'ночь', 'безнадег', 'судно', 'расставание', 'депрессия', 'сумно',
+            'страсть к курению', 'электрофорез', 'буерак', 'перемотка', 'ssshhhiiittt', 'дурной вкус',
+            'увула', 'черниковская хата', 'sadsvit', 'структура щастя', 'molchat doma', 'молчат дома',
+            'ploho', 'плохо', 'sad', 'depress', 'doomer', 'post-punk', 'melanchol', 'heartbreak',
+            'cry', 'crying', 'pain', 'alone', 'lonely', 'broken', 'dark', 'slowcore', 'goth',
+            'shoegaze', 'gloomy', 'bleak', 'emo', 'hopeless', 'star shopping', 'cigarettes after sex',
+            'joji', 'mitski', 'eyedress', 'mareux', 'current joys', 'beach fossils', 'surf curse',
+            'дайте танк', 'панелька', 'хрущевка', 'утро'
+        }
+        for w in depressive_words:
+            if w in text:
+                return 'depressive'
+
+        rap_words = {
+            'рэп', 'реп', 'хип хоп', 'хип-хоп', 'трэп', 'треп', 'дрил', 'дрилл', 'rap', 'hip hop',
+            'trap', 'drill', 'kizaru', 'og buda', 'macan', 'скриптонит', 'oxxxymiron', 'моргенштерн',
+            'miyagi', 'эндшпиль', 'дежавю', 'travis scott', 'playboi carti', '21 savage', 'drake',
+            'майот', 'mayot', 'big baby tape', 'платина', 'friendly thug'
+        }
+        for w in rap_words:
+            if w in text:
+                return 'rap'
+
+        rock_words = {
+            'рок', 'панк', 'метал', 'альтернатив', 'грандж', 'rock', 'punk', 'metal', 'grunge',
+            'alternative', 'король и шут', 'кино', 'би-2', 'сплин', 'земфира', 'нервы',
+            'пошлая молли', 'три дня дождя', 'порнофильмы', 'arctic monkeys', '505', 'nirvana',
+            'linkin park', 'океан ельзи', 'the hardkiss', 'карна', 'жадан'
+        }
+        for w in rock_words:
+            if w in text:
+                return 'rock'
+
+        lofi_words = {'lofi', 'lo-fi', 'chill', 'лофай', 'чилл', 'релакс', 'relax', 'спокойн', 'beats', 'study'}
+        for w in lofi_words:
+            if w in text:
+                return 'lofi'
+
+        pop_words = {'pop', 'dance', 'club', 'поп', 'попса', 'танцевальн', 'клубняк', 'диско', 'disco', 'house'}
+        for w in pop_words:
+            if w in text:
+                return 'pop'
+
+        return 'general'
+
+    def _get_cluster_artists(self, lang, theme):
+        """Returns related artists for genre & language clusters to query direct high-quality tracks."""
+        clusters = {
+            ("ru", "depressive"): ["Перемотка", "Буерак", "Дурной Вкус", "Дайте танк", "Черниковская Хата", "Электрофорез", "ssshhhiiittt", "Увула", "Молчат Дома", "Ploho", "Культура курения", "Хмурый"],
+            ("ru", "phonk"): ["DVRST", "Shadowraze", "zxcursed", "KSLV Noh", "plhxntxnm", "Shadxwbxrn", "Gravechill"],
+            ("ru", "rap"): ["Kizaru", "OG Buda", "Mayot", "Big Baby Tape", "Платина", "Скриптонит", "Miyagi & Эндшпиль", "Macan", "LSP", "PHARAOH"],
+            ("ru", "rock"): ["Кино", "Би-2", "Сплин", "Земфира", "Король и Шут", "Три дня дождя", "Порнофильмы", "Нервы", "Валентин Стрыкало", "Пошлая Молли"],
+            ("ru", "pop"): ["ANNA ASTI", "Zivert", "Mary Gu", "HammAli & Navai", "JONY", "Моя Мишель", "Cream Soda"],
+            ("ru", "lofi"): ["русский чилл", "русский лофай"],
+
+            ("ua", "depressive"): ["SadSvit", "Структура Щастя", "Паліндром", "Schmalgauzen", "Океан Ельзи", "Скрябін", "Мотор'ролла", "Латексфауна"],
+            ("ua", "rock"): ["Океан Ельзи", "Бумбокс", "Скрябін", "Антитіла", "The Hardkiss", "Друга Ріка", "Карна", "Жадан і Собаки"],
+            ("ua", "rap"): ["alyona alyona", "Kalush", "OTOY", "Krechet", "Міша Крупін", "Skofka"],
+            ("ua", "pop"): ["DOROFEEVA", "KAZKA", "Артем Пивоваров", "Jerry Heil", "KOLA", "Клавдія Петрівна"],
+
+            ("en", "depressive"): ["Mareux", "Eyedress", "Current Joys", "The Smiths", "Joy Division", "Cigarettes After Sex", "Slowdive", "Beach Fossils", "Surf Curse", "Mitski", "Joji", "TV Girl"],
+            ("en", "phonk"): ["Kordhell", "SXMPRA", "Interworld", "PlayaPhonk", "MoonDeity", "Twisted", "Hensonn", "Pharmacist"],
+            ("en", "rap"): ["Travis Scott", "Playboi Carti", "Lil Peep", "Juice WRLD", "21 Savage", "Metro Boomin", "Don Toliver", "Kendrick Lamar"],
+            ("en", "rock"): ["Arctic Monkeys", "The Neighbourhood", "Deftones", "Radiohead", "Nirvana", "Linkin Park", "Bring Me The Horizon", "Green Day"],
+            ("en", "lofi"): ["Kudasai", "Idealism", "Jinsang", "potsu", "Saib", "Tomppabeats"],
+            ("en", "pop"): ["The Weeknd", "Dua Lipa", "Billie Eilish", "Harry Styles", "Taylor Swift"]
+        }
+        return clusters.get((lang, theme), [])
+
     def get_similar_tracks(self, track_info, limit=10, exclude_ids=None):
-        """Finds recommended songs with similar theme/genre/artist to provide endless smart autoplay."""
+        """Finds recommended songs matching both the exact theme/mood AND language of the given track."""
         if not track_info:
             return []
 
         import re
+        import random
         exclude_set = set(exclude_ids or [])
         track_id = track_info.get("id")
         if track_id:
@@ -276,86 +407,135 @@ class MusicEngine:
         title = track_info.get("title", "")
         artist = track_info.get("artist", "").strip()
 
-        # Clean title from common video fluff
+        # Clean title from common video noise
         clean_title = re.sub(r'(?i)\b(official\s+(audio|video|music\s+video)|lyrics?|visualizer|remastered|hd|4k|hq)\b', '', title)
         clean_title = re.sub(r'[\(\[\{\]\}\)]', ' ', clean_title)
         clean_title = ' '.join(clean_title.split())
 
-        # If artist is generic, try to split title by '-'
-        generic_artists = {"youtube creator", "soundcloud artist", "unknown artist", "soundflow artist", "soundflow"}
+        generic_artists = {"youtube creator", "soundcloud artist", "unknown artist", "soundflow artist", "soundflow", ""}
         if not artist or artist.lower() in generic_artists:
-            if " - " in title:
-                parts = title.split(" - ", 1)
-                artist = parts[0].strip()
-                clean_title = parts[1].strip()
-            elif " – " in title:
-                parts = title.split(" – ", 1)
-                artist = parts[0].strip()
-                clean_title = parts[1].strip()
+            for sep in [" - ", " – ", " — "]:
+                if sep in title:
+                    parts = title.split(sep, 1)
+                    artist = parts[0].strip()
+                    clean_title = parts[1].strip()
+                    break
 
-        GENRE_KEYWORDS = [
-            "phonk", "synthwave", "retrowave", "cyberpunk", "lofi", "lo-fi", "chill",
-            "rock", "metal", "grunge", "punk", "indie", "pop", "hip hop", "rap", "trap",
-            "r&b", "soul", "jazz", "blues", "edm", "house", "techno", "trance", "dubstep",
-            "bass", "drum and bass", "dnb", "ambient", "acoustic", "classical", "anime"
-        ]
+        lang = self._detect_track_language(clean_title, artist)
+        theme = self._detect_track_theme(clean_title, artist)
+        cluster = self._get_cluster_artists(lang, theme)
 
-        detected_genre = None
-        lower_title = title.lower()
-        for g in GENRE_KEYWORDS:
-            if g in lower_title:
-                detected_genre = g
-                break
-
-        # Generate search queries for similar music
-        queries = []
-        if artist and artist.lower() not in generic_artists:
-            if detected_genre:
-                queries.append(f"{artist} {detected_genre} mix")
-            queries.append(f"{artist} radio mix")
-            queries.append(f"{artist} similar music")
-        
-        if clean_title:
-            queries.append(f"{clean_title} radio")
-
-        if not queries:
-            queries.append(f"{title} similar songs")
-
-        cache_key = f"similar:{track_id or title}:{limit}"
+        cache_key = f"sim_v4:{lang}:{theme}:{track_id or title}:{limit}"
         now = time.time()
         if cache_key in self.search_cache:
             entry = self.search_cache[cache_key]
             if now - entry.get("time", 0) < 1800:
                 return entry.get("results", [])
 
-        # Choose the single best search query to avoid locking backend
-        target_query = queries[0] if queries else f"{title} mix"
+        # Priority 1: Search queries matching artist, theme, and language
+        queries = []
+        if artist and artist.lower() not in generic_artists:
+            if lang == "ru":
+                if theme == "depressive":
+                    queries.append(f"{artist} похожие песни пост панк")
+                    queries.append(f"{artist} русский пост панк")
+                elif theme == "phonk":
+                    queries.append(f"{artist} русский фонк")
+                elif theme == "rap":
+                    queries.append(f"{artist} похожие треки рэп")
+                elif theme == "rock":
+                    queries.append(f"{artist} русский рок")
+                else:
+                    queries.append(f"{artist} похожие песни русский")
+            elif lang == "ua":
+                if theme == "depressive":
+                    queries.append(f"{artist} український пост панк сумна музика")
+                elif theme == "rock":
+                    queries.append(f"{artist} український рок")
+                elif theme == "rap":
+                    queries.append(f"{artist} український реп")
+                else:
+                    queries.append(f"{artist} схожі українські пісні")
+            else: # en / other
+                if theme == "depressive":
+                    queries.append(f"{artist} similar sad doomer songs")
+                elif theme == "phonk":
+                    queries.append(f"{artist} drift phonk mix")
+                elif theme == "rock":
+                    queries.append(f"{artist} similar alternative rock")
+                elif theme == "rap":
+                    queries.append(f"{artist} similar rap radio")
+                else:
+                    queries.append(f"{artist} similar songs radio")
+
+        # Priority 2: Direct cluster queries from genre-defining peers
+        if cluster:
+            sample_artists = [a for a in cluster if a.lower() != artist.lower()]
+            if sample_artists:
+                for art in random.sample(sample_artists, min(3, len(sample_artists))):
+                    queries.append(f"{art} трек")
+
+        # Priority 3: Thematic genre radio queries
+        if lang == "ru":
+            if theme == "depressive":
+                queries.append("русский пост панк домер треки")
+            elif theme == "phonk":
+                queries.append("русский фонк zxc дрифт")
+            elif theme == "rap":
+                queries.append("русский рэп новинки хиты")
+            elif theme == "rock":
+                queries.append("русский рок альтернатива песни")
+        elif lang == "ua":
+            if theme == "depressive":
+                queries.append("український пост панк інді сумна музика")
+            elif theme == "rock":
+                queries.append("український рок треки")
+        elif lang == "en":
+            if theme == "depressive":
+                queries.append("doomer music sad post-punk tracks")
+            elif theme == "phonk":
+                queries.append("drift phonk tracks")
+
+        if not queries:
+            queries.append(f"{clean_title} radio")
 
         candidates = []
         seen_titles = {clean_title.lower()}
-        original_duration = track_info.get("duration", 0)
 
-        found = self.search(target_query, source="all", limit=limit)
-        for item in found:
-            item_id = item.get("id")
-            item_title = item.get("title", "").strip()
-            norm_item_title = re.sub(r'[\(\[\{\]\}\)]', ' ', item_title.lower()).strip()
-
-            if item_id in exclude_set:
-                continue
-            if norm_item_title in seen_titles:
-                continue
-
-            # Avoid 1+ hour compilation sets if original track was a normal song (< 10 mins)
-            dur = item.get("duration", 0)
-            if original_duration and original_duration < 600 and dur > 1200:
-                continue
-
-            seen_titles.add(norm_item_title)
-            exclude_set.add(item_id)
-            candidates.append(item)
+        for q in queries:
             if len(candidates) >= limit:
                 break
+            found = self.search(q, source="all", limit=max(6, limit // 2))
+            for item in found:
+                item_id = item.get("id")
+                item_title = item.get("title", "").strip()
+                item_artist = item.get("artist", "").strip()
+                norm_item_title = re.sub(r'[\(\[\{\]\}\)]', ' ', item_title.lower()).strip()
+
+                if item_id in exclude_set:
+                    continue
+                if norm_item_title in seen_titles:
+                    continue
+
+                dur = item.get("duration", 0)
+                # Discard multi-hour compilations and tiny audio clips (<30s or >720s)
+                if dur and (dur < 30 or dur > 720):
+                    continue
+
+                # Strict language compatibility check
+                item_lang = self._detect_track_language(item_title, item_artist)
+                if lang == "ru" and item_lang != "ru":
+                    continue
+                if lang == "ua" and item_lang != "ua":
+                    continue
+                if lang == "en" and item_lang in ("ru", "ua"):
+                    continue
+
+                seen_titles.add(norm_item_title)
+                exclude_set.add(item_id)
+                candidates.append(item)
+                if len(candidates) >= limit:
+                    break
 
         self.search_cache[cache_key] = {"results": candidates, "time": now}
         return candidates
