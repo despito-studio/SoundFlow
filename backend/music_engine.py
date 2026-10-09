@@ -1,4 +1,4 @@
-﻿import os
+import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor

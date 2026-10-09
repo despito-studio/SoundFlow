@@ -1,4 +1,4 @@
-﻿/* ========================================================
+/* ========================================================
    SoundFlow - Ultra-Modern Minimalist Music Player
    Inspired by the Neon Swirl Brand Identity
    ======================================================== */
@@ -44,8 +44,10 @@
 }
 
 body {
-    background-color: var(--bg-main);
-    color: var(--text-primary);
+    background-color: #08090d;
+    background-color: var(--bg-main, #08090d);
+    color: #f8fafc;
+    color: var(--text-primary, #f8fafc);
     font-family: var(--font-family);
     overflow: hidden;
     height: 100vh;
@@ -72,8 +74,10 @@ body {
 /* APP SHELL */
 .app-container {
     display: grid;
-    grid-template-columns: var(--sidebar-width) 1fr;
-    grid-template-rows: 1fr var(--player-height);
+    grid-template-columns: 230px 1fr;
+    grid-template-columns: var(--sidebar-width, 230px) 1fr;
+    grid-template-rows: 1fr 94px;
+    grid-template-rows: 1fr var(--player-height, 94px);
     height: 100vh;
     width: 100vw;
 }
@@ -82,7 +86,8 @@ body {
    SIDEBAR
    ======================================================== */
 .sidebar {
-    background-color: var(--bg-sidebar);
+    background-color: #0b0d13;
+    background-color: var(--bg-sidebar, #0b0d13);
     border-right: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;

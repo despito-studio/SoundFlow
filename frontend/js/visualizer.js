@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SoundCloud-style Waveform Visualizer
  * Styled with the new neon sunset gradient (#ff6b35 -> #ff2d75).
  * Highly optimized, pauses completely when paused or hidden to use 0% CPU.

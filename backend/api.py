@@ -1,4 +1,4 @@
-﻿import threading
+import threading
 from backend.music_engine import MusicEngine
 from backend.library import LibraryManager
 from backend.system_stats import SystemStats

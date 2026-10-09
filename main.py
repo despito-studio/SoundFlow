@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import json
 import threading
@@ -85,9 +85,19 @@ def _patch_pywebview_http():
 _patch_pywebview_http()
 
 def run_app():
-    # Base directory (supports both script and frozen exe)
+    # Base directory (supports both script, onefile, and onedir frozen exe)
     if getattr(sys, "frozen", False):
-        base_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        if hasattr(sys, "_MEIPASS"):
+            base_dir = sys._MEIPASS
+        else:
+            exe_dir = os.path.dirname(sys.executable)
+            internal_dir = os.path.join(exe_dir, "_internal")
+            if os.path.exists(os.path.join(internal_dir, "frontend", "index.html")):
+                base_dir = internal_dir
+            elif os.path.exists(os.path.join(exe_dir, "frontend", "index.html")):
+                base_dir = exe_dir
+            else:
+                base_dir = exe_dir
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
     html_file = os.path.join(base_dir, "frontend", "index.html")

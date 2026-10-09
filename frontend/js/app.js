@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SoundFlow Application Controller
  * Handles view switching, search, playlists, likes, system stats, and keyboard shortcuts.
  */

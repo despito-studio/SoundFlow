@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import zipfile
 import threading
@@ -148,6 +148,9 @@ class SoundFlowInstaller:
             messagebox.showerror("Помилка", "Будь ласка, вкажіть папку для встановлення.")
             return
 
+        create_desktop = bool(self.desktop_shortcut_var.get())
+        create_start_menu = bool(self.start_menu_var.get())
+
         self.is_installing = True
         self.options_frame.pack_forget()
         self.progress_frame.pack(fill=tk.BOTH, expand=True)
@@ -156,9 +159,9 @@ class SoundFlowInstaller:
         self.btn_install.config(state=tk.DISABLED)
 
         # Run extraction in background thread
-        threading.Thread(target=self.run_extraction, args=(target_dir,), daemon=True).start()
+        threading.Thread(target=self.run_extraction, args=(target_dir, create_desktop, create_start_menu), daemon=True).start()
 
-    def run_extraction(self, target_dir):
+    def run_extraction(self, target_dir, create_desktop=True, create_start_menu=True):
         try:
             os.makedirs(target_dir, exist_ok=True)
 
@@ -184,11 +187,23 @@ class SoundFlowInstaller:
             self.register_in_windows(target_dir, target_exe)
 
             # Create Shortcuts
-            if self.desktop_shortcut_var.get():
+            if create_desktop:
                 self.update_status("Створення ярлика на Робочому столі...", "Desktop Shortcut", 96)
-                self.create_shortcut(target_exe, os.path.join(os.path.expanduser("~\\Desktop"), "SoundFlow.lnk"))
+                desktop_paths = set()
+                desktop_paths.add(os.path.join(os.path.expanduser("~"), "Desktop"))
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                        raw_desk = winreg.QueryValueEx(k, "Desktop")[0]
+                        exp_desk = os.path.expandvars(raw_desk)
+                        if os.path.exists(exp_desk):
+                            desktop_paths.add(exp_desk)
+                except Exception:
+                    pass
+                for dp in desktop_paths:
+                    if os.path.exists(dp):
+                        self.create_shortcut(target_exe, os.path.join(dp, "SoundFlow.lnk"))
 
-            if self.start_menu_var.get():
+            if create_start_menu:
                 self.update_status("Створення ярлика в меню «Пуск»...", "Start Menu Shortcut", 99)
                 start_dir = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
                 sm_programs = os.path.join(start_dir, "Microsoft", "Windows", "Start Menu", "Programs")
@@ -223,18 +238,23 @@ class SoundFlowInstaller:
         try:
             icon_file = os.path.join(os.path.dirname(target_path), "assets", "icon.ico")
             if not os.path.exists(icon_file):
+                icon_file = os.path.join(os.path.dirname(target_path), "_internal", "assets", "icon.ico")
+            if not os.path.exists(icon_file):
                 icon_file = target_path
 
+            os.makedirs(os.path.dirname(shortcut_path), exist_ok=True)
+
             ps_script = f'''
-            `$wsh = New-Object -ComObject WScript.Shell;
-            `$s = `$wsh.CreateShortcut("{shortcut_path}");
-            `$s.TargetPath = "{target_path}";
-            `$s.WorkingDirectory = "{os.path.dirname(target_path)}";
-            `$s.IconLocation = "{icon_file},0";
-            `$s.Description = "SoundFlow Music Player";
-            `$s.Save();
+            $wsh = New-Object -ComObject WScript.Shell
+            $s = $wsh.CreateShortcut('{shortcut_path}')
+            $s.TargetPath = '{target_path}'
+            $s.WorkingDirectory = '{os.path.dirname(target_path)}'
+            $s.IconLocation = '{icon_file},0'
+            $s.Description = 'SoundFlow Music Player'
+            $s.Save()
             '''
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], creationflags=subprocess.CREATE_NO_WINDOW, check=False)
+            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                           creationflags=subprocess.CREATE_NO_WINDOW, check=False)
         except Exception as e:
             print("Failed to create shortcut:", e)
 

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import shutil
 import subprocess
@@ -33,6 +33,13 @@ def build():
     if res.returncode != 0:
         print("Build failed with code:", res.returncode)
         sys.exit(res.returncode)
+
+    dist_flow = os.path.join(base_dir, "dist", "SoundFlow")
+    # Ensure frontend and assets exist in both dist/SoundFlow/ and dist/SoundFlow/_internal/
+    for sub in ["", "_internal"]:
+        target_dir = os.path.join(dist_flow, sub) if sub else dist_flow
+        shutil.copytree(os.path.join(base_dir, "frontend"), os.path.join(target_dir, "frontend"), dirs_exist_ok=True)
+        shutil.copytree(os.path.join(base_dir, "assets"), os.path.join(target_dir, "assets"), dirs_exist_ok=True)
 
     print("\n=== Build successful! Output in dist/SoundFlow ===")
 

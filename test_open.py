@@ -1,4 +1,4 @@
-﻿import webview
+import webview
 import time
 import threading
 import os

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SoundFlow Audio Playback Engine
  * Uses native HTML5 Audio element with streaming buffer and preloading.
  */

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SoundFlow Clerk Authentication Module
  * Ultra-fast OAuth (Google, GitHub) + Email authentication via Clerk.
  */

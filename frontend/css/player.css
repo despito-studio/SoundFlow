@@ -1,13 +1,15 @@
-﻿/* ========================================================
+/* ========================================================
    SoundFlow Player Bar Stylesheet - Minimalist Glass Edition
    ======================================================== */
 
 .player-bar {
     grid-column: 1 / -1;
     grid-row: 2;
-    background: var(--bg-player);
+    background: #0b0d13;
+    background: var(--bg-player, rgba(11, 13, 19, 0.92));
     backdrop-filter: blur(24px);
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
     display: grid;
     grid-template-columns: 280px 1fr 240px;
     align-items: center;

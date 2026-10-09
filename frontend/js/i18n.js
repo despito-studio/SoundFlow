@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SoundFlow Internationalization (i18n) Engine
  * Supported languages:
  *  - 'uk': Українська (Default)
