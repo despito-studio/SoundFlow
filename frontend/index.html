@@ -2,9 +2,15 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SoundFlow</title>
     <link rel="icon" type="image/png" href="assets/icon.png">
+    <link rel="apple-touch-icon" href="assets/icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SoundFlow">
+    <meta name="theme-color" content="#ff2d75">
+    <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/player.css">
     <script async crossorigin="anonymous"
@@ -60,6 +66,20 @@
                     </svg>
                     <span data-i18n="nav_profile">Профіль</span>
                     <span class="role-badge-pill listener" id="nav-role-badge">СЛУХАЧ</span>
+                </button>
+                <button class="nav-item nav-connect-item" id="nav-btn-connect-accounts" title="Підключити YouTube та SoundCloud">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                    </svg>
+                    <span>Синхронізація</span>
+                </button>
+                <button class="nav-item" id="nav-btn-settings" title="Налаштування SoundFlow">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <span>Налаштування</span>
                 </button>
             </nav>
 
@@ -117,6 +137,12 @@
 
                     <!-- TOPBAR ACTIONS: LANGUAGE & AUTH -->
                     <div class="topbar-actions">
+                        <!-- Auto Game Mode Status Indicator -->
+                        <div class="game-mode-badge" id="game-mode-badge" style="display: none;" title="Авто-оптимізація для ігор">
+                            <span class="game-mode-dot"></span>
+                            <span id="game-mode-label">🎮 Гра активна</span>
+                        </div>
+
                         <!-- Language Selector Dropdown (Українська, Русский, English, Español) -->
                         <div class="lang-selector-wrapper" id="lang-selector-wrapper">
                             <button class="lang-selector-btn" id="lang-menu-btn" title="Мова / Язык / Language / Idioma">
@@ -172,20 +198,20 @@
             <div class="content-scroll">
                 <!-- HOME VIEW -->
                 <section id="home-view" class="view-panel active">
-                    <div class="hero-banner">
+                    <div class="hero-banner hero-compact">
                         <div class="hero-glow"></div>
-                        <div class="hero-content">
-                            <span class="hero-badge" data-i18n="hero_tag">НОВИЙ РІВЕНЬ ЗВУКУ</span>
-                            <h1 data-i18n="hero_title">Музика без меж</h1>
-                            <p data-i18n="hero_desc">Миттєвий онлайн-стрімінг треків із SoundCloud та YouTube. Жодних гальм, нуль зайвого навантаження.</p>
-                            <div class="hero-actions">
+                        <div class="hero-content-compact">
+                            <div class="hero-text-col">
+                                <h2 data-i18n="hero_title">Музика без меж</h2>
+                                <p data-i18n="hero_desc">Швидкий онлайн-стрімінг треків із SoundCloud та YouTube без реклами.</p>
+                            </div>
+                            <div class="hero-actions-compact">
                                 <button class="btn-hero-play" id="btn-hero-mix">
-                                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                                         <path d="M8 5v14l11-7z"/>
                                     </svg>
                                     <span data-i18n="hero_btn_mix">Увімкнути мікс</span>
                                 </button>
-                                <button class="btn-hero-secondary" id="btn-hero-search" data-i18n="hero_btn_search">Знайти трек</button>
                             </div>
                         </div>
                     </div>
@@ -203,7 +229,24 @@
 
                 <!-- SEARCH VIEW -->
                 <section id="search-view" class="view-panel">
-                    <div class="section-header">
+                    <!-- SEARCH HISTORY CONTAINER -->
+                    <div id="search-history-container" class="search-history-box" style="display: none;">
+                        <div class="sh-box-header">
+                            <div class="sh-box-title">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                                <span>Нещодавні пошуки</span>
+                            </div>
+                            <button id="btn-clear-search-history" class="sh-clear-btn">Очистити все</button>
+                        </div>
+                        <div class="search-history-chips" id="search-history-chips">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <div class="section-header" id="search-results-header" style="display: none;">
                         <h2>Результати: <span id="search-query-display"></span></h2>
                         <span id="search-count" class="text-muted"></span>
                     </div>
@@ -367,6 +410,10 @@
                             </button>
                         </div>
                         <div class="sc-tabs-actions">
+                            <button class="sc-action-btn connect-btn" id="btn-profile-connect-accounts" title="Підключити YouTube та SoundCloud">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+                                <span>Підключити акаунти</span>
+                            </button>
                             <button class="sc-action-btn" id="btn-profile-edit">
                                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
                                 <span data-i18n="profile_edit_btn">Редагувати профіль</span>
@@ -604,6 +651,20 @@
                                     <!-- Populated dynamically -->
                                 </div>
                             </div>
+
+                            <!-- Quick Sync Accounts Card -->
+                            <div class="sc-side-widget connect-sync-widget">
+                                <div class="sc-widget-header">
+                                    <div class="sc-widget-title-row">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+                                        <span>СИНХРОНІЗАЦІЯ</span>
+                                    </div>
+                                </div>
+                                <div class="sc-connect-widget-content">
+                                    <p class="sc-connect-widget-desc">Підключи свій YouTube або SoundCloud, щоб автоматично імпортувати пісні в історію.</p>
+                                    <button class="btn-primary w-full" id="btn-sidebar-connect-accounts" style="margin-top: 10px; font-size: 0.8rem; padding: 7px 12px;">Підключити акаунти</button>
+                                </div>
+                            </div>
                         </aside>
                     </div>
                 </section>
@@ -730,8 +791,22 @@
                 </div>
             </div>
 
-            <!-- Right: Volume & Queue -->
+            <!-- Right: Volume, Lyrics, Download & Queue -->
             <div class="player-right">
+                <button id="btn-player-lyrics" class="icon-btn" title="Текст пісні / Караоке">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                    </svg>
+                </button>
+                <button id="btn-player-download" class="icon-btn" title="Завантажити трек офлайн (MP3)">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                </button>
                 <button id="btn-toggle-queue" class="icon-btn" title="Черга відтворення">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="8" y1="6" x2="21" y2="6"></line>
@@ -964,7 +1039,7 @@
     </div>
 
     <!-- MODAL: WELCOME ONBOARDING (FIRST RUN / LOGIN AS GUEST) -->
-    <div class="modal-overlay" id="modal-welcome-onboarding">
+    <div class="modal-overlay" id="modal-welcome-onboarding" style="display: none;">
         <div class="modal-card welcome-modal-card">
             <div class="welcome-header">
                 <div class="welcome-badge">🎵 SoundFlow</div>
@@ -1009,12 +1084,6 @@
             </div>
         </div>
     </div>
-    <script>
-        if (sessionStorage.getItem('soundflow_onboarding_dismissed') === 'true') {
-            var _obm = document.getElementById('modal-welcome-onboarding');
-            if (_obm) _obm.style.display = 'none';
-        }
-    </script>
 
     <!-- MODAL: CONNECT ACCOUNTS (YOUTUBE & SOUNDCLOUD) -->
     <div class="modal-overlay" id="modal-connect-accounts" style="display: none;">
@@ -1064,6 +1133,210 @@
             <div class="connect-modal-actions">
                 <button class="btn-secondary" id="btn-sync-all-accounts">🔄 Синхронізувати всі</button>
                 <button class="btn-primary" id="btn-done-connect-modal">Готово</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: SETTINGS -->
+    <div class="modal-overlay" id="modal-settings" style="display: none;">
+        <div class="modal-card settings-modal-card">
+            <div class="settings-modal-header">
+                <div class="settings-title-wrap">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <h3>Налаштування SoundFlow</h3>
+                </div>
+                <button class="modal-close-x" id="btn-close-settings-modal">✕</button>
+            </div>
+
+            <div class="settings-sections-scroll">
+                <!-- SECTION: ГЕЙМЕРСЬКІ ТА СИСТЕМНІ ФУНКЦІЇ -->
+                <div class="settings-group">
+                    <h4 class="settings-group-title">🎮 Геймінг & Windows</h4>
+                    
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Глобальні гарячі клавіші</span>
+                            <span class="settings-desc">Ctrl+Alt+Left/Right/Space/Up/Down для керування треками у будь-якій грі або додатку</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-hotkeys" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Discord Rich Presence</span>
+                            <span class="settings-desc">Показувати назву пісні, виконавця та таймер відтворення у вашому Discord-профілі</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-discord" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Ігровий Toast HUD</span>
+                            <span class="settings-desc">Міні-сповіщення у правому верхньому куті екрана при зміні треку під час гри (без втрати фокусу)</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-hud" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Згортання в системний трей</span>
+                            <span class="settings-desc">При закритті вікна згортати в панель біля годинника з контекстним меню</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-tray" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Автозапуск з Windows</span>
+                            <span class="settings-desc">Автоматично запускати SoundFlow при включенні комп'ютера</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-startup">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- SECTION: ЗВУКОВИЙ РУШІЙ -->
+                <div class="settings-group">
+                    <h4 class="settings-group-title">🎚️ Звуковий рушій</h4>
+                    
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Нормалізація гучності</span>
+                            <span class="settings-desc">Web Audio Dynamics Compressor автоматично вирівнює рівень звуку між тихими та гучними треками</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-volume-norm" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- SECTION: ОФЛАЙН ТА ЛОКАЛЬНА МУЗИКА -->
+                <div class="settings-group">
+                    <h4 class="settings-group-title">💾 Офлайн & Локальна музика</h4>
+                    
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Офлайн завантаження</span>
+                            <span class="settings-desc">Можливість зберігати треки на диск у папку Музика/SoundFlow в один клік</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-download" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Розумний кеш аудіо</span>
+                            <span class="settings-desc">Прискорення повторного відкриття треків та збереження інтернет-трафіку</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-cache" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Локальна музика на комп'ютері</span>
+                            <span class="settings-desc">Сканування локальних аудіофайлів (MP3, FLAC, WAV, M4A) з папки «Музика»</span>
+                        </div>
+                        <button class="btn-secondary-sm" id="btn-scan-local-music">🔍 Сканувати ПК</button>
+                    </div>
+                </div>
+
+                <!-- SECTION: ТЕКСТИ ТА ІНТЕРАКТИВ -->
+                <div class="settings-group">
+                    <h4 class="settings-group-title">🎤 Тексти пісень & Пошук</h4>
+                    
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Синхронізовані тексти пісень (Караоке)</span>
+                            <span class="settings-desc">Відображення та підсвічування тексту пісні рядок за рядком у такт музиці (LRCLIB)</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-lyrics" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row">
+                        <div class="settings-info">
+                            <span class="settings-label">Пряма вставка посилань у пошук</span>
+                            <span class="settings-desc">Вставте будь-яке пряме посилання YouTube або SoundCloud у пошуковий рядок для миттєвого відтворення</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="setting-direct-paste" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- SECTION: IPHONE / IOS STREAMING -->
+                <div class="settings-group ios-group">
+                    <h4 class="settings-group-title">📱 SoundFlow для iPhone / iOS</h4>
+                    <p class="settings-desc" style="margin-bottom: 12px;">
+                        Слухайте всю музику SoundFlow на вашому iPhone через локальну Wi-Fi мережу або встановіть як додаток на робочий стіл iOS:
+                    </p>
+                    <div class="ios-connect-box">
+                        <div class="ios-url-badge" id="ios-lan-url-display">http://192.168.0.116:8088</div>
+                        <button class="btn-primary-sm" id="btn-copy-ios-url">📋 Скопіювати посилання</button>
+                    </div>
+                    <div class="ios-steps">
+                        <div class="ios-step"><strong>Крок 1:</strong> Переконайтесь, що iPhone підключений до того ж Wi-Fi, що й комп'ютер.</div>
+                        <div class="ios-step"><strong>Крок 2:</strong> Відкрийте адресу вище в Safari на iPhone.</div>
+                        <div class="ios-step"><strong>Крок 3:</strong> Натисніть кнопку <strong>«Поділитися»</strong> (квадрат зі стрілкою вгору) ➔ <strong>«На екран 'Початковий'»</strong> (Add to Home Screen).</div>
+                        <div class="ios-step"><strong>Крок 4:</strong> SoundFlow з'явиться як повноцінний додаток з іконкою та фоновим звуком!</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-modal-actions">
+                <button class="btn-primary" id="btn-save-settings">Готово</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: SYNCHRONIZED LYRICS (KARAOKE) -->
+    <div class="modal-overlay" id="modal-lyrics" style="display: none;">
+        <div class="modal-card lyrics-modal-card">
+            <div class="lyrics-modal-header">
+                <div class="lyrics-track-info">
+                    <span class="lyrics-badge">🎤 LRCLIB СИНХРОНІЗАЦІЯ</span>
+                    <h3 id="lyrics-title">Назва треку</h3>
+                    <span id="lyrics-artist" class="lyrics-artist">Виконавець</span>
+                </div>
+                <button class="modal-close-x" id="btn-close-lyrics-modal">✕</button>
+            </div>
+            <div class="lyrics-scroll-container" id="lyrics-scroll-container">
+                <div class="lyrics-loading" id="lyrics-loading" style="display: none;">
+                    <div class="lyrics-spinner"></div>
+                    <span>Шукаємо синхронізований текст...</span>
+                </div>
+                <div class="lyrics-empty" id="lyrics-empty" style="display: none;">
+                    <span>🎵 Текст для цього треку не знайдено або він є інструментальним.</span>
+                </div>
+                <div class="lyrics-lines-list" id="lyrics-lines-list">
+                    <!-- Populated dynamically with synced or plain lyrics -->
+                </div>
             </div>
         </div>
     </div>

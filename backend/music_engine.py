@@ -101,11 +101,7 @@ class MusicEngine:
 
     def search_youtube(self, query, limit=10):
         try:
-            opts = dict(self.base_search_opts)
-            if self.node_path:
-                opts["js_runtimes"] = {"node": {"path": self.node_path}}
-
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            with yt_dlp.YoutubeDL(self.base_search_opts) as ydl:
                 res = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
                 raw_entries = res.get("entries", []) if res else []
                 clean = []
@@ -177,7 +173,11 @@ class MusicEngine:
             return None
 
         track_id = track_info.get("id")
-        target_url = track_info.get("url")
+        target_url = track_info.get("url") or track_info.get("source_url") or track_info.get("webpage_url")
+        if not target_url and track_id and str(track_id).startswith("yt_"):
+            target_url = f"https://www.youtube.com/watch?v={track_id[3:]}"
+        if target_url:
+            track_info["url"] = target_url
 
         if force_refresh and track_id:
             self.stream_cache.pop(track_id, None)
@@ -404,15 +404,17 @@ class MusicEngine:
                         title = e.get('title') or 'SoundCloud Track'
                         uploader = e.get('uploader') or e.get('artist') or 'SoundCloud'
                         duration = int(e.get('duration') or 0)
-                        thumb = e.get('thumbnail') or ''
-                        track_id = f"sc_{hash(track_url) & 0xffffffff}"
+                        thumb = e.get('thumbnail') or self._extract_best_thumbnail(e) or 'assets/icon.png'
+                        track_id = f"sc_{abs(hash(track_url))}"
 
                         collected.append({
                             'id': track_id,
                             'title': title,
                             'artist': uploader,
                             'duration': duration,
+                            'duration_formatted': self._format_duration(duration),
                             'thumbnail': thumb,
+                            'url': track_url,
                             'source': 'soundcloud',
                             'source_url': track_url,
                             'imported_from': 'soundcloud'
@@ -473,15 +475,18 @@ class MusicEngine:
                         uploader = e.get('uploader') or e.get('channel') or 'YouTube'
                         duration = int(e.get('duration') or 0)
                         thumb = e.get('thumbnail') or f"https://i.ytimg.com/vi/{yt_id}/hqdefault.jpg"
+                        yt_watch_url = f"https://www.youtube.com/watch?v={yt_id}"
 
                         collected.append({
                             'id': f"yt_{yt_id}",
                             'title': title,
                             'artist': uploader,
                             'duration': duration,
+                            'duration_formatted': self._format_duration(duration),
                             'thumbnail': thumb,
+                            'url': yt_watch_url,
                             'source': 'youtube',
-                            'source_url': f"https://www.youtube.com/watch?v={yt_id}",
+                            'source_url': yt_watch_url,
                             'imported_from': 'youtube'
                         })
                         if len(collected) >= limit:
@@ -490,4 +495,39 @@ class MusicEngine:
                     print(f"Error importing from {target_url}: {ex}")
 
         return collected
+
+    def resolve_direct_url(self, url):
+        """Resolves a direct YouTube or SoundCloud URL into a playable track object."""
+        if not url:
+            return None
+        url = url.strip()
+        opts = {
+            'quiet': True,
+            'skip_download': True,
+            'extract_flat': False,
+            'noplaylist': True
+        }
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    return None
+                source = 'soundcloud' if 'soundcloud.com' in url else 'youtube'
+                raw_id = info.get('id') or abs(hash(url))
+                t_id = f"sc_{raw_id}" if source == 'soundcloud' else f"yt_{raw_id}"
+                duration = int(info.get('duration') or 0)
+                return {
+                    'id': t_id,
+                    'title': info.get('title') or 'Track',
+                    'artist': info.get('uploader') or info.get('artist') or ('SoundCloud' if source == 'soundcloud' else 'YouTube'),
+                    'duration': duration,
+                    'duration_formatted': self._format_duration(duration),
+                    'thumbnail': self._extract_best_thumbnail(info),
+                    'url': url,
+                    'source': source,
+                    'source_url': url
+                }
+        except Exception as e:
+            print(f"Error resolving direct URL {url}: {e}")
+            return None
 

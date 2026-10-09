@@ -23,6 +23,13 @@ def build():
         "--collect-all", "pywebview",
         "--collect-all", "pythonnet",
         "--collect-all", "yt_dlp",
+        "--collect-all", "pystray",
+        "--collect-all", "pypresence",
+        "--collect-all", "PIL",
+        "--exclude-module", "tkinter",
+        "--exclude-module", "_tkinter",
+        "--exclude-module", "tcl",
+        "--exclude-module", "tk",
         "--clean",
         "-y",
         os.path.join(base_dir, "main.py")

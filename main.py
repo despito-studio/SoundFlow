@@ -2,11 +2,20 @@ import os
 import sys
 import json
 import threading
+
+# Prevent crashes when run without console in PyInstaller
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 import bottle
 import webview
 import webview.http
 from webview.util import abspath, is_app, is_local_url
 from backend.api import AppApi
+from backend.desktop_integration import DesktopIntegration
+from backend.mobile_server import MobileServer
 
 # Chromium & WebView2 flags: ensure uninterrupted media autoplay
 os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--autoplay-policy=no-user-gesture-required"
@@ -129,6 +138,13 @@ def run_app():
     os.makedirs(storage_dir, exist_ok=True)
 
     api = AppApi()
+    desktop = DesktopIntegration(api, base_dir)
+    api.set_desktop(desktop)
+
+    # Start mobile streaming server for iPhone / LAN
+    mobile_server = MobileServer(api, base_dir, port=8088)
+    mobile_server.start()
+    api.set_mobile_server(mobile_server)
 
     # Window creation
     window = webview.create_window(
@@ -141,6 +157,21 @@ def run_app():
         background_color="#0e1117",
         text_select=False,
     )
+
+    desktop.set_window(window)
+
+    def on_loaded():
+        desktop.start()
+
+    window.events.loaded += on_loaded
+
+    def on_closing():
+        if desktop and desktop.tray_enabled:
+            desktop.minimize_to_tray()
+            return False
+        return True
+
+    window.events.closing += on_closing
 
     # Start pywebview with internal lightweight HTTP server & persistent profile
     webview.start(

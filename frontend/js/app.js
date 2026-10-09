@@ -1,7 +1,88 @@
 /**
  * SoundFlow Application Controller
- * Handles view switching, search, playlists, likes, system stats, and keyboard shortcuts.
+ * Handles view switching, search, playlists, likes, system stats, keyboard shortcuts,
+ * audio normalizer, offline downloads, synchronized lyrics, and iOS mobile streaming bridge.
  */
+
+class MobileApiBridge {
+    async search(query, source = 'all', limit = 16) {
+        try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&source=${source}&limit=${limit}`);
+            return await res.json();
+        } catch (e) { return []; }
+    }
+    async get_discover_tracks(genre = 'lofi') {
+        try {
+            const res = await fetch(`/api/discover?genre=${encodeURIComponent(genre)}`);
+            return await res.json();
+        } catch (e) { return []; }
+    }
+    async get_stream(track, forceRefresh = false) {
+        try {
+            const res = await fetch('/api/stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track, forceRefresh })
+            });
+            const data = await res.json();
+            return data.stream_url;
+        } catch (e) { return null; }
+    }
+    async get_similar_tracks(track, limit = 8, exclude_ids = []) {
+        try {
+            const res = await fetch('/api/similar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track, limit, exclude_ids })
+            });
+            return await res.json();
+        } catch (e) { return []; }
+    }
+    async get_library() {
+        try {
+            const res = await fetch('/api/library');
+            return await res.json();
+        } catch (e) { return { liked_tracks: [], playlists: {}, history: [] }; }
+    }
+    async toggle_like(track) {
+        try {
+            const res = await fetch('/api/like', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(track)
+            });
+            return await res.json();
+        } catch (e) { return { is_liked: false, liked_count: 0 }; }
+    }
+    async resolve_direct_url(url) {
+        try {
+            const res = await fetch('/api/resolve_direct', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            return await res.json();
+        } catch (e) { return null; }
+    }
+    async record_history(track) { return true; }
+    async get_settings() {
+        return {
+            hotkeys_enabled: true,
+            discord_enabled: true,
+            hud_enabled: true,
+            tray_enabled: true,
+            volume_norm_enabled: true,
+            offline_download_enabled: true,
+            smart_cache_enabled: true,
+            local_music_enabled: true,
+            lyrics_enabled: true,
+            direct_paste_enabled: true,
+            startup_enabled: false
+        };
+    }
+    async update_settings(settings) { return true; }
+    async get_mobile_url() { return window.location.origin; }
+}
 
 class SoundFlowApp {
     constructor() {
@@ -16,11 +97,39 @@ class SoundFlowApp {
             history: []
         };
 
+        this.settings = {
+            hotkeys_enabled: true,
+            discord_enabled: true,
+            hud_enabled: true,
+            tray_enabled: true,
+            volume_norm_enabled: true,
+            offline_download_enabled: true,
+            smart_cache_enabled: true,
+            local_music_enabled: true,
+            lyrics_enabled: true,
+            direct_paste_enabled: true,
+            startup_enabled: false
+        };
+
         this.friends = [];
         this.player = new SoundFlowPlayer();
         this.trackForPlaylistModal = null;
 
+        this._parsedLyrics = null;
+        this._currentLyricsTrackId = null;
+        this._activeLyricIndex = -1;
+
         this.init();
+    }
+
+    getApi() {
+        if (window.pywebview && window.pywebview.api) {
+            return window.pywebview.api;
+        }
+        if (!window.mobileApiBridge) {
+            window.mobileApiBridge = new MobileApiBridge();
+        }
+        return window.mobileApiBridge;
     }
 
     async init() {
@@ -32,29 +141,37 @@ class SoundFlowApp {
         this.setupGenreChips();
         this.setupPlayerControls();
         this.setupModals();
+        this.setupSettingsModal();
+        this.setupLyricsModal();
         this.setupOnboardingModal();
         this.setupConnectAccountsModal();
         this.setupKeyboardShortcuts();
         this.setupStatsUpdater();
         this.setupProfile();
 
+        await this.loadSettings();
+
         // Check onboarding after slight delay so auth can initialize
         setTimeout(() => this.checkOnboarding(), 1000);
 
-        // Wait for pywebview API to be ready
-        window.addEventListener('pywebviewready', async () => {
-            await this.loadLibrary();
-            await this.loadDiscover(this.currentGenre);
-            await this.loadFriends();
-            this.updateStats();
-        });
+        // Load initial data safely exactly once
+        let initialDataLoaded = false;
+        const loadInitialData = async () => {
+            if (initialDataLoaded) return;
+            initialDataLoaded = true;
+            try {
+                await this.loadLibrary();
+                await this.loadDiscover(this.currentGenre);
+                await this.loadFriends();
+                this.updateStats();
+            } catch (err) {
+                console.warn('Initial data load error:', err);
+            }
+        };
 
-        // Fallback if pywebviewready fired earlier or running in dev
+        window.addEventListener('pywebviewready', loadInitialData);
         if (window.pywebview && window.pywebview.api) {
-            await this.loadLibrary();
-            await this.loadDiscover(this.currentGenre);
-            await this.loadFriends();
-            this.updateStats();
+            loadInitialData();
         }
     }
 
@@ -158,6 +275,8 @@ class SoundFlowApp {
             this.renderPlaylistView(playlistId);
         } else if (viewName === 'profile') {
             this.renderProfileView();
+        } else if (viewName === 'search') {
+            this.renderSearchHistory();
         }
     }
 
@@ -238,6 +357,15 @@ class SoundFlowApp {
         if (input) {
             input.addEventListener('input', () => {
                 if (clearBtn) clearBtn.style.display = input.value ? 'block' : 'none';
+                if (!input.value.trim() && this.currentView === 'search') {
+                    this.renderSearchHistory();
+                }
+            });
+
+            input.addEventListener('focus', () => {
+                if (this.currentView === 'search' || !input.value.trim()) {
+                    this.renderSearchHistory();
+                }
             });
 
             input.addEventListener('keydown', (e) => {
@@ -252,8 +380,27 @@ class SoundFlowApp {
                 input.value = '';
                 clearBtn.style.display = 'none';
                 input.focus();
+                if (this.currentView === 'search') {
+                    this.renderSearchHistory();
+                }
             });
         }
+
+        // Clear all search history button
+        document.getElementById('btn-clear-search-history')?.addEventListener('click', async () => {
+            if (window.pywebview && window.pywebview.api) {
+                try {
+                    await window.pywebview.api.clear_search_history();
+                } catch (e) {
+                    console.warn(e);
+                }
+            }
+            this.searchHistory = [];
+            const box = document.getElementById('search-history-container');
+            if (box) box.style.display = 'none';
+            const chips = document.getElementById('search-history-chips');
+            if (chips) chips.innerHTML = '';
+        });
 
         // Source filter chips
         document.querySelectorAll('.source-chip').forEach(chip => {
@@ -266,6 +413,83 @@ class SoundFlowApp {
                 }
             });
         });
+    }
+
+    async addSearchHistory(query) {
+        if (!query || !query.trim() || query.startsWith('/')) return;
+        query = query.trim();
+        if (!this.searchHistory) this.searchHistory = [];
+        this.searchHistory = [query, ...this.searchHistory.filter(q => q !== query)].slice(0, 25);
+        if (window.pywebview && window.pywebview.api) {
+            try {
+                const updated = await window.pywebview.api.add_search_query(query);
+                if (updated) this.searchHistory = updated;
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+    }
+
+    async renderSearchHistory() {
+        const box = document.getElementById('search-history-container');
+        const chipsContainer = document.getElementById('search-history-chips');
+        if (!box || !chipsContainer) return;
+
+        let history = this.searchHistory;
+        if ((!history || history.length === 0) && window.pywebview && window.pywebview.api) {
+            try {
+                history = await window.pywebview.api.get_search_history();
+                this.searchHistory = history || [];
+            } catch (e) {
+                this.searchHistory = [];
+            }
+        }
+        history = this.searchHistory || [];
+
+        if (!history || history.length === 0) {
+            box.style.display = 'none';
+            chipsContainer.innerHTML = '';
+            return;
+        }
+
+        box.style.display = 'block';
+        chipsContainer.innerHTML = '';
+
+        history.forEach(q => {
+            const chip = document.createElement('div');
+            chip.className = 'sh-chip';
+            chip.innerHTML = `
+                <span>${this.escapeHtml(q)}</span>
+                <span class="sh-chip-del" title="Видалити">✕</span>
+            `;
+
+            chip.addEventListener('click', (e) => {
+                if (e.target.closest('.sh-chip-del')) {
+                    e.stopPropagation();
+                    this.removeSearchHistoryItem(q);
+                    return;
+                }
+                const input = document.getElementById('search-input');
+                if (input) input.value = q;
+                this.executeSearch(q);
+            });
+
+            chipsContainer.appendChild(chip);
+        });
+    }
+
+    async removeSearchHistoryItem(query) {
+        if (!query) return;
+        this.searchHistory = (this.searchHistory || []).filter(item => item !== query);
+        if (window.pywebview && window.pywebview.api) {
+            try {
+                const updated = await window.pywebview.api.remove_search_query(query);
+                if (updated) this.searchHistory = updated;
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+        this.renderSearchHistory();
     }
 
     async handleSecretCommand(cmd) {
@@ -363,14 +587,39 @@ class SoundFlowApp {
             }
         }
 
+        // Direct link paste check (YouTube / SoundCloud URL)
+        const isUrl = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|soundcloud\.com)\/.+/i.test(query);
+        if (isUrl && (this.settings?.direct_paste_enabled !== false)) {
+            this.showToast('🔍 Розпізнавання прямого посилання...');
+            try {
+                const api = this.getApi();
+                if (api && api.resolve_direct_url) {
+                    const directTrack = await api.resolve_direct_url(query);
+                    if (directTrack && directTrack.id) {
+                        this.player.addToQueue(directTrack);
+                        this.player.playTrackAtIndex(this.player.queue.length - 1);
+                        this.showToast(`🎵 Відтворюється: ${directTrack.title}`);
+                        const input = document.getElementById('search-input');
+                        if (input) input.value = '';
+                        return;
+                    }
+                }
+            } catch (urlErr) {
+                console.warn('Direct URL resolution failed:', urlErr);
+            }
+        }
+
+        this.addSearchHistory(query);
         this.switchView('search');
 
         const queryDisplay = document.getElementById('search-query-display');
         const countDisplay = document.getElementById('search-count');
+        const resultsHeader = document.getElementById('search-results-header');
         const loading = document.getElementById('search-loading');
         const grid = document.getElementById('search-tracks-grid');
         const empty = document.getElementById('search-empty');
 
+        if (resultsHeader) resultsHeader.style.display = 'flex';
         if (queryDisplay) queryDisplay.textContent = `"${query}"`;
         if (countDisplay) countDisplay.textContent = '';
         if (loading) loading.style.display = 'flex';
@@ -414,7 +663,7 @@ class SoundFlowApp {
 
             card.innerHTML = `
                 <div class="track-card-art">
-                    <img src="${track.thumbnail || ''}" alt="Cover" loading="lazy">
+                    <img src="${track.thumbnail || 'assets/icon.png'}" onerror="this.onerror=null;this.src='assets/icon.png'" alt="Cover" loading="lazy">
                     ${sourceTag}
                     <button class="card-play-btn" title="Відтворити">
                         <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
@@ -504,7 +753,7 @@ class SoundFlowApp {
 
             row.innerHTML = `
                 <span class="track-row-index">${idx + 1}</span>
-                <img src="${track.thumbnail || ''}" class="track-row-thumb" alt="art">
+                <img src="${track.thumbnail || 'assets/icon.png'}" onerror="this.onerror=null;this.src='assets/icon.png'" class="track-row-thumb" alt="Cover">
                 <div class="track-row-info">
                     <span class="track-row-title">${this.escapeHtml(track.title)}</span>
                     <span class="track-row-artist">${this.escapeHtml(track.artist)}</span>
@@ -617,6 +866,7 @@ class SoundFlowApp {
         }
 
         if (btnDelete) {
+            btnDelete.style.display = pl.is_auto ? 'none' : 'inline-flex';
             btnDelete.onclick = async () => {
                 if (confirm(`Ви дійсно бажаєте видалити плейлист "${pl.name}"?`)) {
                     if (window.pywebview && window.pywebview.api) {
@@ -764,6 +1014,22 @@ class SoundFlowApp {
             this.player.toggleMute();
         });
 
+        // Lyrics toggle button
+        document.getElementById('btn-player-lyrics')?.addEventListener('click', () => {
+            const modal = document.getElementById('modal-lyrics');
+            if (modal && modal.style.display === 'flex') {
+                modal.style.display = 'none';
+                document.getElementById('btn-player-lyrics')?.classList.remove('active');
+            } else {
+                this.openLyricsModal();
+            }
+        });
+
+        // Download offline track button
+        document.getElementById('btn-player-download')?.addEventListener('click', () => {
+            this.downloadCurrentTrack();
+        });
+
         // Queue drawer toggle
         const queuePanel = document.getElementById('queue-panel');
         document.getElementById('btn-toggle-queue')?.addEventListener('click', () => {
@@ -783,6 +1049,12 @@ class SoundFlowApp {
         if (track && track.id) {
             if (!this.library.history) this.library.history = [];
             this.library.history = [track, ...this.library.history.filter(t => t.id !== track.id)].slice(0, 150);
+        }
+
+        // If lyrics modal is currently open, refresh lyrics for the new track
+        const lyricsModal = document.getElementById('modal-lyrics');
+        if (lyricsModal && lyricsModal.style.display === 'flex') {
+            this.openLyricsModal();
         }
 
         // Update liked state on player bar
@@ -1015,6 +1287,7 @@ class SoundFlowApp {
         btnSignIn?.addEventListener('click', () => {
             if (modal) modal.style.display = 'none';
             sessionStorage.setItem('soundflow_onboarding_dismissed', 'true');
+            localStorage.removeItem('soundflow_onboarding_dismissed');
             if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
                 window.soundFlowAuth.openSignIn();
             }
@@ -1023,6 +1296,7 @@ class SoundFlowApp {
         btnGuest?.addEventListener('click', () => {
             if (modal) modal.style.display = 'none';
             sessionStorage.setItem('soundflow_onboarding_dismissed', 'true');
+            localStorage.removeItem('soundflow_onboarding_dismissed');
             const msg = window.soundFlowI18n ? window.soundFlowI18n.t('toast_guest_welcome', 'Ви увійшли як гість. Приємного прослуховування! 🎧') : 'Ви увійшли як гість. Приємного прослуховування! 🎧';
             this.showToast(msg);
         });
@@ -1032,16 +1306,36 @@ class SoundFlowApp {
         const modal = document.getElementById('modal-welcome-onboarding');
         if (!modal) return;
 
-        // If user is already authenticated via Clerk, hide onboarding modal
-        const isLoggedIn = window.soundFlowAuth && window.soundFlowAuth.isLoggedIn && window.soundFlowAuth.isLoggedIn();
-        if (isLoggedIn) {
+        // Clean up legacy persistent dismissal
+        localStorage.removeItem('soundflow_onboarding_dismissed');
+
+        // If user is already authenticated with Clerk, NEVER show
+        const isUserLoggedIn = window.soundFlowAuth && window.soundFlowAuth.isLoggedIn && window.soundFlowAuth.isLoggedIn();
+        if (isUserLoggedIn) {
             modal.style.display = 'none';
             return;
         }
 
-        // If user already dismissed onboarding for this active session, hide
+        // If user already dismissed onboarding during this current session, do not show again
         if (sessionStorage.getItem('soundflow_onboarding_dismissed') === 'true') {
             modal.style.display = 'none';
+            return;
+        }
+
+        // Wait for Clerk auth readyPromise to verify session status
+        if (window.soundFlowAuth && window.soundFlowAuth.readyPromise) {
+            window.soundFlowAuth.readyPromise.then(() => {
+                const stillLoggedIn = window.soundFlowAuth.isLoggedIn && window.soundFlowAuth.isLoggedIn();
+                if (!stillLoggedIn && sessionStorage.getItem('soundflow_onboarding_dismissed') !== 'true') {
+                    modal.style.display = 'flex';
+                } else {
+                    modal.style.display = 'none';
+                }
+            }).catch(() => {
+                if (sessionStorage.getItem('soundflow_onboarding_dismissed') !== 'true') {
+                    modal.style.display = 'flex';
+                }
+            });
             return;
         }
 
@@ -1095,9 +1389,21 @@ class SoundFlowApp {
             }
         };
 
-        btnOpen?.addEventListener('click', () => {
-            if (modal) modal.style.display = 'flex';
-            refreshConnectedStatus();
+        const openButtons = [
+            document.getElementById('btn-open-connect-modal'),
+            document.getElementById('nav-btn-connect-accounts'),
+            document.getElementById('btn-profile-connect-accounts'),
+            document.getElementById('btn-sidebar-connect-accounts')
+        ];
+        openButtons.forEach(btn => {
+            btn?.addEventListener('click', () => {
+                if (modal) modal.style.display = 'flex';
+                refreshConnectedStatus();
+            });
+        });
+
+        modal?.addEventListener('click', (e) => {
+            if (e.target === modal) modal.style.display = 'none';
         });
 
         btnClose?.addEventListener('click', () => {
@@ -1465,7 +1771,18 @@ class SoundFlowApp {
     // SYSTEM STATS (RAM & CPU BADGE)
     // ==========================================
     setupStatsUpdater() {
-        setInterval(() => this.updateStats(), 4000);
+        this.currentGameInfo = null;
+        this.isGameModeActive = false;
+
+        // Instant Alt-Tab response via window focus/blur
+        window.addEventListener('focus', () => this.handleWindowFocusChange(true));
+        window.addEventListener('blur', () => this.handleWindowFocusChange(false));
+        document.addEventListener('visibilitychange', () => {
+            this.handleWindowFocusChange(document.visibilityState === 'visible');
+        });
+
+        // Fast periodic poll (2.5s) for background game state and resource telemetry
+        setInterval(() => this.updateStats(), 2500);
     }
 
     async updateStats() {
@@ -1476,9 +1793,87 @@ class SoundFlowApp {
                 if (textElem && stats) {
                     textElem.textContent = `⚡ RAM: ${stats.ram_mb} MB | CPU: ${stats.cpu_percent}%`;
                 }
+                if (stats && stats.game_optimizer) {
+                    this.handleGameOptimizerUpdate(stats.game_optimizer);
+                }
             }
         } catch (e) {
             // Silently ignore stats error
+        }
+    }
+
+    handleGameOptimizerUpdate(gameInfo) {
+        this.currentGameInfo = gameInfo;
+        const badge = document.getElementById('game-mode-badge');
+        const label = document.getElementById('game-mode-label');
+
+        if (!gameInfo || !gameInfo.game_running) {
+            if (this.isGameModeActive) {
+                this.deactivateGameMode();
+            }
+            if (badge) badge.style.display = 'none';
+            return;
+        }
+
+        // Active game detected (e.g. Dota 2)
+        if (badge) {
+            badge.style.display = 'inline-flex';
+            const gameTitle = gameInfo.game_name || 'Гра';
+            if (gameInfo.is_optimizing) {
+                badge.className = 'game-mode-badge optimizing';
+                if (label) label.textContent = `🎮 ${gameTitle}: Оптимізація`;
+                badge.title = `Виявлено запущену гру (${gameTitle}). Важкі ефекти інтерфейсу призупинено для максимального FPS!`;
+            } else {
+                badge.className = 'game-mode-badge';
+                if (label) label.textContent = `🎮 ${gameTitle}: Активна`;
+                badge.title = `Ви перемкнулись на SoundFlow (Alt-Tab). Повний інтерфейс увімкнено!`;
+            }
+        }
+
+        if (gameInfo.is_optimizing && !this.isGameModeActive) {
+            this.activateGameMode();
+        } else if (!gameInfo.is_optimizing && this.isGameModeActive) {
+            this.deactivateGameMode();
+        }
+    }
+
+    handleWindowFocusChange(isFocused) {
+        if (!this.currentGameInfo || !this.currentGameInfo.game_running) return;
+
+        const badge = document.getElementById('game-mode-badge');
+        const label = document.getElementById('game-mode-label');
+        const gameTitle = this.currentGameInfo.game_name || 'Гра';
+
+        if (isFocused) {
+            // User Alt-Tabbed into SoundFlow -> restore normal UI immediately!
+            this.deactivateGameMode();
+            if (badge) {
+                badge.className = 'game-mode-badge';
+                if (label) label.textContent = `🎮 ${gameTitle}: Активна`;
+            }
+        } else {
+            // User Alt-Tabbed into Game -> engage ultra-optimization!
+            this.activateGameMode();
+            if (badge) {
+                badge.className = 'game-mode-badge optimizing';
+                if (label) label.textContent = `🎮 ${gameTitle}: Оптимізація`;
+            }
+        }
+    }
+
+    activateGameMode() {
+        this.isGameModeActive = true;
+        document.body.classList.add('game-mode-active');
+        if (this.player && this.player.visualizer) {
+            this.player.visualizer.pause();
+        }
+    }
+
+    deactivateGameMode() {
+        this.isGameModeActive = false;
+        document.body.classList.remove('game-mode-active');
+        if (this.player && this.player.visualizer && this.player.isPlaying) {
+            this.player.visualizer.resume();
         }
     }
 
@@ -1512,6 +1907,12 @@ class SoundFlowApp {
                 const friendsPanel = document.getElementById('sc-tab-content-friends');
 
                 if (tab === 'admin') {
+                    const hasStaffAccess = this.profile?.role === 'admin' || this.profile?.role === 'moderator';
+                    if (!hasStaffAccess) {
+                        const allTab = document.querySelector('.sc-tab-btn[data-tab="all"]');
+                        if (allTab) allTab.click();
+                        return;
+                    }
                     if (tracksPanel) tracksPanel.style.display = 'none';
                     if (friendsPanel) friendsPanel.style.display = 'none';
                     if (adminPanel) adminPanel.style.display = 'block';
@@ -1853,19 +2254,22 @@ class SoundFlowApp {
 
         const { name, role, avatar_url, followers, following } = this.profile;
 
-        // Admin tab & dropdown button visibility
+        const isModerator = this.profile.role === 'moderator';
+        const hasStaffAccess = isAdmin || isModerator;
+
+        // Admin tab & dropdown button visibility: STRICTLY visible only for admin and moderator
         const adminTabBtn = document.getElementById('sc-tab-admin');
         const adminRoleOpt = document.getElementById('role-option-admin-btn');
         if (adminTabBtn) {
-            adminTabBtn.style.display = (isOwner || isAdmin) ? 'inline-flex' : 'none';
-            // If non-admin is viewing the admin tab, bounce to 'all'
-            if ((!isOwner && !isAdmin) && adminTabBtn.classList.contains('active')) {
+            adminTabBtn.style.display = hasStaffAccess ? 'inline-flex' : 'none';
+            // If non-admin/non-moderator is viewing the admin tab, bounce to 'all'
+            if (!hasStaffAccess && adminTabBtn.classList.contains('active')) {
                 const allTab = document.querySelector('.sc-tab-btn[data-tab="all"]');
                 if (allTab) allTab.click();
             }
         }
         if (adminRoleOpt) {
-            adminRoleOpt.style.display = (isOwner || isAdmin) ? 'flex' : 'none';
+            adminRoleOpt.style.display = hasStaffAccess ? 'flex' : 'none';
         }
 
         // Friends counter badges
@@ -2405,6 +2809,385 @@ class SoundFlowApp {
         this.toastTimeout = setTimeout(() => {
             toast.classList.remove('show');
         }, 2600);
+    }
+
+    // ==========================================
+    // SETTINGS MODAL & TOGGLES
+    // ==========================================
+    setupSettingsModal() {
+        const modal = document.getElementById('modal-settings');
+        const openBtn = document.getElementById('nav-btn-settings');
+        const closeBtn = document.getElementById('btn-close-settings-modal');
+        const saveBtn = document.getElementById('btn-save-settings');
+
+        if (openBtn) {
+            openBtn.addEventListener('click', () => {
+                this.loadSettings();
+                this.updateIosDisplayUrl();
+                if (modal) modal.style.display = 'flex';
+            });
+        }
+
+        const closeModal = () => {
+            if (modal) modal.style.display = 'none';
+        };
+
+        if (closeBtn) closeBtn.addEventListener('click', closeModal);
+        if (saveBtn) saveBtn.addEventListener('click', closeModal);
+
+        // Wiring checkbox toggles
+        const bindToggle = (id, key) => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('change', () => {
+                    this.updateSetting(key, el.checked);
+                });
+            }
+        };
+
+        bindToggle('setting-hotkeys', 'hotkeys_enabled');
+        bindToggle('setting-discord', 'discord_enabled');
+        bindToggle('setting-hud', 'hud_enabled');
+        bindToggle('setting-tray', 'tray_enabled');
+        bindToggle('setting-startup', 'startup_enabled');
+        bindToggle('setting-volume-norm', 'volume_norm_enabled');
+        bindToggle('setting-download', 'offline_download_enabled');
+        bindToggle('setting-cache', 'smart_cache_enabled');
+        bindToggle('setting-lyrics', 'lyrics_enabled');
+        bindToggle('setting-direct-paste', 'direct_paste_enabled');
+
+        // Local music scan button
+        const scanBtn = document.getElementById('btn-scan-local-music');
+        if (scanBtn) {
+            scanBtn.addEventListener('click', async () => {
+                scanBtn.textContent = '⏳ Сканування...';
+                scanBtn.disabled = true;
+                try {
+                    const api = this.getApi();
+                    if (api && api.scan_local_music) {
+                        const res = await api.scan_local_music();
+                        if (res && res.success) {
+                            await this.loadLibrary();
+                            this.showToast(`📁 Знайдено ${res.count} пісень у папці Музика!`);
+                        } else {
+                            this.showToast('Файлів не знайдено або папка недоступна');
+                        }
+                    }
+                } catch (err) {
+                    this.showToast('Помилка сканування локальної музики');
+                } finally {
+                    scanBtn.textContent = '🔍 Сканувати ПК';
+                    scanBtn.disabled = false;
+                }
+            });
+        }
+
+        // Copy iOS LAN URL
+        const copyBtn = document.getElementById('btn-copy-ios-url');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => {
+                const urlEl = document.getElementById('ios-lan-url-display');
+                const urlText = urlEl ? urlEl.textContent : '';
+                if (navigator.clipboard && urlText) {
+                    navigator.clipboard.writeText(urlText);
+                    this.showToast('📋 Адресу скопійовано! Відкрийте в Safari на iPhone');
+                }
+            });
+        }
+    }
+
+    async updateIosDisplayUrl() {
+        const urlEl = document.getElementById('ios-lan-url-display');
+        if (!urlEl) return;
+        try {
+            const api = this.getApi();
+            if (api && api.get_mobile_url) {
+                const url = await api.get_mobile_url();
+                if (url) urlEl.textContent = url;
+            }
+        } catch (e) {}
+    }
+
+    async loadSettings() {
+        try {
+            const api = this.getApi();
+            if (api && api.get_settings) {
+                this.settings = await api.get_settings();
+            } else {
+                this.settings = {
+                    hotkeys_enabled: true,
+                    discord_enabled: true,
+                    hud_enabled: true,
+                    tray_enabled: true,
+                    volume_norm_enabled: true,
+                    offline_download_enabled: true,
+                    smart_cache_enabled: true,
+                    local_music_enabled: true,
+                    lyrics_enabled: true,
+                    direct_paste_enabled: true,
+                    startup_enabled: false
+                };
+            }
+            this.applySettingsToUI();
+        } catch (e) {
+            console.warn('Failed to load settings:', e);
+        }
+    }
+
+    applySettingsToUI() {
+        const s = this.settings || {};
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!val;
+        };
+        setVal('setting-hotkeys', s.hotkeys_enabled !== false);
+        setVal('setting-discord', s.discord_enabled !== false);
+        setVal('setting-hud', s.hud_enabled !== false);
+        setVal('setting-tray', s.tray_enabled !== false);
+        setVal('setting-startup', !!s.startup_enabled);
+        setVal('setting-volume-norm', s.volume_norm_enabled !== false);
+        setVal('setting-download', s.offline_download_enabled !== false);
+        setVal('setting-cache', s.smart_cache_enabled !== false);
+        setVal('setting-lyrics', s.lyrics_enabled !== false);
+        setVal('setting-direct-paste', s.direct_paste_enabled !== false);
+
+        // Apply volume normalization to player
+        if (this.player && this.player.setVolumeNormalization) {
+            this.player.setVolumeNormalization(s.volume_norm_enabled !== false);
+        }
+    }
+
+    async updateSetting(key, val) {
+        if (!this.settings) this.settings = {};
+        this.settings[key] = val;
+        if (key === 'volume_norm_enabled' && this.player) {
+            this.player.setVolumeNormalization(val);
+        }
+        try {
+            const api = this.getApi();
+            if (api && api.update_settings) {
+                await api.update_settings(this.settings);
+            }
+        } catch (e) {
+            console.warn('Failed to save settings:', e);
+        }
+    }
+
+    // ==========================================
+    // SYNCHRONIZED LYRICS (LRCLIB KARAOKE)
+    // ==========================================
+    setupLyricsModal() {
+        const modal = document.getElementById('modal-lyrics');
+        const closeBtn = document.getElementById('btn-close-lyrics-modal');
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                if (modal) modal.style.display = 'none';
+                document.getElementById('btn-player-lyrics')?.classList.remove('active');
+            });
+        }
+    }
+
+    async openLyricsModal() {
+        const modal = document.getElementById('modal-lyrics');
+        const lyricsBtn = document.getElementById('btn-player-lyrics');
+        const titleEl = document.getElementById('lyrics-title');
+        const artistEl = document.getElementById('lyrics-artist');
+        const loadingEl = document.getElementById('lyrics-loading');
+        const emptyEl = document.getElementById('lyrics-empty');
+        const listEl = document.getElementById('lyrics-lines-list');
+
+        const track = this.player.currentTrack;
+        if (!track) {
+            this.showToast('Спочатку увімкніть трек для перегляду тексту 🎵');
+            return;
+        }
+
+        if (modal) modal.style.display = 'flex';
+        if (lyricsBtn) lyricsBtn.classList.add('active');
+
+        if (titleEl) titleEl.textContent = track.title || 'Трек';
+        if (artistEl) artistEl.textContent = track.artist || '';
+
+        // If already cached for current track, do not refetch
+        if (this._currentLyricsTrackId === track.id && this._parsedLyrics) {
+            return;
+        }
+
+        this._currentLyricsTrackId = track.id;
+        this._parsedLyrics = null;
+        this._activeLyricIndex = -1;
+
+        if (loadingEl) loadingEl.style.display = 'flex';
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (listEl) listEl.innerHTML = '';
+
+        try {
+            // Clean up title (remove (Official Video), [MV], feat. etc.)
+            const cleanTitle = (track.title || '')
+                .replace(/(\(|\[).*?(official|video|audio|remix|feat|ft|lyrics|hd|4k|visualizer).*?(\)|\])/gi, '')
+                .replace(/feat\..*$/i, '')
+                .trim();
+            const cleanArtist = (track.artist || '').trim();
+
+            const dur = Math.round(track.duration || 0);
+            const queryUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(cleanArtist)}&track_name=${encodeURIComponent(cleanTitle)}${dur > 0 ? `&duration=${dur}` : ''}`;
+
+            const resp = await fetch(queryUrl);
+            if (!resp.ok) {
+                // Try fallback search API if exact get didn't match
+                const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanArtist} ${cleanTitle}`)}`;
+                const searchResp = await fetch(searchUrl);
+                if (searchResp.ok) {
+                    const searchResults = await searchResp.json();
+                    if (Array.isArray(searchResults) && searchResults.length > 0) {
+                        this.renderLyricsData(searchResults[0]);
+                        return;
+                    }
+                }
+                throw new Error('Not found');
+            }
+
+            const data = await resp.json();
+            this.renderLyricsData(data);
+        } catch (e) {
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (emptyEl) emptyEl.style.display = 'flex';
+        }
+    }
+
+    renderLyricsData(data) {
+        const loadingEl = document.getElementById('lyrics-loading');
+        const emptyEl = document.getElementById('lyrics-empty');
+        const listEl = document.getElementById('lyrics-lines-list');
+
+        if (loadingEl) loadingEl.style.display = 'none';
+
+        const syncedLyrics = data?.syncedLyrics;
+        const plainLyrics = data?.plainLyrics;
+
+        if (syncedLyrics) {
+            // Parse LRC format: [00:12.34] lyric line
+            const lines = syncedLyrics.split('\n');
+            const parsed = [];
+            const timeRegex = /\[(\d{2}):(\d{2}(?:\.\d+)?)\]/;
+
+            lines.forEach((line, index) => {
+                const match = line.match(timeRegex);
+                if (match) {
+                    const min = parseFloat(match[1]);
+                    const sec = parseFloat(match[2]);
+                    const totalSec = min * 60 + sec;
+                    const text = line.replace(timeRegex, '').trim();
+                    if (text) {
+                        parsed.push({ time: totalSec, text, index });
+                    }
+                }
+            });
+
+            this._parsedLyrics = parsed;
+
+            if (listEl) {
+                listEl.innerHTML = parsed.map((item, idx) => `
+                    <div class="lyric-line" id="lyric-line-${idx}" data-time="${item.time}">
+                        ${this.escapeHtml(item.text)}
+                    </div>
+                `).join('');
+
+                listEl.querySelectorAll('.lyric-line').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const t = parseFloat(el.dataset.time);
+                        if (!isNaN(t)) {
+                            this.player.seek(t);
+                        }
+                    });
+                });
+            }
+        } else if (plainLyrics) {
+            this._parsedLyrics = null;
+            if (listEl) {
+                listEl.innerHTML = plainLyrics.split('\n').filter(l => l.trim()).map(line => `
+                    <div class="lyric-line" style="color: rgba(255,255,255,0.7); font-size:1.05rem;">
+                        ${this.escapeHtml(line.trim())}
+                    </div>
+                `).join('');
+            }
+        } else {
+            if (emptyEl) emptyEl.style.display = 'flex';
+        }
+    }
+
+    onPlayerTimeUpdate(currentTime, duration) {
+        if (!this._parsedLyrics || this._parsedLyrics.length === 0) return;
+
+        // Find active line: the latest lyric where item.time <= currentTime
+        let activeIdx = -1;
+        for (let i = 0; i < this._parsedLyrics.length; i++) {
+            if (this._parsedLyrics[i].time <= currentTime) {
+                activeIdx = i;
+            } else {
+                break;
+            }
+        }
+
+        if (activeIdx !== this._activeLyricIndex) {
+            this._activeLyricIndex = activeIdx;
+
+            const listEl = document.getElementById('lyrics-lines-list');
+            if (!listEl) return;
+
+            listEl.querySelectorAll('.lyric-line.active').forEach(el => el.classList.remove('active'));
+
+            if (activeIdx >= 0) {
+                const activeEl = document.getElementById(`lyric-line-${activeIdx}`);
+                if (activeEl) {
+                    activeEl.classList.add('active');
+                    const scrollContainer = document.getElementById('lyrics-scroll-container');
+                    if (scrollContainer) {
+                        const topOffset = activeEl.offsetTop - (scrollContainer.clientHeight / 2) + (activeEl.clientHeight / 2);
+                        scrollContainer.scrollTo({ top: Math.max(0, topOffset), behavior: 'smooth' });
+                    }
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // OFFLINE DOWNLOAD (MP3)
+    // ==========================================
+    async downloadCurrentTrack() {
+        const track = this.player.currentTrack;
+        if (!track) {
+            this.showToast('Спочатку виберіть трек для завантаження 🎵');
+            return;
+        }
+
+        if (this.settings && this.settings.offline_download_enabled === false) {
+            this.showToast('Офлайн завантаження вимкнено в налаштуваннях ⚙️');
+            return;
+        }
+
+        const btn = document.getElementById('btn-player-download');
+        if (btn) btn.classList.add('downloading');
+
+        this.showToast(`⬇️ Завантаження: "${track.title}"...`);
+
+        try {
+            const api = this.getApi();
+            if (api && api.download_track) {
+                const res = await api.download_track(track);
+                if (res && res.success) {
+                    this.showToast(`✅ Завантажено: ${res.title}! Збережено в Музика/SoundFlow`);
+                } else {
+                    this.showToast(res?.error || 'Не вдалося завантажити трек');
+                }
+            }
+        } catch (e) {
+            console.error('Download error:', e);
+            this.showToast('Помилка завантаження треку');
+        } finally {
+            if (btn) btn.classList.remove('downloading');
+        }
     }
 
     escapeHtml(str) {

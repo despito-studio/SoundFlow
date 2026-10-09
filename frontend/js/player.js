@@ -30,6 +30,13 @@ class SoundFlowPlayer {
         this.bassBoostEnabled = true;
         this.bassGain = 6;
         this.hqAudioEnabled = true;
+        this.volumeNormEnabled = true;
+
+        this.audioCtx = null;
+        this.audioSourceNode = null;
+        this.compressorNode = null;
+        this.bassFilterNode = null;
+        this.webAudioInitialized = false;
 
         this.visualizer = new WaveformVisualizer('visualizer-canvas');
 
@@ -46,6 +53,20 @@ class SoundFlowPlayer {
 
         this.setupAudioListeners();
         this.setupMediaSession();
+        window.soundFlowPlayer = this;
+    }
+
+    initWebAudio() {
+        // Native direct output to prevent Chromium CORS muting on cross-origin streams
+        this.webAudioInitialized = true;
+    }
+
+    setVolumeNormalization(enabled) {
+        this.volumeNormEnabled = !!enabled;
+        if (this.audio) {
+            const baseVol = this.lastVolume > 0 ? this.lastVolume : 0.8;
+            this.audio.volume = this.volumeNormEnabled ? Math.min(1.0, baseVol * 0.95) : baseVol;
+        }
     }
 
     setBassBoost(enabled, gain = 6) {
@@ -59,6 +80,7 @@ class SoundFlowPlayer {
         this.audio.addEventListener('play', () => {
             this.visualizer.start();
             this.updatePlayPauseUI(true);
+            this.notifyPlaybackState(true);
         });
 
         this.audio.addEventListener('playing', () => {
@@ -74,6 +96,7 @@ class SoundFlowPlayer {
             }
             this.visualizer.start();
             this.updatePlayPauseUI(true);
+            this.notifyPlaybackState(true);
         });
 
         this.audio.addEventListener('canplay', () => {
@@ -88,6 +111,7 @@ class SoundFlowPlayer {
             this.showLoading(false);
             this.visualizer.stop();
             this.updatePlayPauseUI(false);
+            this.notifyPlaybackState(false);
         });
 
         this.audio.addEventListener('timeupdate', () => {
@@ -202,6 +226,8 @@ class SoundFlowPlayer {
                 streamUrl = this.prefetchedUrl;
                 this.prefetchedUrl = null;
                 this.prefetchedTrackId = null;
+            } else if (window.soundFlowApp && typeof window.soundFlowApp.getApi === 'function') {
+                streamUrl = await window.soundFlowApp.getApi().get_stream(track, forceRefresh);
             } else if (window.pywebview && window.pywebview.api) {
                 streamUrl = await window.pywebview.api.get_stream(track, forceRefresh);
             }
@@ -340,11 +366,31 @@ class SoundFlowPlayer {
         }
     }
 
+    togglePlay() {
+        this.togglePlayPause();
+    }
+
     togglePlayPause() {
         if (this.audio && !this.audio.paused) {
             this.pause();
         } else {
             this.play();
+        }
+    }
+
+    changeVolumeRelative(delta) {
+        const cur = this.audio ? this.audio.volume : this.lastVolume;
+        const nextVol = Math.max(0, Math.min(1, cur + delta));
+        this.setVolume(nextVol);
+    }
+
+    notifyPlaybackState(isPlaying) {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.update_playback_state) {
+            window.pywebview.api.update_playback_state(
+                this.currentTrack,
+                isPlaying,
+                this.audio ? (this.audio.currentTime || 0) : 0
+            );
         }
     }
 
@@ -507,6 +553,10 @@ class SoundFlowPlayer {
 
         if (currentElem) currentElem.textContent = this.formatTime(current);
         if (totalElem && duration > 0) totalElem.textContent = this.formatTime(duration);
+
+        if (window.soundFlowApp && window.soundFlowApp.onPlayerTimeUpdate) {
+            window.soundFlowApp.onPlayerTimeUpdate(current, duration);
+        }
 
         if (duration > 0 && seekbar && progress) {
             const pct = (current / duration) * 100;

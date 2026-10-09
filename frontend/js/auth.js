@@ -244,9 +244,16 @@ class SoundFlowAuth {
 
             document.getElementById('btn-sign-out')?.addEventListener('click', async () => {
                 dropdown.style.display = 'none';
+                localStorage.removeItem('soundflow_logged_in');
+                localStorage.removeItem('soundflow_user_id');
+                sessionStorage.removeItem('soundflow_onboarding_dismissed');
                 await this.clerk.signOut();
                 if (window.soundFlowApp) window.soundFlowApp.showToast('Ви вийшли з акаунта');
             });
+
+            // Persist login flag
+            localStorage.setItem('soundflow_logged_in', 'true');
+            if (user && user.id) localStorage.setItem('soundflow_user_id', user.id);
 
             // Show Profile tab in sidebar when logged in
             if (document.body) document.body.classList.add('user-logged-in');
@@ -298,29 +305,57 @@ class SoundFlowAuth {
     }
 
     async openSignIn() {
-        if (!this.clerk) {
+        if (!this.clerk || !this.clerk.loaded) {
             if (window.soundFlowApp) window.soundFlowApp.showToast('Підключення до сервісу авторизації...');
-            await this.readyPromise;
+            try {
+                await this.readyPromise;
+            } catch (e) {
+                console.warn(e);
+            }
         }
 
-        if (!this.clerk) {
+        if (!this.clerk || !this.clerk.loaded) {
+            try {
+                if (window.Clerk && typeof window.Clerk.load === 'function') {
+                    await window.Clerk.load();
+                    this.clerk = window.Clerk;
+                }
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+
+        if (!this.clerk || !this.clerk.loaded) {
             if (window.soundFlowApp) window.soundFlowApp.showToast('Помилка підключення до сервісу авторизації');
             return;
         }
 
-        // Open Clerk's native modal window directly
-        this.clerk.openSignIn();
+        try {
+            // Open Clerk's native modal window directly
+            this.clerk.openSignIn();
+        } catch (e) {
+            console.error('Error opening Clerk modal:', e);
+            if (window.soundFlowApp) window.soundFlowApp.showToast('Не вдалося відкрити вікно входу');
+        }
     }
 
     async openUserProfile() {
-        if (!this.clerk) {
-            await this.readyPromise;
+        if (!this.clerk || !this.clerk.loaded) {
+            try {
+                await this.readyPromise;
+            } catch (e) {
+                console.warn(e);
+            }
         }
 
-        if (!this.clerk) return;
+        if (!this.clerk || !this.clerk.loaded) return;
 
-        // Open Clerk's native profile modal directly
-        this.clerk.openUserProfile();
+        try {
+            // Open Clerk's native profile modal directly
+            this.clerk.openUserProfile();
+        } catch (e) {
+            console.error('Error opening UserProfile modal:', e);
+        }
     }
 
     escapeHtml(str) {

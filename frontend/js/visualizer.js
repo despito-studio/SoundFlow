@@ -56,6 +56,19 @@ class WaveformVisualizer {
         this.renderIdle();
     }
 
+    pause() {
+        if (this.animationId) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+    }
+
+    resume() {
+        if (this.isPlaying && !this.animationId) {
+            this.animate();
+        }
+    }
+
     animate() {
         if (!this.isPlaying) return;
 

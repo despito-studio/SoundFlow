@@ -131,31 +131,53 @@ class LibraryManager:
         if folder and not os.path.exists(folder):
             os.makedirs(folder, exist_ok=True)
 
+    def _normalize_track(self, track):
+        if not isinstance(track, dict):
+            return track
+        if not track.get("url") and track.get("source_url"):
+            track["url"] = track["source_url"]
+        elif not track.get("url") and track.get("id") and str(track.get("id")).startswith("yt_"):
+            track["url"] = f"https://www.youtube.com/watch?v={track['id'][3:]}"
+        if not track.get("thumbnail"):
+            track["thumbnail"] = "assets/icon.png"
+        return track
+
     def _load(self):
+        data = None
         if os.path.exists(self.data_path):
             try:
                 with open(self.data_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
             except Exception:
                 pass
-        return {
-            "liked_tracks": [],
-            "playlists": {
-                "favorites": {
-                    "id": "favorites",
-                    "name": "Улюблені треки",
-                    "created_at": time.time(),
-                    "tracks": []
+        if not data:
+            data = {
+                "liked_tracks": [],
+                "playlists": {
+                    "favorites": {
+                        "id": "favorites",
+                        "name": "Улюблені треки",
+                        "created_at": time.time(),
+                        "tracks": []
+                    }
+                },
+                "history": [],
+                "settings": {
+                    "volume": 0.8,
+                    "repeat": "off", # off, all, one
+                    "shuffle": False,
+                    "preferred_source": "all"
                 }
-            },
-            "history": [],
-            "settings": {
-                "volume": 0.8,
-                "repeat": "off", # off, all, one
-                "shuffle": False,
-                "preferred_source": "all"
             }
-        }
+        if isinstance(data.get("liked_tracks"), list):
+            data["liked_tracks"] = [self._normalize_track(t) for t in data["liked_tracks"]]
+        if isinstance(data.get("history"), list):
+            data["history"] = [self._normalize_track(t) for t in data["history"]]
+        if isinstance(data.get("playlists"), dict):
+            for pl in data["playlists"].values():
+                if isinstance(pl.get("tracks"), list):
+                    pl["tracks"] = [self._normalize_track(t) for t in pl["tracks"]]
+        return data
 
     def _save(self):
         with self._lock:
@@ -252,20 +274,78 @@ class LibraryManager:
     def add_history(self, track):
         if not track or not track.get("id"):
             return
+        track_id = track["id"]
         history = self.data.setdefault("history", [])
         # Remove previous occurrence to bring to top
-        history = [t for t in history if t.get("id") != track["id"]]
+        history = [t for t in history if t.get("id") != track_id]
         track_with_time = dict(track)
         track_with_time["played_at"] = time.time()
         history.insert(0, track_with_time)
-        # Keep last 100
-        self.data["history"] = history[:100]
+        # Keep last 150
+        self.data["history"] = history[:150]
+
+        # Track play frequency
+        play_counts = self.data.setdefault("play_counts", {})
+        play_counts[track_id] = play_counts.get(track_id, 0) + 1
+        catalog = self.data.setdefault("track_catalog", {})
+        catalog[track_id] = dict(track)
+
+        # Automatically assemble and update smart playlist "Часто слухаєш"
+        self._update_frequently_played()
+
         self._save()
+
+    def _update_frequently_played(self):
+        play_counts = self.data.setdefault("play_counts", {})
+        catalog = self.data.setdefault("track_catalog", {})
+        if not play_counts or not catalog:
+            return
+
+        sorted_track_ids = sorted(play_counts.keys(), key=lambda tid: play_counts.get(tid, 0), reverse=True)
+        top_tracks = [catalog[tid] for tid in sorted_track_ids if tid in catalog][:50]
+        if top_tracks:
+            playlists = self.data.setdefault("playlists", {})
+            pl_id = "frequently_played"
+            playlists[pl_id] = {
+                "id": pl_id,
+                "name": "🔥 Часто слухаєш",
+                "created_at": playlists.get(pl_id, {}).get("created_at", time.time()),
+                "tracks": top_tracks,
+                "is_auto": True
+            }
 
     def clear_history(self):
         self.data["history"] = []
         self._save()
         return True
+
+    def add_search_query(self, query):
+        if not query or not str(query).strip():
+            return self.get_search_history()
+        q = str(query).strip()
+        sh = self.data.setdefault("search_history", [])
+        if q in sh:
+            sh.remove(q)
+        sh.insert(0, q)
+        self.data["search_history"] = sh[:25]
+        self._save()
+        return self.data["search_history"]
+
+    def get_search_history(self):
+        return self.data.setdefault("search_history", [])
+
+    def clear_search_history(self):
+        self.data["search_history"] = []
+        self._save()
+        return []
+
+    def remove_search_query(self, query):
+        q = str(query).strip()
+        sh = self.data.setdefault("search_history", [])
+        if q in sh:
+            sh.remove(q)
+            self._save()
+        return self.data["search_history"]
 
     def update_settings(self, new_settings):
         if isinstance(new_settings, dict):
