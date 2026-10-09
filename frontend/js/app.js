@@ -60,7 +60,8 @@ class SoundFlowApp {
         document.querySelectorAll('.nav-item').forEach(btn => {
             btn.addEventListener('click', () => {
                 const view = btn.dataset.view;
-                if (view === 'profile' && (!window.soundFlowAuth || !window.soundFlowAuth.user)) {
+                const isUserLoggedIn = window.soundFlowAuth && (window.soundFlowAuth.user || (window.soundFlowAuth.clerk && window.soundFlowAuth.clerk.user));
+                if (view === 'profile' && !isUserLoggedIn) {
                     this.showToast('Для доступу до вкладки Профіль необхідно увійти в акаунт 🔒');
                     if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
                         window.soundFlowAuth.openSignIn();
@@ -108,7 +109,7 @@ class SoundFlowApp {
 
     switchView(viewName, playlistId = null) {
         if (viewName === 'profile') {
-            const isUserLoggedIn = window.soundFlowAuth && window.soundFlowAuth.user;
+            const isUserLoggedIn = window.soundFlowAuth && (window.soundFlowAuth.user || (window.soundFlowAuth.clerk && window.soundFlowAuth.clerk.user));
             if (!isUserLoggedIn) {
                 this.showToast('Для доступу до вкладки Профіль необхідно увійти в акаунт 🔒');
                 if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
@@ -169,10 +170,13 @@ class SoundFlowApp {
         }
 
         // Re-render auth state if user is logged in
-        if (window.soundFlowAuth && window.soundFlowAuth.user) {
-            window.soundFlowAuth.updateUserState(window.soundFlowAuth.user);
-        } else if (window.soundFlowAuth) {
-            window.soundFlowAuth.renderGuestState();
+        if (window.soundFlowAuth) {
+            const u = window.soundFlowAuth.user || (window.soundFlowAuth.clerk ? window.soundFlowAuth.clerk.user : null);
+            if (u) {
+                window.soundFlowAuth.updateUserState(u);
+            } else {
+                window.soundFlowAuth.renderGuestState();
+            }
         }
 
         const langName = window.soundFlowI18n ? window.soundFlowI18n.t('name') : lang;
@@ -1579,6 +1583,19 @@ class SoundFlowApp {
                 }
                 this.showToast(`ID скопійовано в буфер: ${myId} 📋`);
             });
+        }
+
+        // Synchronize sidebar Profile tab visibility based on active authentication
+        const hasAuthUser = window.soundFlowAuth && (window.soundFlowAuth.user || (window.soundFlowAuth.clerk && window.soundFlowAuth.clerk.user));
+        const profileNavItem = document.getElementById('nav-item-profile');
+        if (profileNavItem) {
+            if (hasAuthUser) {
+                profileNavItem.style.display = 'flex';
+                if (document.body) document.body.classList.add('user-logged-in');
+            } else {
+                profileNavItem.style.display = 'none';
+                if (document.body) document.body.classList.remove('user-logged-in');
+            }
         }
 
         const { name, role, avatar_url, followers, following } = this.profile;

@@ -2877,15 +2877,11 @@ input:checked + .slider:before { transform: translateX(18px); }
    AUTHENTICATION & PROFILE ACCESS GUARDS
    ========================================== */
 #nav-item-profile {
-    display: none !important;
+    display: none;
 }
 
 body.user-logged-in #nav-item-profile {
-    display: flex !important;
-}
-
-body:not(.user-logged-in) #profile-view {
-    display: none !important;
+    display: flex;
 }
 
 /* ==========================================

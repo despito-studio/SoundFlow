@@ -14,8 +14,11 @@ class SoundFlowAuth {
         this.readyPromise = this.init();
     }
 
+    isLoggedIn() {
+        return !!(this.user || (this.clerk && this.clerk.user));
+    }
+
     async init() {
-        if (document.body) document.body.classList.remove('user-logged-in');
         this.renderGuestState();
 
         try {
@@ -70,11 +73,17 @@ class SoundFlowAuth {
 
             // Listen for login/logout changes
             this.clerk.addListener((emission) => {
-                this.updateUserState(emission.user);
+                const u = emission?.user || this.clerk?.user;
+                this.updateUserState(u);
             });
 
             // Sync current user state
-            this.updateUserState(this.clerk.user);
+            const currentUser = this.clerk.user;
+            if (currentUser) {
+                this.updateUserState(currentUser);
+            } else {
+                this.renderGuestState();
+            }
 
         } catch (err) {
             console.error("[SoundFlow Auth] Initialization error:", err);
@@ -118,6 +127,11 @@ class SoundFlowAuth {
     }
 
     renderGuestState() {
+        if (this.clerk && this.clerk.user) {
+            this.updateUserState(this.clerk.user);
+            return;
+        }
+        this.user = null;
         if (document.body) document.body.classList.remove('user-logged-in');
         const profileNavItem = document.getElementById('nav-item-profile');
         if (profileNavItem) profileNavItem.style.display = 'none';
@@ -147,11 +161,15 @@ class SoundFlowAuth {
     }
 
     async updateUserState(user) {
-        this.user = user;
+        if (!user && this.clerk && this.clerk.user) {
+            user = this.clerk.user;
+        }
+        this.user = user || null;
         const authContainer = document.getElementById('auth-container');
         if (!authContainer) return;
 
-        if (user) {
+        if (this.user) {
+            user = this.user;
             const avatarUrl = user.imageUrl || '';
             const displayName = user.fullName || user.firstName || user.primaryEmailAddress?.emailAddress || 'Користувач';
             const email = user.primaryEmailAddress?.emailAddress || '';
