@@ -1033,9 +1033,12 @@ class SoundFlowApp {
         if (window.pywebview && window.pywebview.api) {
             try {
                 const stats = await window.pywebview.api.get_system_stats();
-                if (stats && stats.ram) {
+                if (stats) {
+                    const ramVal = stats.ram_mb || (stats.ram && stats.ram.app_mb);
                     const ramEl = document.getElementById('console-ram-stat');
-                    if (ramEl) ramEl.textContent = `${stats.ram.app_mb} MB (${stats.ram.percent}%)`;
+                    if (ramEl && ramVal) {
+                        ramEl.textContent = `${ramVal} MB`;
+                    }
                 }
             } catch(e) {}
         }
