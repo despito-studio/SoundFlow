@@ -1014,7 +1014,6 @@ class SoundFlowApp {
 
         btnSignIn?.addEventListener('click', () => {
             if (modal) modal.style.display = 'none';
-            localStorage.setItem('soundflow_onboarding_completed', 'true');
             sessionStorage.setItem('soundflow_onboarding_dismissed', 'true');
             if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
                 window.soundFlowAuth.openSignIn();
@@ -1023,25 +1022,35 @@ class SoundFlowApp {
 
         btnGuest?.addEventListener('click', () => {
             if (modal) modal.style.display = 'none';
-            localStorage.setItem('soundflow_onboarding_completed', 'true');
             sessionStorage.setItem('soundflow_onboarding_dismissed', 'true');
-            this.showToast('Ви увійшли як гість. Приємного прослуховування! 🎧');
+            const msg = window.soundFlowI18n ? window.soundFlowI18n.t('toast_guest_welcome', 'Ви увійшли як гість. Приємного прослуховування! 🎧') : 'Ви увійшли як гість. Приємного прослуховування! 🎧';
+            this.showToast(msg);
         });
     }
 
     checkOnboarding() {
-        // If user is already authenticated via Clerk, do not show onboarding
-        const isLoggedIn = window.soundFlowAuth && window.soundFlowAuth.isLoggedIn && window.soundFlowAuth.isLoggedIn();
-        if (isLoggedIn) return;
-
-        // If user already dismissed/completed onboarding previously, don't show
-        const dismissed = sessionStorage.getItem('soundflow_onboarding_dismissed') || localStorage.getItem('soundflow_onboarding_completed');
-        if (dismissed) return;
-
         const modal = document.getElementById('modal-welcome-onboarding');
-        if (modal) {
-            modal.style.display = 'flex';
+        if (!modal) return;
+
+        // If user is already authenticated via Clerk, hide onboarding modal
+        const isLoggedIn = window.soundFlowAuth && window.soundFlowAuth.isLoggedIn && window.soundFlowAuth.isLoggedIn();
+        if (isLoggedIn) {
+            modal.style.display = 'none';
+            return;
         }
+
+        // If user already dismissed onboarding for this active session, hide
+        if (sessionStorage.getItem('soundflow_onboarding_dismissed') === 'true') {
+            modal.style.display = 'none';
+            return;
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    openOnboardingModal() {
+        const modal = document.getElementById('modal-welcome-onboarding');
+        if (modal) modal.style.display = 'flex';
     }
 
     // ==========================================

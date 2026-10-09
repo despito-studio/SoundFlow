@@ -964,33 +964,33 @@
     </div>
 
     <!-- MODAL: WELCOME ONBOARDING (FIRST RUN / LOGIN AS GUEST) -->
-    <div class="modal-overlay" id="modal-welcome-onboarding" style="display: none;">
+    <div class="modal-overlay" id="modal-welcome-onboarding">
         <div class="modal-card welcome-modal-card">
             <div class="welcome-header">
                 <div class="welcome-badge">🎵 SoundFlow</div>
-                <h2 class="welcome-title">Ласкаво просимо!</h2>
-                <p class="welcome-subtitle">Увійдіть у профіль, щоб ваша історія, плейлисти та вподобання зберігалися скрізь.</p>
+                <h2 class="welcome-title" data-i18n="welcome_title">Ласкаво просимо!</h2>
+                <p class="welcome-subtitle" data-i18n="welcome_subtitle">Увійдіть у профіль, щоб ваша історія, плейлисти та вподобання зберігалися скрізь.</p>
             </div>
             <div class="welcome-features">
                 <div class="wf-item">
                     <span class="wf-icon">⚡</span>
                     <div class="wf-text">
-                        <strong>Швидкий і легкий плеєр</strong>
-                        <p>Лише ~100 МБ оперативної пам'яті та нуль реклами</p>
+                        <strong data-i18n="wf_fast_title">Швидкий і легкий плеєр</strong>
+                        <p data-i18n="wf_fast_desc">Лише ~100 МБ оперативної пам'яті та нуль реклами</p>
                     </div>
                 </div>
                 <div class="wf-item">
                     <span class="wf-icon">💾</span>
                     <div class="wf-text">
-                        <strong>Повне збереження історії</strong>
-                        <p>Всі прослухані треки автоматично зберігаються за вашим профілем</p>
+                        <strong data-i18n="wf_history_title">Повне збереження історії</strong>
+                        <p data-i18n="wf_history_desc">Всі прослухані треки автоматично зберігаються за вашим профілем</p>
                     </div>
                 </div>
                 <div class="wf-item">
                     <span class="wf-icon">🔗</span>
                     <div class="wf-text">
-                        <strong>Синхронізація YouTube та SoundCloud</strong>
-                        <p>Імпортуйте свої треки прямо в плеєр в 1 клік</p>
+                        <strong data-i18n="wf_sync_title">Синхронізація YouTube та SoundCloud</strong>
+                        <p data-i18n="wf_sync_desc">Імпортуйте свої треки прямо в плеєр в 1 клік</p>
                     </div>
                 </div>
             </div>
@@ -1001,14 +1001,20 @@
                         <polyline points="10 17 15 12 10 7"></polyline>
                         <line x1="15" y1="12" x2="3" y2="12"></line>
                     </svg>
-                    <span>Увійти / Зареєструватися</span>
+                    <span data-i18n="btn_welcome_signin">Увійти / Зареєструватися</span>
                 </button>
                 <button class="btn-welcome-guest" id="btn-welcome-guest">
-                    <span>👤 Увійти як гість</span>
+                    <span data-i18n="btn_welcome_guest">👤 Увійти як гість</span>
                 </button>
             </div>
         </div>
     </div>
+    <script>
+        if (sessionStorage.getItem('soundflow_onboarding_dismissed') === 'true') {
+            var _obm = document.getElementById('modal-welcome-onboarding');
+            if (_obm) _obm.style.display = 'none';
+        }
+    </script>
 
     <!-- MODAL: CONNECT ACCOUNTS (YOUTUBE & SOUNDCLOUD) -->
     <div class="modal-overlay" id="modal-connect-accounts" style="display: none;">

@@ -169,7 +169,20 @@ const SOUNDFLOW_TRANSLATIONS = {
         toast_role_switched: 'Роль змінено на',
         toast_theme_applied: 'Тему банера застосовано!',
         toast_backup_exported: 'Бібліотеку успішно збережено в файл',
-        toast_backup_imported: 'Бібліотеку успішно імпортовано!'
+        toast_backup_imported: 'Бібліотеку успішно імпортовано!',
+
+        // Onboarding Modal
+        welcome_title: 'Ласкаво просимо!',
+        welcome_subtitle: 'Увійдіть у профіль, щоб ваша історія, плейлисти та вподобання зберігалися скрізь.',
+        wf_fast_title: 'Швидкий і легкий плеєр',
+        wf_fast_desc: 'Лише ~100 МБ оперативної пам\'яті та нуль реклами',
+        wf_history_title: 'Повне збереження історії',
+        wf_history_desc: 'Всі прослухані треки автоматично зберігаються за вашим профілем',
+        wf_sync_title: 'Синхронізація YouTube та SoundCloud',
+        wf_sync_desc: 'Імпортуйте свої треки прямо в плеєр в 1 клік',
+        btn_welcome_signin: 'Увійти / Зареєструватися',
+        btn_welcome_guest: '👤 Увійти як гість',
+        toast_guest_welcome: 'Ви увійшли як гість. Приємного прослуховування! 🎧'
     },
 
     ru: {
@@ -319,7 +332,20 @@ const SOUNDFLOW_TRANSLATIONS = {
         toast_role_switched: 'Роль изменена на',
         toast_theme_applied: 'Тема баннера применена!',
         toast_backup_exported: 'Библиотека успешно сохранена в файл',
-        toast_backup_imported: 'Библиотека успешно импортирована!'
+        toast_backup_imported: 'Библиотека успешно импортирована!',
+
+        // Onboarding Modal
+        welcome_title: 'Добро пожаловать!',
+        welcome_subtitle: 'Войдите в профиль, чтобы ваша история, плейлисты и любимые треки сохранялись везде.',
+        wf_fast_title: 'Быстрый и лёгкий плеер',
+        wf_fast_desc: 'Всего ~100 МБ оперативной памяти и ноль рекламы',
+        wf_history_title: 'Полное сохранение истории',
+        wf_history_desc: 'Все прослушанные треки автоматически сохраняются за вашим профилем',
+        wf_sync_title: 'Синхронизация YouTube и SoundCloud',
+        wf_sync_desc: 'Импортируйте свои треки прямо в плеер в 1 клик',
+        btn_welcome_signin: 'Войти / Зарегистрироваться',
+        btn_welcome_guest: '👤 Войти как гость',
+        toast_guest_welcome: 'Вы вошли как гость. Приятного прослушивания! 🎧'
     },
 
     en: {
@@ -469,7 +495,20 @@ const SOUNDFLOW_TRANSLATIONS = {
         toast_role_switched: 'Role switched to',
         toast_theme_applied: 'Banner theme applied!',
         toast_backup_exported: 'Library exported to file successfully',
-        toast_backup_imported: 'Library imported successfully!'
+        toast_backup_imported: 'Library imported successfully!',
+
+        // Onboarding Modal
+        welcome_title: 'Welcome!',
+        welcome_subtitle: 'Sign in so your history, playlists, and favorites stay synced everywhere.',
+        wf_fast_title: 'Fast & Ultra-Light Player',
+        wf_fast_desc: 'Only ~100 MB RAM usage and zero ads',
+        wf_history_title: 'Full History Persistence',
+        wf_history_desc: 'All listened tracks are permanently saved to your profile',
+        wf_sync_title: 'YouTube & SoundCloud Sync',
+        wf_sync_desc: 'Import your music directly into the player in 1 click',
+        btn_welcome_signin: 'Sign In / Register',
+        btn_welcome_guest: '👤 Continue as Guest',
+        toast_guest_welcome: 'You have entered as a guest. Enjoy listening! 🎧'
     },
 
     es: {
@@ -619,7 +658,20 @@ const SOUNDFLOW_TRANSLATIONS = {
         toast_role_switched: 'Rol cambiado a',
         toast_theme_applied: '¡Tema de portada aplicado!',
         toast_backup_exported: 'Biblioteca exportada con éxito',
-        toast_backup_imported: '¡Biblioteca importada con éxito!'
+        toast_backup_imported: '¡Biblioteca importada con éxito!',
+
+        // Onboarding Modal
+        welcome_title: '¡Bienvenido!',
+        welcome_subtitle: 'Inicia sesión para sincronizar tu historial, listas y favoritos en todas partes.',
+        wf_fast_title: 'Reproductor rápido y ligero',
+        wf_fast_desc: 'Solo ~100 MB de RAM y cero anuncios',
+        wf_history_title: 'Historial persistente',
+        wf_history_desc: 'Todas las canciones escuchadas se guardan en tu perfil',
+        wf_sync_title: 'Sincronización YouTube y SoundCloud',
+        wf_sync_desc: 'Importa tus pistas directamente al reproductor en 1 clic',
+        btn_welcome_signin: 'Iniciar sesión / Registrarse',
+        btn_welcome_guest: '👤 Continuar como invitado',
+        toast_guest_welcome: 'Has entrado como invitado. ¡Disfruta escuchando! 🎧'
     }
 };
 

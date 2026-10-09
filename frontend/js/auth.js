@@ -253,6 +253,10 @@ class SoundFlowAuth {
             const profileNavItem = document.getElementById('nav-item-profile');
             if (profileNavItem) profileNavItem.style.display = 'flex';
 
+            // Hide onboarding modal
+            const obModal = document.getElementById('modal-welcome-onboarding');
+            if (obModal) obModal.style.display = 'none';
+
             // Bind user library in backend
             if (window.pywebview && window.pywebview.api) {
                 const userInfo = {
