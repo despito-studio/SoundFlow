@@ -24,34 +24,17 @@ class SystemStats:
             self.trim_memory()
 
     def trim_memory(self):
-        """Flushes unneeded working set memory from Python and child WebView2 processes."""
-        trimmed_count = 1
+        """Flushes unneeded working set memory from Python process without disrupting audio services."""
         try:
             gc.collect()
-            # Trim Python process
+            # Trim Python process working set
             ctypes.windll.psapi.EmptyWorkingSet(ctypes.windll.kernel32.GetCurrentProcess())
-
-            # Trim child processes (msedgewebview2)
-            PROCESS_QUERY_INFORMATION = 0x0400
-            PROCESS_SET_QUOTA = 0x0100
-            desired_access = PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA
-
-            children = self.process.children(recursive=True)
-            for child in children:
-                try:
-                    h_proc = ctypes.windll.kernel32.OpenProcess(desired_access, False, child.pid)
-                    if h_proc:
-                        ctypes.windll.psapi.EmptyWorkingSet(h_proc)
-                        ctypes.windll.kernel32.CloseHandle(h_proc)
-                        trimmed_count += 1
-                except Exception:
-                    pass
             self._last_trim = time.time()
         except Exception:
             pass
         stats = self.get_stats()
         stats["success"] = True
-        stats["trimmed_processes"] = trimmed_count
+        stats["trimmed_processes"] = 1
         return stats
 
     def get_stats(self):

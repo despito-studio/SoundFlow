@@ -319,33 +319,41 @@ class MusicEngine:
         if not queries:
             queries.append(f"{title} similar songs")
 
+        cache_key = f"similar:{track_id or title}:{limit}"
+        now = time.time()
+        if cache_key in self.search_cache:
+            entry = self.search_cache[cache_key]
+            if now - entry.get("time", 0) < 1800:
+                return entry.get("results", [])
+
+        # Choose the single best search query to avoid locking backend
+        target_query = queries[0] if queries else f"{title} mix"
+
         candidates = []
         seen_titles = {clean_title.lower()}
         original_duration = track_info.get("duration", 0)
 
-        for q in queries:
+        found = self.search(target_query, source="all", limit=limit)
+        for item in found:
+            item_id = item.get("id")
+            item_title = item.get("title", "").strip()
+            norm_item_title = re.sub(r'[\(\[\{\]\}\)]', ' ', item_title.lower()).strip()
+
+            if item_id in exclude_set:
+                continue
+            if norm_item_title in seen_titles:
+                continue
+
+            # Avoid 1+ hour compilation sets if original track was a normal song (< 10 mins)
+            dur = item.get("duration", 0)
+            if original_duration and original_duration < 600 and dur > 1200:
+                continue
+
+            seen_titles.add(norm_item_title)
+            exclude_set.add(item_id)
+            candidates.append(item)
             if len(candidates) >= limit:
                 break
-            found = self.search(q, source="all", limit=limit)
-            for item in found:
-                item_id = item.get("id")
-                item_title = item.get("title", "").strip()
-                norm_item_title = re.sub(r'[\(\[\{\]\}\)]', ' ', item_title.lower()).strip()
 
-                if item_id in exclude_set:
-                    continue
-                if norm_item_title in seen_titles:
-                    continue
-
-                # Avoid 1+ hour compilation sets if original track was a normal song (< 10 mins)
-                dur = item.get("duration", 0)
-                if original_duration and original_duration < 600 and dur > 1200:
-                    continue
-
-                seen_titles.add(norm_item_title)
-                exclude_set.add(item_id)
-                candidates.append(item)
-                if len(candidates) >= limit:
-                    break
-
+        self.search_cache[cache_key] = {"results": candidates, "time": now}
         return candidates

@@ -1,12 +1,12 @@
 /**
  * SoundFlow Audio Playback Engine
- * Uses native HTML5 Audio element with direct progressive streaming, robust error-recovery,
- * seamless track transitions, and auto-refreshed stream caching.
+ * Uses native HTML5 Audio element with direct progressive streaming,
+ * dedicated fresh Audio instance per track transition to prevent WASAPI endpoint detachment,
+ * robust error-recovery, and smart background prefetching.
  */
 class SoundFlowPlayer {
     constructor() {
-        this.audio = new Audio();
-        this.audio.preload = 'auto';
+        this.audio = null;
 
         this.queue = [];
         this.currentIndex = -1;
@@ -33,6 +33,16 @@ class SoundFlowPlayer {
 
         this.visualizer = new WaveformVisualizer('visualizer-canvas');
 
+        // Initialize persistent DOM audio element
+        this.audio = document.getElementById('soundflow-audio');
+        if (!this.audio) {
+            this.audio = document.createElement('audio');
+            this.audio.id = 'soundflow-audio';
+            this.audio.preload = 'auto';
+            document.body.appendChild(this.audio);
+        }
+        this.audio.volume = this.lastVolume;
+
         this.setupAudioListeners();
         this.setupMediaSession();
     }
@@ -43,6 +53,8 @@ class SoundFlowPlayer {
     }
 
     setupAudioListeners() {
+        if (!this.audio) return;
+
         this.audio.addEventListener('play', () => {
             this.visualizer.start();
             this.updatePlayPauseUI(true);
@@ -66,19 +78,17 @@ class SoundFlowPlayer {
         });
 
         this.audio.addEventListener('error', (e) => {
-            // Ignore reset / unmount events with empty src
             const src = this.audio.currentSrc || this.audio.src || '';
             if (!src || src.endsWith('/about:blank') || src === window.location.href) {
                 return;
             }
 
-            console.error('Audio element playback error:', e);
+            console.error('Audio playback error:', e);
             this.showLoading(false);
 
-            // Auto-retry once with a force-refreshed direct stream URL
             if (this.currentTrack && !this._lastErrorRetried && this.currentIndex >= 0) {
                 this._lastErrorRetried = true;
-                console.log('Stream error encountered. Attempting fresh URL retry...');
+                console.log('Stream error encountered. Retrying with fresh URL...');
                 setTimeout(() => {
                     this.playTrackAtIndex(this.currentIndex, true);
                 }, 400);
@@ -87,9 +97,9 @@ class SoundFlowPlayer {
 
             this._lastErrorRetried = false;
             if (window.soundFlowApp) {
-                window.soundFlowApp.showToast('Помилка аудіопотоку. Перехід до наступного треку...');
+                window.soundFlowApp.showToast('Помилка відтворення. Перехід до наступного треку...');
             }
-            setTimeout(() => this.next(), 900);
+            setTimeout(() => this.next(), 800);
         });
     }
 
@@ -156,18 +166,9 @@ class SoundFlowPlayer {
         this.showLoading(true);
 
         try {
-            // Safely unload previous audio stream before requesting the new one
-            try {
-                this.audio.pause();
-                this.audio.removeAttribute('src');
-                this.audio.load();
-            } catch (e) {
-                // Ignore transient pause/reset errors
-            }
-
             let streamUrl = null;
 
-            // Check if we already prefetched this track
+            // Check if prefetched
             if (!forceRefresh && this.prefetchedTrackId === track.id && this.prefetchedUrl) {
                 streamUrl = this.prefetchedUrl;
                 this.prefetchedUrl = null;
@@ -176,7 +177,7 @@ class SoundFlowPlayer {
                 streamUrl = await window.pywebview.api.get_stream(track, forceRefresh);
             }
 
-            // Check if user selected another track while resolving stream URL
+            // Check if superseded while fetching stream URL
             if (this.currentRequestId !== reqId) {
                 return;
             }
@@ -185,10 +186,21 @@ class SoundFlowPlayer {
                 throw new Error('Не вдалося отримати аудіопотік');
             }
 
-            // Reset media element to beginning with fresh source
-            this.audio.src = streamUrl;
-            this.audio.currentTime = 0;
-            this.audio.load();
+            // Use persistent DOM audio element with guaranteed continuous WASAPI binding
+            if (!this.audio) {
+                this.audio = document.getElementById('soundflow-audio') || new Audio();
+                this.setupAudioListeners();
+            }
+
+            // Ensure volume is applied properly
+            this.audio.volume = this.isMuted ? 0 : (this.lastVolume || 0.8);
+
+            // If same stream URL and not forceRefresh, simply replay from start
+            if (this.audio.src === streamUrl && !forceRefresh) {
+                this.audio.currentTime = 0;
+            } else {
+                this.audio.src = streamUrl;
+            }
 
             try {
                 const playPromise = this.audio.play();
@@ -200,7 +212,6 @@ class SoundFlowPlayer {
                     return;
                 }
                 if (playErr.name === 'AbortError') {
-                    // Ignored: superseded by a newer track selection
                     return;
                 }
                 throw playErr;
@@ -214,7 +225,7 @@ class SoundFlowPlayer {
             this.showLoading(false);
             this.updateMediaSession(track);
 
-            // Record in history & notify app
+            // Record history & notify app
             if (window.pywebview && window.pywebview.api) {
                 window.pywebview.api.record_history(track);
             }
@@ -228,7 +239,6 @@ class SoundFlowPlayer {
             }
             console.error('Play error:', err);
 
-            // If first attempt failed, retry once with force_refresh
             if (!forceRefresh && window.pywebview && window.pywebview.api) {
                 console.warn('Retrying playTrackAtIndex with force-refreshed stream...');
                 return this.playTrackAtIndex(index, true);
@@ -242,8 +252,7 @@ class SoundFlowPlayer {
     }
 
     async play() {
-        const src = this.audio.currentSrc || this.audio.src || '';
-        if (src && !src.endsWith('/about:blank') && src !== window.location.href) {
+        if (this.audio && this.audio.src && !this.audio.src.endsWith('/about:blank') && this.audio.src !== window.location.href) {
             try {
                 if (this.audio.ended) {
                     this.audio.currentTime = 0;
@@ -268,16 +277,18 @@ class SoundFlowPlayer {
     }
 
     pause() {
-        try {
-            this.audio.pause();
-        } catch (e) {}
+        if (this.audio) {
+            try {
+                this.audio.pause();
+            } catch (e) {}
+        }
     }
 
     togglePlayPause() {
-        if (this.audio.paused) {
-            this.play();
-        } else {
+        if (this.audio && !this.audio.paused) {
             this.pause();
+        } else {
+            this.play();
         }
     }
 
@@ -293,7 +304,6 @@ class SoundFlowPlayer {
             if (this.repeat === 'all') {
                 nextIdx = 0;
             } else if (this.autoplay && this.currentTrack && window.soundFlowApp) {
-                // Autoplay: fetch similar tracks and continue playing!
                 this.showLoading(true);
                 const added = await window.soundFlowApp.fetchAndAppendSimilarTracks(this.currentTrack);
                 this.showLoading(false);
@@ -303,7 +313,7 @@ class SoundFlowPlayer {
                 }
                 return;
             } else {
-                return; // Stop at end of queue
+                return;
             }
         }
 
@@ -311,8 +321,7 @@ class SoundFlowPlayer {
     }
 
     prev() {
-        if (this.audio.currentTime > 3) {
-            // Restart current track
+        if (this.audio && this.audio.currentTime > 3) {
             this.audio.currentTime = 0;
             return;
         }
@@ -385,25 +394,29 @@ class SoundFlowPlayer {
     }
 
     seek(timeSeconds) {
-        if (this.audio.duration && !isNaN(this.audio.duration)) {
+        if (this.audio && this.audio.duration && !isNaN(this.audio.duration)) {
             this.audio.currentTime = Math.max(0, Math.min(timeSeconds, this.audio.duration));
         }
     }
 
     setVolume(value) {
         const v = Math.max(0, Math.min(1, parseFloat(value)));
-        this.audio.volume = v;
+        this.lastVolume = v;
+        if (this.audio) {
+            this.audio.volume = v;
+        }
         if (v > 0) this.isMuted = false;
         this.updateVolumeUI();
     }
 
     toggleMute() {
-        if (this.isMuted || this.audio.volume === 0) {
-            this.audio.volume = this.lastVolume || 0.8;
+        if (this.isMuted || (this.audio && this.audio.volume === 0)) {
+            const v = this.lastVolume || 0.8;
+            if (this.audio) this.audio.volume = v;
             this.isMuted = false;
         } else {
-            this.lastVolume = this.audio.volume;
-            this.audio.volume = 0;
+            this.lastVolume = (this.audio ? this.audio.volume : 0.8) || 0.8;
+            if (this.audio) this.audio.volume = 0;
             this.isMuted = true;
         }
         this.updateVolumeUI();
@@ -411,18 +424,21 @@ class SoundFlowPlayer {
 
     onTrackEnded() {
         if (this.repeat === 'one') {
-            this.audio.currentTime = 0;
-            this.audio.play().catch(e => {
-                if (this.currentIndex >= 0) {
-                    this.playTrackAtIndex(this.currentIndex, true);
-                }
-            });
+            if (this.audio) {
+                this.audio.currentTime = 0;
+                this.audio.play().catch(e => {
+                    if (this.currentIndex >= 0) {
+                        this.playTrackAtIndex(this.currentIndex, true);
+                    }
+                });
+            }
         } else {
             this.next();
         }
     }
 
     onTimeUpdate() {
+        if (!this.audio) return;
         const current = this.audio.currentTime || 0;
         const duration = this.audio.duration || 0;
 
@@ -457,6 +473,7 @@ class SoundFlowPlayer {
     }
 
     onProgressUpdate() {
+        if (!this.audio) return;
         const buffer = document.getElementById('seekbar-buffer');
         if (!buffer || !this.audio.duration) return;
 
@@ -532,7 +549,8 @@ class SoundFlowPlayer {
             if (playIcon) playIcon.style.display = 'none';
             if (pauseIcon) pauseIcon.style.display = 'none';
         } else {
-            this.updatePlayPauseUI(!this.audio.paused);
+            const isPlaying = this.audio ? !this.audio.paused : false;
+            this.updatePlayPauseUI(isPlaying);
         }
     }
 
@@ -541,9 +559,10 @@ class SoundFlowPlayer {
         const highIcon = document.getElementById('vol-high-icon');
         const muteIcon = document.getElementById('vol-mute-icon');
 
-        if (slider) slider.value = this.audio.volume;
+        const curVol = this.audio ? this.audio.volume : this.lastVolume;
+        if (slider) slider.value = curVol;
 
-        const isZero = this.audio.volume === 0 || this.isMuted;
+        const isZero = curVol === 0 || this.isMuted;
         if (highIcon) highIcon.style.display = isZero ? 'none' : 'block';
         if (muteIcon) muteIcon.style.display = isZero ? 'block' : 'none';
     }

@@ -519,7 +519,12 @@ class SoundFlowApp {
             row.addEventListener('click', (e) => {
                 if (e.target.closest('[data-action]')) return;
                 if (this.player.currentTrack && this.player.currentTrack.id === track.id) {
-                    this.player.togglePlayPause();
+                    if (this.player.audio) {
+                        this.player.audio.currentTime = 0;
+                        this.player.play();
+                    } else {
+                        this.player.playTrackAtIndex(idx);
+                    }
                     return;
                 }
                 if (this.currentView === 'search') {
@@ -831,23 +836,29 @@ class SoundFlowApp {
     async playFromSearch(selectedTrack, searchTracks = [], selectedIdx = 0) {
         if (!selectedTrack) return;
 
-        // If clicking the track that is already playing or loaded, toggle play/pause
+        // If clicking the track that is already playing, replay it from beginning
         if (this.player.currentTrack && this.player.currentTrack.id === selectedTrack.id) {
-            this.player.togglePlayPause();
+            if (this.player.audio) {
+                this.player.audio.currentTime = 0;
+                this.player.play();
+            } else {
+                this.player.playTrackAtIndex(this.player.currentIndex);
+            }
             return;
         }
 
-        if (this.player.autoplay) {
-            // Immediately start playing the chosen track
-            this.player.setQueue([selectedTrack], 0);
-
-            const tFinding = window.soundFlowI18n ? window.soundFlowI18n.t('toast_finding_similar') : 'Підбираємо схожі пісні за тематикою... 🎵';
-            this.showToast(tFinding);
-
-            // Fetch and append similar tracks for continuous themed radio
-            await this.fetchAndAppendSimilarTracks(selectedTrack);
-        } else {
+        // Set queue to the current view's tracks so user has full queue continuity
+        if (Array.isArray(searchTracks) && searchTracks.length > 0) {
             this.player.setQueue(searchTracks, selectedIdx);
+        } else {
+            this.player.setQueue([selectedTrack], 0);
+        }
+
+        // Fetch similar tracks in background ONLY if queue has 1-2 tracks, without blocking audio playback
+        if (this.player.autoplay && this.player.queue.length <= 2) {
+            setTimeout(() => {
+                this.fetchAndAppendSimilarTracks(selectedTrack);
+            }, 1000);
         }
     }
 
