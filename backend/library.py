@@ -19,7 +19,22 @@ class LibraryManager:
                 self.base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
             os.makedirs(self.base_dir, exist_ok=True)
             self.data_path = os.path.join(self.base_dir, "library.json")
+        self.session_file = os.path.join(self.base_dir, "session.json")
         self.current_user_id = None
+        # Restore last active user session if exists
+        if os.path.exists(self.session_file):
+            try:
+                with open(self.session_file, "r", encoding="utf-8") as sf:
+                    sdata = json.load(sf)
+                    last_id = sdata.get("last_user_id")
+                    if last_id:
+                        user_file = os.path.join(self.base_dir, f"library_{last_id}.json")
+                        if os.path.exists(user_file):
+                            self.current_user_id = last_id
+                            self.data_path = user_file
+            except Exception:
+                pass
+
         self._ensure_dir()
         self.data = self._load()
 
@@ -45,13 +60,50 @@ class LibraryManager:
         return f"SF-{uuid.uuid4().hex[:6].upper()}"
 
     def set_user(self, user_id=None, user_info=None):
-        """Switches library to a specific user's file or back to guest."""
+        """Switches library to a specific user's file or back to guest with strict history preservation."""
         self.current_user_id = user_id
         if user_id:
             safe_id = "".join(c for c in str(user_id) if c.isalnum() or c in ("-", "_"))
-            self.data_path = os.path.join(self.base_dir, f"library_{safe_id}.json")
+            target_path = os.path.join(self.base_dir, f"library_{safe_id}.json")
+
+            # If this is user's first time logging in and guest library has history/likes, carry them over!
+            if not os.path.exists(target_path):
+                guest_path = os.path.join(self.base_dir, "library.json")
+                if os.path.exists(guest_path):
+                    try:
+                        with open(guest_path, "r", encoding="utf-8") as gf:
+                            gdata = json.load(gf)
+                        init_payload = {
+                            "liked_tracks": gdata.get("liked_tracks", []),
+                            "playlists": gdata.get("playlists", {}),
+                            "history": gdata.get("history", []),
+                            "settings": gdata.get("settings", {
+                                "volume": 0.8,
+                                "repeat": "off",
+                                "shuffle": False,
+                                "preferred_source": "all"
+                            }),
+                            "profile": {}
+                        }
+                        with open(target_path, "w", encoding="utf-8") as tf:
+                            json.dump(init_payload, tf, ensure_ascii=False, indent=2)
+                    except Exception:
+                        pass
+
+            self.data_path = target_path
+            try:
+                with open(self.session_file, "w", encoding="utf-8") as sf:
+                    json.dump({"last_user_id": safe_id}, sf, indent=2)
+            except Exception:
+                pass
         else:
             self.data_path = os.path.join(self.base_dir, "library.json")
+            try:
+                with open(self.session_file, "w", encoding="utf-8") as sf:
+                    json.dump({"last_user_id": None}, sf, indent=2)
+            except Exception:
+                pass
+
         self._ensure_dir()
         self.data = self._load()
 
@@ -444,3 +496,59 @@ class LibraryManager:
         except Exception:
             pass
         return False
+
+    def import_external_tracks(self, platform, tracks, identifier=None):
+        """Imports songs from YouTube/SoundCloud into user history and a dedicated playlist."""
+        if not tracks or not isinstance(tracks, list):
+            return {"success": False, "count": 0}
+
+        prof = self.data.setdefault("profile", {})
+        conn = prof.setdefault("connected_accounts", {})
+        if identifier:
+            conn[platform] = identifier
+
+        # 1. Add to history
+        history = self.data.setdefault("history", [])
+        existing_ids = {t.get("id") for t in history}
+        new_count = 0
+        for tr in tracks:
+            tr_id = tr.get("id")
+            if tr_id not in existing_ids:
+                existing_ids.add(tr_id)
+                tr_copy = dict(tr)
+                tr_copy["played_at"] = time.time()
+                history.insert(0, tr_copy)
+                new_count += 1
+        self.data["history"] = history[:200]
+
+        # 2. Add or update playlist
+        pl_name = "SoundCloud Імпорт" if platform == "soundcloud" else "YouTube Імпорт"
+        pl_id = f"pl_{platform}_imported"
+        playlists = self.data.setdefault("playlists", {})
+        if pl_id not in playlists:
+            playlists[pl_id] = {
+                "id": pl_id,
+                "name": pl_name,
+                "created_at": time.time(),
+                "tracks": tracks[:50]
+            }
+        else:
+            pl_tracks = playlists[pl_id].setdefault("tracks", [])
+            pl_ids = {t.get("id") for t in pl_tracks}
+            for tr in tracks:
+                if tr.get("id") not in pl_ids:
+                    pl_ids.add(tr.get("id"))
+                    pl_tracks.append(tr)
+
+        self._save()
+        return {
+            "success": True,
+            "count": len(tracks),
+            "new_in_history": new_count,
+            "playlist_id": pl_id,
+            "playlist_name": pl_name
+        }
+
+    def get_connected_accounts(self):
+        return self.data.setdefault("profile", {}).setdefault("connected_accounts", {})
+

@@ -359,3 +359,135 @@ class MusicEngine:
 
         self.search_cache[cache_key] = {"results": candidates, "time": now}
         return candidates
+
+    def import_soundcloud_profile(self, identifier, limit=40):
+        """
+        Imports liked tracks and uploaded tracks from a SoundCloud user profile.
+        Accepts: username or full URL (e.g. 'nocopyrightsounds' or 'https://soundcloud.com/nocopyrightsounds').
+        """
+        if not identifier or not identifier.strip():
+            return []
+
+        clean = identifier.strip().rstrip('/')
+        if not clean.startswith('http'):
+            clean = f'https://soundcloud.com/{clean}'
+
+        # Try likes first, then tracks
+        targets = [f'{clean}/likes', f'{clean}/tracks', clean]
+        collected = []
+        seen_urls = set()
+
+        opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'playlistend': limit,
+            'ignoreerrors': True
+        }
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            for target_url in targets:
+                if len(collected) >= limit:
+                    break
+                try:
+                    info = ydl.extract_info(target_url, download=False)
+                    if not info:
+                        continue
+                    entries = info.get('entries') or ([info] if info.get('url') else [])
+                    for e in entries:
+                        if not e or not isinstance(e, dict):
+                            continue
+                        track_url = e.get('url') or e.get('webpage_url')
+                        if not track_url or track_url in seen_urls:
+                            continue
+                        seen_urls.add(track_url)
+
+                        title = e.get('title') or 'SoundCloud Track'
+                        uploader = e.get('uploader') or e.get('artist') or 'SoundCloud'
+                        duration = int(e.get('duration') or 0)
+                        thumb = e.get('thumbnail') or ''
+                        track_id = f"sc_{hash(track_url) & 0xffffffff}"
+
+                        collected.append({
+                            'id': track_id,
+                            'title': title,
+                            'artist': uploader,
+                            'duration': duration,
+                            'thumbnail': thumb,
+                            'source': 'soundcloud',
+                            'source_url': track_url,
+                            'imported_from': 'soundcloud'
+                        })
+                        if len(collected) >= limit:
+                            break
+                except Exception as ex:
+                    print(f"Error importing from {target_url}: {ex}")
+
+        return collected
+
+    def import_youtube_profile(self, identifier, limit=40):
+        """
+        Imports tracks from a YouTube channel, handle, or playlist URL.
+        Accepts: handle (@username), channel URL, or playlist URL.
+        """
+        if not identifier or not identifier.strip():
+            return []
+
+        clean = identifier.strip()
+        if 'playlist?list=' in clean:
+            targets = [clean]
+        elif clean.startswith('@'):
+            targets = [f'https://www.youtube.com/{clean}/videos', f'https://www.youtube.com/{clean}']
+        elif 'youtube.com' in clean or 'youtu.be' in clean:
+            targets = [clean if '/videos' in clean else f"{clean.rstrip('/')}/videos", clean]
+        else:
+            targets = [f'https://www.youtube.com/@{clean}/videos', f'https://www.youtube.com/@{clean}']
+
+        collected = []
+        seen_ids = set()
+
+        opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'playlistend': limit,
+            'ignoreerrors': True
+        }
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            for target_url in targets:
+                if len(collected) >= limit:
+                    break
+                try:
+                    info = ydl.extract_info(target_url, download=False)
+                    if not info:
+                        continue
+                    entries = info.get('entries') or ([info] if info.get('id') else [])
+                    for e in entries:
+                        if not e or not isinstance(e, dict):
+                            continue
+                        yt_id = e.get('id')
+                        if not yt_id or yt_id in seen_ids:
+                            continue
+                        seen_ids.add(yt_id)
+
+                        title = e.get('title') or 'YouTube Music'
+                        uploader = e.get('uploader') or e.get('channel') or 'YouTube'
+                        duration = int(e.get('duration') or 0)
+                        thumb = e.get('thumbnail') or f"https://i.ytimg.com/vi/{yt_id}/hqdefault.jpg"
+
+                        collected.append({
+                            'id': f"yt_{yt_id}",
+                            'title': title,
+                            'artist': uploader,
+                            'duration': duration,
+                            'thumbnail': thumb,
+                            'source': 'youtube',
+                            'source_url': f"https://www.youtube.com/watch?v={yt_id}",
+                            'imported_from': 'youtube'
+                        })
+                        if len(collected) >= limit:
+                            break
+                except Exception as ex:
+                    print(f"Error importing from {target_url}: {ex}")
+
+        return collected
+

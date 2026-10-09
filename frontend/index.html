@@ -514,6 +514,20 @@
                                             </div>
                                         </div>
                                     </div>
+
+                                    <!-- Perk 7: Connect YouTube & SoundCloud -->
+                                    <div class="admin-perk-card">
+                                        <div class="perk-icon-box orange">🔗</div>
+                                        <div class="perk-info">
+                                            <h4>Синхронізація YouTube та SoundCloud</h4>
+                                            <p>Підключіть ваші профілі YouTube та SoundCloud, щоб автоматично завантажити всі прослухані та улюблені пісні.</p>
+                                            <div class="admin-btn-row">
+                                                <button class="btn-primary-sm" id="btn-open-connect-modal">
+                                                    <span>🔗 Підключити акаунти</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -945,6 +959,105 @@
                         <div class="t-line info">[SECURITY] Owner Console Ready.</div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: WELCOME ONBOARDING (FIRST RUN / LOGIN AS GUEST) -->
+    <div class="modal-overlay" id="modal-welcome-onboarding" style="display: none;">
+        <div class="modal-card welcome-modal-card">
+            <div class="welcome-header">
+                <div class="welcome-badge">🎵 SoundFlow</div>
+                <h2 class="welcome-title">Ласкаво просимо!</h2>
+                <p class="welcome-subtitle">Увійдіть у профіль, щоб ваша історія, плейлисти та вподобання зберігалися скрізь.</p>
+            </div>
+            <div class="welcome-features">
+                <div class="wf-item">
+                    <span class="wf-icon">⚡</span>
+                    <div class="wf-text">
+                        <strong>Швидкий і легкий плеєр</strong>
+                        <p>Лише ~100 МБ оперативної пам'яті та нуль реклами</p>
+                    </div>
+                </div>
+                <div class="wf-item">
+                    <span class="wf-icon">💾</span>
+                    <div class="wf-text">
+                        <strong>Повне збереження історії</strong>
+                        <p>Всі прослухані треки автоматично зберігаються за вашим профілем</p>
+                    </div>
+                </div>
+                <div class="wf-item">
+                    <span class="wf-icon">🔗</span>
+                    <div class="wf-text">
+                        <strong>Синхронізація YouTube та SoundCloud</strong>
+                        <p>Імпортуйте свої треки прямо в плеєр в 1 клік</p>
+                    </div>
+                </div>
+            </div>
+            <div class="welcome-actions">
+                <button class="btn-welcome-primary" id="btn-welcome-signin">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                        <polyline points="10 17 15 12 10 7"></polyline>
+                        <line x1="15" y1="12" x2="3" y2="12"></line>
+                    </svg>
+                    <span>Увійти / Зареєструватися</span>
+                </button>
+                <button class="btn-welcome-guest" id="btn-welcome-guest">
+                    <span>👤 Увійти як гість</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: CONNECT ACCOUNTS (YOUTUBE & SOUNDCLOUD) -->
+    <div class="modal-overlay" id="modal-connect-accounts" style="display: none;">
+        <div class="modal-card connect-modal-card">
+            <div class="connect-modal-header">
+                <h3>🔗 Підключення YouTube та SoundCloud</h3>
+                <button class="modal-close-x" id="btn-close-connect-modal">✕</button>
+            </div>
+            <p class="connect-intro-text">
+                Введіть нікнейм або посилання вашого профілю, і SoundFlow автоматично імпортує всі ваші пісні в історію та плейлисти:
+            </p>
+
+            <!-- SoundCloud Box -->
+            <div class="connect-service-box">
+                <div class="cs-header">
+                    <div class="cs-brand sc-brand">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M1.175 12.225c-.053 0-.097.042-.1.096l-.37 3.328c-.006.054.037.1.09.102.054.002.1-.037.102-.09l.37-3.33a.099.099 0 0 0-.092-.106zm1.09-.947c-.053 0-.098.043-.102.096l-.364 4.275c-.004.053.038.1.092.102.053.003.1-.038.102-.092l.365-4.275a.1.1 0 0 0-.093-.106zm1.107-.442c-.055 0-.1.043-.103.097l-.36 4.717c-.004.054.038.1.092.103.054.004.1-.038.103-.092l.36-4.718a.1.1 0 0 0-.092-.107zm1.114.394c-.054 0-.1.043-.104.098l-.348 4.323c-.004.054.039.1.092.104.054.004.1-.039.104-.092l.348-4.324a.1.1 0 0 0-.092-.11zm20.514 1.15c0-1.87-1.517-3.38-3.384-3.38-.456 0-.888.093-1.282.26a4.57 4.57 0 0 0-4.502-3.76c-.32 0-.632.036-.935.102-.098.022-.163.11-.157.21l.36 9.87c.003.076.066.136.142.136h9.758c1.867 0 3.384-1.516 3.384-3.384z"/>
+                        </svg>
+                        <span>SoundCloud</span>
+                    </div>
+                    <span class="cs-status" id="status-sc-connected">Не підключено</span>
+                </div>
+                <div class="cs-input-row">
+                    <input type="text" id="input-sc-username" placeholder="Нікнейм або посилання (напр. nocopyrightsounds)">
+                    <button class="btn-primary" id="btn-import-sc">Імпортувати</button>
+                </div>
+            </div>
+
+            <!-- YouTube Box -->
+            <div class="connect-service-box">
+                <div class="cs-header">
+                    <div class="cs-brand yt-brand">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                        </svg>
+                        <span>YouTube / YouTube Music</span>
+                    </div>
+                    <span class="cs-status" id="status-yt-connected">Не підключено</span>
+                </div>
+                <div class="cs-input-row">
+                    <input type="text" id="input-yt-channel" placeholder="Канал @handle або посилання на плейлист">
+                    <button class="btn-primary" id="btn-import-yt">Імпортувати</button>
+                </div>
+            </div>
+
+            <div class="connect-modal-actions">
+                <button class="btn-secondary" id="btn-sync-all-accounts">🔄 Синхронізувати всі</button>
+                <button class="btn-primary" id="btn-done-connect-modal">Готово</button>
             </div>
         </div>
     </div>

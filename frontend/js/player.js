@@ -513,11 +513,12 @@ class SoundFlowPlayer {
             seekbar.value = pct;
             progress.style.width = `${pct}%`;
 
-            // Pre-fetch next track or pre-fetch similar tracks if 20s remaining
-            if (duration - current < 20) {
+            // Pre-fetch next track or pre-fetch similar tracks if 25s remaining
+            if (duration - current < 25) {
                 if (this.currentIndex < this.queue.length - 1 && !this.prefetchedUrl) {
                     this.prefetchNextTrack();
-                } else if (this.currentIndex === this.queue.length - 1 && this.autoplay && !this.isFetchingSimilar && window.soundFlowApp) {
+                }
+                if (this.currentIndex >= this.queue.length - 2 && this.autoplay && !this.isFetchingSimilar && window.soundFlowApp) {
                     if (this._prefetchedSimilarTrackId !== this.currentTrack?.id) {
                         this._prefetchedSimilarTrackId = this.currentTrack?.id;
                         this.isFetchingSimilar = true;

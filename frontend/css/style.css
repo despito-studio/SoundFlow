@@ -3283,3 +3283,293 @@ body.user-logged-in #nav-item-profile {
 .t-line.error { color: #ef4444; }
 .t-line.info { color: #38bdf8; }
 .t-line.warning { color: #f59e0b; }
+
+/* ==========================================================================
+   ONBOARDING & CONNECT ACCOUNTS MODALS
+   ========================================================================== */
+
+/* Welcome Modal */
+.welcome-modal-card {
+    width: 460px;
+    max-width: 92vw;
+    background: linear-gradient(170deg, #181d2e 0%, #10131d 100%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
+    padding: 32px 30px 28px;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(255, 45, 117, 0.15);
+    text-align: center;
+    gap: 20px;
+    animation: welcomeFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes welcomeFadeIn {
+    from { opacity: 0; transform: scale(0.94) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.welcome-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.welcome-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 14px;
+    background: linear-gradient(135deg, rgba(255, 107, 53, 0.2), rgba(255, 45, 117, 0.2));
+    border: 1px solid rgba(255, 45, 117, 0.35);
+    border-radius: 20px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #ff5277;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.welcome-title {
+    font-size: 1.65rem;
+    font-weight: 800;
+    color: #fff;
+    margin: 4px 0 0;
+    letter-spacing: -0.5px;
+}
+
+.welcome-subtitle {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    margin: 0;
+}
+
+.welcome-features {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    padding: 14px 16px;
+}
+
+.wf-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.wf-icon {
+    font-size: 1.2rem;
+    line-height: 1.2;
+    flex-shrink: 0;
+    padding-top: 2px;
+}
+
+.wf-text strong {
+    display: block;
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 2px;
+}
+
+.wf-text p {
+    font-size: 0.77rem;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.35;
+}
+
+.welcome-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.btn-welcome-primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: linear-gradient(135deg, #ff6b35 0%, #ff2d75 100%);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 20px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 20px rgba(255, 45, 117, 0.35);
+}
+
+.btn-welcome-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(255, 45, 117, 0.5);
+    filter: brightness(1.08);
+}
+
+.btn-welcome-guest {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 10px 18px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-welcome-guest:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Connect Accounts Modal */
+.connect-modal-card {
+    width: 480px;
+    max-width: 92vw;
+    background: #141824;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 18px;
+    padding: 24px 26px;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
+    gap: 16px;
+}
+
+.connect-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.connect-modal-header h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+}
+
+.modal-close-x {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.15s;
+}
+
+.modal-close-x:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.connect-intro-text {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.4;
+}
+
+.connect-service-box {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.cs-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.cs-brand.sc-brand svg {
+    color: #ff5500;
+}
+
+.cs-brand.yt-brand svg {
+    color: #ff0000;
+}
+
+.cs-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+}
+
+.cs-status.connected {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.cs-status.loading {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.cs-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.cs-input-row input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #fff;
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.cs-input-row input:focus {
+    border-color: var(--accent-orange);
+}
+
+.cs-input-row button {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+}
+
+.connect-modal-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+

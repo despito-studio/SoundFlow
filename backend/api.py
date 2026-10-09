@@ -113,3 +113,33 @@ class AppApi:
 
     def trim_memory(self):
         return self.stats.trim_memory()
+
+    def import_external_profile(self, platform, identifier):
+        platform = str(platform).lower().strip()
+        if platform == "soundcloud":
+            tracks = self.engine.import_soundcloud_profile(identifier)
+        elif platform in ("youtube", "yt"):
+            tracks = self.engine.import_youtube_profile(identifier)
+        else:
+            return {"success": False, "error": f"Непідтримувана платформа: {platform}"}
+
+        if not tracks:
+            return {"success": False, "error": "Не знайдено пісень для імпорту або профіль недоступний"}
+
+        return self.library.import_external_tracks(platform, tracks, identifier)
+
+    def get_connected_accounts(self):
+        return self.library.get_connected_accounts()
+
+    def sync_connected_accounts(self):
+        accs = self.library.get_connected_accounts()
+        results = {}
+        total_imported = 0
+        for platform, ident in accs.items():
+            if ident:
+                res = self.import_external_profile(platform, ident)
+                results[platform] = res
+                if res.get("success"):
+                    total_imported += res.get("count", 0)
+        return {"success": True, "total_imported": total_imported, "details": results}
+

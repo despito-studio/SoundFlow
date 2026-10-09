@@ -32,9 +32,14 @@ class SoundFlowApp {
         this.setupGenreChips();
         this.setupPlayerControls();
         this.setupModals();
+        this.setupOnboardingModal();
+        this.setupConnectAccountsModal();
         this.setupKeyboardShortcuts();
         this.setupStatsUpdater();
         this.setupProfile();
+
+        // Check onboarding after slight delay so auth can initialize
+        setTimeout(() => this.checkOnboarding(), 1000);
 
         // Wait for pywebview API to be ready
         window.addEventListener('pywebviewready', async () => {
@@ -642,6 +647,15 @@ class SoundFlowApp {
             }
             this.updateSidebarPlaylists();
             this.updateLikedBadge();
+
+            // Auto-refresh active view to reflect user switch immediately
+            if (this.currentView === 'history') {
+                this.renderHistoryView();
+            } else if (this.currentView === 'liked') {
+                this.renderLikedView();
+            } else if (this.currentView === 'profile') {
+                this.updateProfileUI();
+            }
         }
     }
 
@@ -765,6 +779,12 @@ class SoundFlowApp {
     }
 
     onTrackChange(track) {
+        // Record in local library history immediately
+        if (track && track.id) {
+            if (!this.library.history) this.library.history = [];
+            this.library.history = [track, ...this.library.history.filter(t => t.id !== track.id)].slice(0, 150);
+        }
+
         // Update liked state on player bar
         const playerLikeBtn = document.getElementById('player-like-btn');
         if (playerLikeBtn) {
@@ -772,14 +792,14 @@ class SoundFlowApp {
         }
         this.updateQueueDrawer();
 
-        // If autoplay is on and there are no upcoming tracks in queue, auto-fetch similar tracks!
-        if (this.player.autoplay && this.player.currentIndex >= this.player.queue.length - 1) {
+        // Automatically fetch similar tracks matching theme/genre/artist behind this song!
+        if (this.player.autoplay && (this.player.currentIndex >= this.player.queue.length - 2 || this.player.queue.length <= 2)) {
             this.fetchAndAppendSimilarTracks(track);
         }
 
         // If currently in history view, refresh
         if (this.currentView === 'history') {
-            this.loadLibrary().then(() => this.renderHistoryView());
+            this.renderHistoryView();
         }
     }
 
@@ -847,19 +867,11 @@ class SoundFlowApp {
             return;
         }
 
-        // Set queue to the current view's tracks so user has full queue continuity
-        if (Array.isArray(searchTracks) && searchTracks.length > 0) {
-            this.player.setQueue(searchTracks, selectedIdx);
-        } else {
-            this.player.setQueue([selectedTrack], 0);
-        }
+        // When a user selects a specific song from search, play it and build a radio of similar music!
+        this.player.setQueue([selectedTrack], 0);
 
-        // Fetch similar tracks in background ONLY if queue has 1-2 tracks, without blocking audio playback
-        if (this.player.autoplay && this.player.queue.length <= 2) {
-            setTimeout(() => {
-                this.fetchAndAppendSimilarTracks(selectedTrack);
-            }, 1000);
-        }
+        // Immediately fetch similar tracks in background so the next song is +- similar theme!
+        this.fetchAndAppendSimilarTracks(selectedTrack);
     }
 
     async fetchAndAppendSimilarTracks(track) {
@@ -989,6 +1001,214 @@ class SoundFlowApp {
         document.getElementById('btn-clear-terminal')?.addEventListener('click', () => {
             const term = document.getElementById('console-terminal-log');
             if (term) term.innerHTML = '';
+        });
+    }
+
+    // ==========================================
+    // ONBOARDING MODAL (WELCOME / GUEST LOGIN)
+    // ==========================================
+    setupOnboardingModal() {
+        const modal = document.getElementById('modal-welcome-onboarding');
+        const btnSignIn = document.getElementById('btn-welcome-signin');
+        const btnGuest = document.getElementById('btn-welcome-guest');
+
+        btnSignIn?.addEventListener('click', () => {
+            if (modal) modal.style.display = 'none';
+            localStorage.setItem('soundflow_onboarding_completed', 'true');
+            sessionStorage.setItem('soundflow_onboarding_dismissed', 'true');
+            if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
+                window.soundFlowAuth.openSignIn();
+            }
+        });
+
+        btnGuest?.addEventListener('click', () => {
+            if (modal) modal.style.display = 'none';
+            localStorage.setItem('soundflow_onboarding_completed', 'true');
+            sessionStorage.setItem('soundflow_onboarding_dismissed', 'true');
+            this.showToast('Ви увійшли як гість. Приємного прослуховування! 🎧');
+        });
+    }
+
+    checkOnboarding() {
+        // If user is already authenticated via Clerk, do not show onboarding
+        const isLoggedIn = window.soundFlowAuth && window.soundFlowAuth.isLoggedIn && window.soundFlowAuth.isLoggedIn();
+        if (isLoggedIn) return;
+
+        // If user already dismissed/completed onboarding previously, don't show
+        const dismissed = sessionStorage.getItem('soundflow_onboarding_dismissed') || localStorage.getItem('soundflow_onboarding_completed');
+        if (dismissed) return;
+
+        const modal = document.getElementById('modal-welcome-onboarding');
+        if (modal) {
+            modal.style.display = 'flex';
+        }
+    }
+
+    // ==========================================
+    // CONNECT ACCOUNTS (YOUTUBE & SOUNDCLOUD)
+    // ==========================================
+    setupConnectAccountsModal() {
+        const modal = document.getElementById('modal-connect-accounts');
+        const btnOpen = document.getElementById('btn-open-connect-modal');
+        const btnClose = document.getElementById('btn-close-connect-modal');
+        const btnDone = document.getElementById('btn-done-connect-modal');
+        const btnImportSc = document.getElementById('btn-import-sc');
+        const btnImportYt = document.getElementById('btn-import-yt');
+        const btnSyncAll = document.getElementById('btn-sync-all-accounts');
+
+        const inputSc = document.getElementById('input-sc-username');
+        const inputYt = document.getElementById('input-yt-channel');
+        const statusSc = document.getElementById('status-sc-connected');
+        const statusYt = document.getElementById('status-yt-connected');
+
+        const refreshConnectedStatus = async () => {
+            if (!window.pywebview || !window.pywebview.api) return;
+            try {
+                const accs = await window.pywebview.api.get_connected_accounts();
+                if (accs) {
+                    if (accs.soundcloud) {
+                        if (inputSc) inputSc.value = accs.soundcloud;
+                        if (statusSc) {
+                            statusSc.textContent = `Підключено (${accs.soundcloud})`;
+                            statusSc.className = 'cs-status connected';
+                        }
+                    }
+                    if (accs.youtube) {
+                        if (inputYt) inputYt.value = accs.youtube;
+                        if (statusYt) {
+                            statusYt.textContent = `Підключено (${accs.youtube})`;
+                            statusYt.className = 'cs-status connected';
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('Error fetching connected accounts:', err);
+            }
+        };
+
+        btnOpen?.addEventListener('click', () => {
+            if (modal) modal.style.display = 'flex';
+            refreshConnectedStatus();
+        });
+
+        btnClose?.addEventListener('click', () => {
+            if (modal) modal.style.display = 'none';
+        });
+
+        btnDone?.addEventListener('click', () => {
+            if (modal) modal.style.display = 'none';
+        });
+
+        // Import SoundCloud
+        btnImportSc?.addEventListener('click', async () => {
+            const ident = inputSc ? inputSc.value.trim() : '';
+            if (!ident) {
+                this.showToast('Введіть нікнейм або посилання SoundCloud ⚠️');
+                return;
+            }
+
+            if (!window.pywebview || !window.pywebview.api) return;
+
+            btnImportSc.disabled = true;
+            btnImportSc.textContent = 'Імпорт...';
+            if (statusSc) {
+                statusSc.textContent = 'Синхронізація...';
+                statusSc.className = 'cs-status loading';
+            }
+
+            try {
+                const res = await window.pywebview.api.import_external_profile('soundcloud', ident);
+                if (res && res.success) {
+                    if (statusSc) {
+                        statusSc.textContent = `Підключено (${ident})`;
+                        statusSc.className = 'cs-status connected';
+                    }
+                    await this.loadLibrary();
+                    this.showToast(`Успішно імпортовано ${res.count} треків з SoundCloud! 🎵`);
+                    if (res.playlist_id) {
+                        this.switchView('playlist', res.playlist_id);
+                    }
+                } else {
+                    if (statusSc) {
+                        statusSc.textContent = 'Помилка';
+                        statusSc.className = 'cs-status';
+                    }
+                    this.showToast(res?.error || 'Не вдалося завантажити треки з SoundCloud');
+                }
+            } catch (err) {
+                this.showToast('Помилка підключення до SoundCloud');
+            } finally {
+                btnImportSc.disabled = false;
+                btnImportSc.textContent = 'Імпортувати';
+            }
+        });
+
+        // Import YouTube
+        btnImportYt?.addEventListener('click', async () => {
+            const ident = inputYt ? inputYt.value.trim() : '';
+            if (!ident) {
+                this.showToast('Введіть канал, @handle або плейлист YouTube ⚠️');
+                return;
+            }
+
+            if (!window.pywebview || !window.pywebview.api) return;
+
+            btnImportYt.disabled = true;
+            btnImportYt.textContent = 'Імпорт...';
+            if (statusYt) {
+                statusYt.textContent = 'Синхронізація...';
+                statusYt.className = 'cs-status loading';
+            }
+
+            try {
+                const res = await window.pywebview.api.import_external_profile('youtube', ident);
+                if (res && res.success) {
+                    if (statusYt) {
+                        statusYt.textContent = `Підключено (${ident})`;
+                        statusYt.className = 'cs-status connected';
+                    }
+                    await this.loadLibrary();
+                    this.showToast(`Успішно імпортовано ${res.count} треків з YouTube! 🎬`);
+                    if (res.playlist_id) {
+                        this.switchView('playlist', res.playlist_id);
+                    }
+                } else {
+                    if (statusYt) {
+                        statusYt.textContent = 'Помилка';
+                        statusYt.className = 'cs-status';
+                    }
+                    this.showToast(res?.error || 'Не вдалося завантажити треки з YouTube');
+                }
+            } catch (err) {
+                this.showToast('Помилка підключення до YouTube');
+            } finally {
+                btnImportYt.disabled = false;
+                btnImportYt.textContent = 'Імпортувати';
+            }
+        });
+
+        // Sync All Accounts
+        btnSyncAll?.addEventListener('click', async () => {
+            if (!window.pywebview || !window.pywebview.api) return;
+            btnSyncAll.disabled = true;
+            btnSyncAll.textContent = 'Синхронізація...';
+            this.showToast('Синхронізація всіх підключених акаунтів... 🔄');
+
+            try {
+                const res = await window.pywebview.api.sync_connected_accounts();
+                if (res && res.success) {
+                    await this.loadLibrary();
+                    await refreshConnectedStatus();
+                    this.showToast(`Оновлено! Імпортовано ${res.total_imported} треків 🚀`);
+                } else {
+                    this.showToast('Не вдалося синхронізувати акаунти');
+                }
+            } catch (err) {
+                this.showToast('Помилка синхронізації');
+            } finally {
+                btnSyncAll.disabled = false;
+                btnSyncAll.textContent = '🔄 Синхронізувати всі';
+            }
         });
     }
 
