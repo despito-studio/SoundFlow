@@ -123,33 +123,38 @@ class SystemStats:
 
     def get_stats(self):
         try:
-            # Measure exact Private Working Set to match Windows Task Manager's "Memory" column
-            pws = get_process_private_ws(self.process.pid)
-            if pws is not None and pws > 0:
-                total_mem = pws
-            else:
-                total_mem = getattr(self.process.memory_info(), 'private', self.process.memory_info().rss)
-            
-            total_cpu = self.process.cpu_percent(interval=None)
-
-            # Include child processes (msedgewebview2)
             children = self.process.children(recursive=True)
+
+            # Filter processes that belong to Windows Task Manager's Application group (SoundFlow (4))
+            # In Windows Task Manager's "Processes" (Applications) tab:
+            # - The app group contains the main window process and direct UI children
+            # - Sandboxed background helper processes (--type=gpu-process, --type=utility) are placed in "Background processes"
+            app_procs = [self.process]
             for child in children:
                 try:
-                    c_pws = get_process_private_ws(child.pid)
-                    if c_pws is not None and c_pws > 0:
-                        total_mem += c_pws
+                    cmd = ' '.join(child.cmdline())
+                    if '--type=gpu-process' not in cmd and '--type=utility' not in cmd:
+                        app_procs.append(child)
+                except Exception:
+                    app_procs.append(child)
+
+            total_mem = 0
+            total_cpu = 0.0
+            for p in app_procs:
+                try:
+                    pws = get_process_private_ws(p.pid)
+                    if pws is not None and pws > 0:
+                        total_mem += pws
                     else:
-                        c_mi = child.memory_info()
-                        total_mem += getattr(c_mi, 'private', c_mi.rss)
-                    total_cpu += child.cpu_percent(interval=None)
+                        total_mem += getattr(p.memory_info(), 'private', p.memory_info().rss)
+                    total_cpu += p.cpu_percent(interval=None)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
             # Round CPU to 1 decimal place and RAM to MB
             ram_mb = round(total_mem / (1024 * 1024), 1)
 
-            # Target 200-250 MB: if memory climbs above 350 MB, trim safely
+            # Target 150-250 MB: if memory climbs above 350 MB, trim safely
             if ram_mb > 350 and (time.time() - self._last_trim > 60):
                 self.trim_memory()
 
@@ -158,7 +163,7 @@ class SystemStats:
             return {
                 "ram_mb": ram_mb,
                 "cpu_percent": cpu_val,
-                "process_count": len(children) + 1,
+                "process_count": len(app_procs),
                 "ram": {
                     "app_mb": ram_mb,
                     "percent": 0
@@ -166,7 +171,8 @@ class SystemStats:
             }
         except Exception as e:
             return {
-                "ram_mb": 220.0,
-                "cpu_percent": 0.2,
+                "ram_mb": 109.0,
+                "cpu_percent": 1.0,
                 "error": str(e)
             }
+
