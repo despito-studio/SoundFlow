@@ -8,20 +8,8 @@ import webview.http
 from webview.util import abspath, is_app, is_local_url
 from backend.api import AppApi
 
-# Chromium & WebView2 memory and CPU optimization flags
-os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
-    "--autoplay-policy=no-user-gesture-required "
-    "--disable-features=Translate,OptimizationHints,MediaRouter,CalculateNativeWinOcclusion "
-    "--renderer-process-limit=1 "
-    "--process-per-site "
-    "--disable-gpu-shader-disk-cache "
-    "--disable-domain-reliability "
-    "--disable-component-update "
-    "--disable-speech-api "
-    "--disable-breakpad "
-    "--disable-print-preview "
-    "--disable-software-rasterizer"
-)
+# Chromium & WebView2 flags: ensure uninterrupted media autoplay
+os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--autoplay-policy=no-user-gesture-required"
 
 def _patch_pywebview_http():
     """

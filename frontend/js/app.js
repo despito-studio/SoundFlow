@@ -520,7 +520,7 @@ class SoundFlowApp {
                 if (e.target.closest('[data-action]')) return;
                 if (this.player.currentTrack && this.player.currentTrack.id === track.id) {
                     if (this.player.audio && !this.player.audio.error && !isNaN(this.player.audio.duration) && this.player.audio.duration > 0) {
-                        this.player.audio.currentTime = 0;
+                        try { this.player.audio.currentTime = 0; } catch(e) {}
                         this.player.play();
                     } else {
                         this.player.playTrackAtIndex(idx, true);
@@ -839,7 +839,7 @@ class SoundFlowApp {
         // If clicking the track that is already playing, replay it from beginning
         if (this.player.currentTrack && this.player.currentTrack.id === selectedTrack.id) {
             if (this.player.audio && !this.player.audio.error && !isNaN(this.player.audio.duration) && this.player.audio.duration > 0) {
-                this.player.audio.currentTime = 0;
+                try { this.player.audio.currentTime = 0; } catch(e) {}
                 this.player.play();
             } else {
                 this.player.playTrackAtIndex(this.player.currentIndex, true);

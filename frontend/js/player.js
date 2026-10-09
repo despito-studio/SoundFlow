@@ -41,6 +41,7 @@ class SoundFlowPlayer {
             this.audio.preload = 'auto';
             document.body.appendChild(this.audio);
         }
+        this.audio.muted = false;
         this.audio.volume = this.lastVolume;
 
         this.setupAudioListeners();
@@ -62,6 +63,15 @@ class SoundFlowPlayer {
 
         this.audio.addEventListener('playing', () => {
             this.showLoading(false);
+            if (this.audio) {
+                this.audio.muted = this.isMuted;
+                if (!this.isMuted) {
+                    const targetVol = this.lastVolume > 0 ? this.lastVolume : 0.8;
+                    if (this.audio.volume === 0 || isNaN(this.audio.volume)) {
+                        this.audio.volume = targetVol;
+                    }
+                }
+            }
             this.visualizer.start();
             this.updatePlayPauseUI(true);
         });
@@ -211,7 +221,8 @@ class SoundFlowPlayer {
                 this.setupAudioListeners();
             }
 
-            // Ensure volume is applied properly
+            // Ensure volume is applied properly and unmuted
+            this.audio.muted = this.isMuted;
             this.audio.volume = this.isMuted ? 0 : (this.lastVolume || 0.8);
 
             // Cleanly pause existing playback before source assignment
@@ -219,13 +230,15 @@ class SoundFlowPlayer {
                 this.audio.pause();
             } catch (e) {}
 
-            // Set new stream source
-            if (this.audio.src === streamUrl && !this.audio.error && !forceRefresh) {
-                this.audio.currentTime = 0;
-            } else {
+            // Assign stream source cleanly
+            if (this.audio.src !== streamUrl || this.audio.error || forceRefresh) {
                 this.audio.src = streamUrl;
-                this.audio.currentTime = 0;
-                this.audio.load();
+            } else {
+                try {
+                    if (!isNaN(this.audio.duration) && this.audio.duration > 0) {
+                        this.audio.currentTime = 0;
+                    }
+                } catch (e) {}
             }
 
             this._lastErrorRetried = false;
@@ -281,6 +294,10 @@ class SoundFlowPlayer {
 
     async play() {
         if (!this.audio) return;
+        this.audio.muted = this.isMuted;
+        if (!this.isMuted && (this.audio.volume === 0 || isNaN(this.audio.volume))) {
+            this.audio.volume = this.lastVolume > 0 ? this.lastVolume : 0.8;
+        }
         const src = this.audio.currentSrc || this.audio.src || '';
         if (src && !src.endsWith('/about:blank') && src !== window.location.href) {
             try {
@@ -433,8 +450,10 @@ class SoundFlowPlayer {
     }
 
     seek(timeSeconds) {
-        if (this.audio && this.audio.duration && !isNaN(this.audio.duration)) {
-            this.audio.currentTime = Math.max(0, Math.min(timeSeconds, this.audio.duration));
+        if (this.audio && this.audio.duration && !isNaN(this.audio.duration) && this.audio.readyState >= 1) {
+            try {
+                this.audio.currentTime = Math.max(0, Math.min(timeSeconds, this.audio.duration));
+            } catch (e) {}
         }
     }
 
