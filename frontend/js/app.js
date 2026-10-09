@@ -269,12 +269,17 @@ class SoundFlowApp {
             if (navigator.clipboard) {
                 navigator.clipboard.writeText(myId);
             }
-            this.showToast(`Ваш ID: ${myId} (скопійовано в буфер обміну) 📋`);
+            this.showToast(`Ваш ID: ${myId} (скопійовано в буфер) 📋`);
+            return true;
+        }
+
+        if (action === '/console' || action === '/root' || action === '/owner') {
+            this.openOwnerConsole();
             return true;
         }
 
         if (action === '/help' || action === '/cmd') {
-            this.showToast('Команди: /setrole <ID> <роль>, /admin <ID>, /myid, або Ctrl+Shift+R');
+            this.showToast('Команди: /console, /setrole <ID> <роль>, /myid, або Ctrl+Shift+C');
             return true;
         }
 
@@ -896,60 +901,217 @@ class SoundFlowApp {
             pickerModal.style.display = 'none';
         });
 
-        // Secret Role Manager Modal
-        const secretModal = document.getElementById('modal-secret-role');
-        document.getElementById('btn-cancel-secret-role')?.addEventListener('click', () => {
-            if (secretModal) secretModal.style.display = 'none';
+        // OWNER CONSOLE MODAL
+        const ownerConsoleModal = document.getElementById('modal-owner-console');
+        const authScreen = document.getElementById('console-auth-screen');
+        const mainScreen = document.getElementById('console-main-screen');
+        const masterInput = document.getElementById('input-console-master-key');
+        const authError = document.getElementById('console-auth-error');
+
+        document.getElementById('btn-close-owner-console')?.addEventListener('click', () => {
+            if (ownerConsoleModal) ownerConsoleModal.style.display = 'none';
         });
 
-        document.getElementById('btn-apply-secret-role')?.addEventListener('click', async () => {
-            const inputId = document.getElementById('input-secret-target-id');
-            const selectRole = document.getElementById('select-secret-target-role');
-            let targetId = inputId ? inputId.value.trim().toUpperCase() : '';
-            if (!targetId && this.profile?.sf_id) {
-                targetId = this.profile.sf_id;
-            }
-            const targetRole = selectRole ? selectRole.value : 'admin';
+        document.getElementById('btn-open-owner-console-perk')?.addEventListener('click', () => {
+            this.openOwnerConsole();
+        });
 
-            if (!targetId) {
-                this.showToast('Вкажіть ID користувача (наприклад: SF-104928)');
-                return;
+        const performConsoleUnlock = () => {
+            const key = masterInput ? masterInput.value.trim() : '';
+            if (key === 'feodal' || key === 'feodai' || this.isOwner()) {
+                this.isConsoleUnlocked = true;
+                if (authError) authError.style.display = 'none';
+                if (authScreen) authScreen.style.display = 'none';
+                if (mainScreen) mainScreen.style.display = 'flex';
+                this.loadConsoleData();
+                this.logConsole('Root owner session authorized successfully.', 'success');
+            } else {
+                if (authError) authError.style.display = 'block';
+                this.logConsole('Failed authorization attempt.', 'error');
             }
+        };
 
+        document.getElementById('btn-console-unlock')?.addEventListener('click', performConsoleUnlock);
+        masterInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') performConsoleUnlock();
+        });
+
+        document.getElementById('btn-console-trim-ram')?.addEventListener('click', async () => {
             try {
                 if (window.pywebview && window.pywebview.api) {
-                    const res = await window.pywebview.api.set_role_by_id(targetId, targetRole);
+                    const res = await window.pywebview.api.trim_memory();
                     if (res && res.success) {
-                        if (res.is_current || targetId === this.profile?.sf_id) {
-                            this.profile.role = targetRole;
-                            this.updateProfileUI();
-                        }
-                        this.showToast(`👑 Роль ${targetRole.toUpperCase()} призначено для ${targetId}! ✨`);
-                        if (secretModal) secretModal.style.display = 'none';
-                    } else {
-                        this.showToast(res?.error || `Користувача ${targetId} не знайдено`);
+                        const ramEl = document.getElementById('console-ram-stat');
+                        if (ramEl) ramEl.textContent = `${res.ram_mb} MB`;
+                        this.logConsole(`[MEMORY] Working set trimmed. Total RAM: ${res.ram_mb} MB across ${res.trimmed_processes} processes.`, 'success');
+                        this.showToast(`RAM оптимізовано: ${res.ram_mb} MB 🧹`);
                     }
                 }
-            } catch (err) {
-                this.showToast('Помилка при призначенні ролі');
+            } catch(e) {
+                this.logConsole(`[MEMORY ERROR] ${e.message}`, 'error');
             }
+        });
+
+        document.getElementById('btn-console-refresh-users')?.addEventListener('click', () => {
+            this.loadConsoleUsers();
+            this.logConsole('[DATABASE] Refreshed user database list.', 'info');
+        });
+
+        document.getElementById('btn-apply-console-role')?.addEventListener('click', () => {
+            this.applyConsoleRole();
+        });
+
+        document.getElementById('btn-clear-terminal')?.addEventListener('click', () => {
+            const term = document.getElementById('console-terminal-log');
+            if (term) term.innerHTML = '';
         });
     }
 
-    openSecretRoleModal() {
-        const modal = document.getElementById('modal-secret-role');
+    openOwnerConsole() {
+        const modal = document.getElementById('modal-owner-console');
         if (!modal) return;
-        const inputId = document.getElementById('input-secret-target-id');
-        const selectRole = document.getElementById('select-secret-target-role');
-        if (inputId) {
-            inputId.value = this.profile?.sf_id || '';
-            inputId.placeholder = this.profile?.sf_id || 'SF-XXXXXX';
-        }
-        if (selectRole) {
-            selectRole.value = 'admin';
-        }
+        const authScreen = document.getElementById('console-auth-screen');
+        const mainScreen = document.getElementById('console-main-screen');
+        const masterInput = document.getElementById('input-console-master-key');
+        const authError = document.getElementById('console-auth-error');
+
         modal.style.display = 'flex';
-        inputId?.focus();
+
+        if (this.isOwner() || this.isConsoleUnlocked) {
+            this.isConsoleUnlocked = true;
+            if (authScreen) authScreen.style.display = 'none';
+            if (mainScreen) mainScreen.style.display = 'flex';
+            this.loadConsoleData();
+        } else {
+            if (authScreen) authScreen.style.display = 'flex';
+            if (mainScreen) mainScreen.style.display = 'none';
+            if (authError) authError.style.display = 'none';
+            if (masterInput) {
+                masterInput.value = '';
+                masterInput.focus();
+            }
+        }
+    }
+
+    logConsole(msg, type = 'info') {
+        const term = document.getElementById('console-terminal-log');
+        if (!term) return;
+        const line = document.createElement('div');
+        line.className = `t-line ${type}`;
+        const time = new Date().toTimeString().slice(0, 8);
+        line.textContent = `[${time}] ${msg}`;
+        term.appendChild(line);
+        term.scrollTop = term.scrollHeight;
+    }
+
+    async loadConsoleData() {
+        if (window.pywebview && window.pywebview.api) {
+            try {
+                const stats = await window.pywebview.api.get_system_stats();
+                if (stats && stats.ram) {
+                    const ramEl = document.getElementById('console-ram-stat');
+                    if (ramEl) ramEl.textContent = `${stats.ram.app_mb} MB (${stats.ram.percent}%)`;
+                }
+            } catch(e) {}
+        }
+        await this.loadConsoleUsers();
+    }
+
+    async loadConsoleUsers() {
+        const tbody = document.getElementById('console-users-tbody');
+        const countEl = document.getElementById('console-users-count');
+        if (!tbody) return;
+
+        try {
+            if (window.pywebview && window.pywebview.api) {
+                const users = await window.pywebview.api.get_all_users();
+                if (Array.isArray(users)) {
+                    if (countEl) countEl.textContent = users.length;
+                    tbody.innerHTML = '';
+                    if (users.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:12px; color:var(--text-muted);">Немає користувачів у базі</td></tr>';
+                        return;
+                    }
+                    users.forEach(u => {
+                        const tr = document.createElement('tr');
+                        const isCurrent = (u.sf_id === this.profile?.sf_id);
+                        tr.innerHTML = `
+                            <td><span class="c-user-id" data-user-id="${u.sf_id}" title="Клікніть, щоб скопіювати ID">${this.escapeHtml(u.sf_id)}</span> ${isCurrent ? '⭐' : ''}</td>
+                            <td><strong>${this.escapeHtml(u.name || 'Anonymous')}</strong></td>
+                            <td style="color:var(--text-muted); font-size:0.72rem;">${this.escapeHtml(u.email || 'local')}</td>
+                            <td><span class="c-role-pill ${u.role || 'listener'}">${(u.role || 'listener').toUpperCase()}</span></td>
+                            <td>
+                                <div class="c-quick-actions">
+                                    <button class="btn-c-quick" data-set-uid="${u.sf_id}" data-set-role="admin" title="Зробити адміністратором">👑</button>
+                                    <button class="btn-c-quick" data-set-uid="${u.sf_id}" data-set-role="moderator" title="Зробити модератором">🛡️</button>
+                                    <button class="btn-c-quick" data-set-uid="${u.sf_id}" data-set-role="artist" title="Зробити виконавцем">🎙️</button>
+                                    <button class="btn-c-quick" data-set-uid="${u.sf_id}" data-set-role="listener" title="Зробити слухачем">🎧</button>
+                                </div>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+
+                    tbody.querySelectorAll('.c-user-id').forEach(el => {
+                        el.addEventListener('click', () => {
+                            const uid = el.dataset.userId;
+                            const input = document.getElementById('input-console-target-id');
+                            if (input) input.value = uid;
+                            this.logConsole(`Selected target user ID: ${uid}`, 'info');
+                        });
+                    });
+
+                    tbody.querySelectorAll('.btn-c-quick').forEach(btn => {
+                        btn.addEventListener('click', async () => {
+                            const uid = btn.dataset.setUid;
+                            const r = btn.dataset.setRole;
+                            await this.assignRoleFromConsole(uid, r);
+                        });
+                    });
+                }
+            }
+        } catch(e) {
+            console.error('Error loading console users:', e);
+            this.logConsole(`[ERROR] Failed to fetch user list: ${e.message}`, 'error');
+        }
+    }
+
+    async assignRoleFromConsole(targetId, targetRole) {
+        if (!targetId) {
+            this.showToast('Вкажіть ID користувача!');
+            this.logConsole('[ERROR] ID користувача не вказано.', 'error');
+            return;
+        }
+
+        try {
+            if (window.pywebview && window.pywebview.api) {
+                const res = await window.pywebview.api.set_role_by_id(targetId, targetRole);
+                if (res && res.success) {
+                    this.logConsole(`[SUCCESS] Set role "${targetRole.toUpperCase()}" for ID ${targetId}.`, 'success');
+                    this.showToast(`👑 Роль ${targetRole.toUpperCase()} призначено для ${targetId}!`);
+                    if (res.is_current || targetId === this.profile?.sf_id) {
+                        this.profile.role = targetRole;
+                        this.updateProfileUI();
+                    }
+                    await this.loadConsoleUsers();
+                } else {
+                    const err = res?.error || 'User not found';
+                    this.logConsole(`[FAILED] ${err}`, 'error');
+                    this.showToast(err);
+                }
+            }
+        } catch(e) {
+            this.logConsole(`[ERROR] ${e.message}`, 'error');
+            this.showToast('Помилка призначення ролі');
+        }
+    }
+
+    async applyConsoleRole() {
+        const input = document.getElementById('input-console-target-id');
+        const select = document.getElementById('select-console-target-role');
+        const targetId = input ? input.value.trim().toUpperCase() : '';
+        const targetRole = select ? select.value : 'listener';
+        await this.assignRoleFromConsole(targetId, targetRole);
     }
 
     openPlaylistPicker(track) {
@@ -994,18 +1156,18 @@ class SoundFlowApp {
     // ==========================================
     setupKeyboardShortcuts() {
         window.addEventListener('keydown', (e) => {
-            // Secret Console shortcut: Ctrl + Shift + R
-            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
+            // Secret Console shortcut: Ctrl + Shift + C, Ctrl + Shift + R, Ctrl + Shift + ~
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c' || e.key === 'R' || e.key === 'r' || e.key === '~' || e.key === '`')) {
                 e.preventDefault();
-                this.openSecretRoleModal();
+                this.openOwnerConsole();
                 return;
             }
 
-            // Close secret modal on Escape
+            // Close Owner Console on Escape
             if (e.key === 'Escape') {
-                const secretModal = document.getElementById('modal-secret-role');
-                if (secretModal && secretModal.style.display !== 'none') {
-                    secretModal.style.display = 'none';
+                const ownerModal = document.getElementById('modal-owner-console');
+                if (ownerModal && ownerModal.style.display !== 'none') {
+                    ownerModal.style.display = 'none';
                     return;
                 }
             }
@@ -1349,29 +1511,10 @@ class SoundFlowApp {
     }
 
     async setRole(roleName) {
-        const isOwner = this.isOwner();
-        const isAdmin = this.profile.role === 'admin';
-        const validRoles = ['listener', 'artist', 'moderator'];
-        if (isOwner || isAdmin) {
-            validRoles.push('admin');
-        } else if (roleName === 'admin') {
-            roleName = 'listener';
-            this.showToast('Роль адміністратора призначається через секретну консоль 👑');
-        }
-
-        if (!validRoles.includes(roleName)) roleName = 'listener';
-
-        this.profile.role = roleName;
-        this.updateProfileUI();
-        await this.saveProfile();
-
-        const roleLabels = {
-            listener: '🎧 Слухач',
-            artist: '🎙️ Виконавець',
-            moderator: '🛡️ Модератор',
-            admin: '👑 Адміністратор (ADMIN)'
-        };
-        this.showToast(`Роль встановлено: ${roleLabels[roleName] || roleName}`);
+        // Users cannot change their roles themselves.
+        // Roles are strictly assigned by the owner via the Owner Console.
+        this.showToast('Зміна ролі дозволена лише через консоль власника 🔒');
+        return;
     }
 
     setBannerPreset(preset) {
@@ -1426,7 +1569,7 @@ class SoundFlowApp {
         if (idEl) {
             idEl.textContent = this.profile.sf_id || 'SF-000000';
         }
-        const idBadge = document.getElementById('sc-profile-id-badge');
+        const idBadge = document.getElementById('sc-user-id-badge') || document.getElementById('sc-profile-id-badge');
         if (idBadge && !idBadge._hasCopyHandler) {
             idBadge._hasCopyHandler = true;
             idBadge.addEventListener('click', () => {

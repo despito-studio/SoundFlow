@@ -254,9 +254,8 @@ class LibraryManager:
             prof = self.get_profile()
             # Prevent changing sf_id directly
             profile_data.pop("sf_id", None)
-            # Normal users cannot change their role via UI profile update
-            if prof.get("role") != "admin":
-                profile_data.pop("role", None)
+            # Roles can only be changed via set_role_by_id / Owner Console
+            profile_data.pop("role", None)
             prof.update(profile_data)
             self._save()
             return prof
@@ -334,6 +333,52 @@ class LibraryManager:
             "success": False,
             "error": f"Користувача з ID '{target_sf_id}' не знайдено."
         }
+
+    def get_all_users(self):
+        """Scans all library files and returns list of registered users with their IDs, names, and roles."""
+        users = []
+        seen_ids = set()
+        if os.path.exists(self.base_dir):
+            for fname in sorted(os.listdir(self.base_dir)):
+                if fname.startswith("library") and fname.endswith(".json"):
+                    fpath = os.path.join(self.base_dir, fname)
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            d = json.load(f)
+                        p = d.setdefault("profile", {})
+                        sid = p.get("sf_id")
+                        if not sid:
+                            sid = self.generate_unique_sf_id()
+                            p["sf_id"] = sid
+                            if "role" not in p:
+                                p["role"] = "listener"
+                            try:
+                                with open(fpath, "w", encoding="utf-8") as fw:
+                                    json.dump(d, fw, ensure_ascii=False, indent=2)
+                            except Exception:
+                                pass
+                        if sid and sid not in seen_ids:
+                            seen_ids.add(sid)
+                            users.append({
+                                "sf_id": sid,
+                                "name": p.get("name", "Слухач"),
+                                "role": p.get("role", "listener"),
+                                "email": p.get("email", ""),
+                                "is_guest": (fname == "library.json")
+                            })
+                    except Exception:
+                        pass
+        # Ensure current active user is in the list
+        cur_p = self.get_profile()
+        if cur_p.get("sf_id") and cur_p["sf_id"] not in seen_ids:
+            users.insert(0, {
+                "sf_id": cur_p["sf_id"],
+                "name": cur_p.get("name", "Слухач"),
+                "role": cur_p.get("role", "listener"),
+                "email": cur_p.get("email", ""),
+                "is_guest": (self.current_user_id is None)
+            })
+        return users
 
     def get_friends(self):
         return self.data.setdefault("friends", [])

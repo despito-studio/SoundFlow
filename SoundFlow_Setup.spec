@@ -5,7 +5,7 @@ a = Analysis(
     ['C:/flowproject/installer/setup_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:/flowproject/installer/soundflow_payload.zip', '.'), ('C:/flowproject/assets/icon.ico', 'assets')],
+    datas=[('C:/flowproject/installer/soundflow_payload.zip', '.'), ('C:/flowproject/assets/icon.ico', 'assets'), ('C:/flowproject/installer/MicrosoftEdgeWebview2Setup.exe', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

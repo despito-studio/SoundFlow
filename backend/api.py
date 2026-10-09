@@ -107,3 +107,9 @@ class AppApi:
 
     def get_user_sf_id(self):
         return self.library.get_profile().get("sf_id", "")
+
+    def get_all_users(self):
+        return self.library.get_all_users()
+
+    def trim_memory(self):
+        return self.stats.trim_memory()

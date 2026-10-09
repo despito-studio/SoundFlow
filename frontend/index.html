@@ -336,46 +336,11 @@
                                         </svg>
                                     </div>
 
-                                    <!-- ROLE BADGE (where the yellow oval is marked) -->
+                                    <!-- ROLE BADGE (Read-only status indicator) -->
                                     <div class="sc-role-badge-container">
-                                        <div class="sc-role-badge role-admin" id="sc-current-role-badge" title="Натисніть для вибору ролі">
-                                            <span class="role-icon" id="sc-role-icon">👑</span>
-                                            <span class="role-title" id="sc-role-title">АДМІНІСТРАТОР</span>
-                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" class="role-dropdown-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                        </div>
-                                        
-                                        <!-- Role Selector Dropdown -->
-                                        <div class="sc-role-dropdown" id="sc-role-dropdown" style="display: none;">
-                                            <div class="role-dropdown-title">Оберіть роль користувача:</div>
-                                            <button class="role-option-btn role-listener" data-role="listener">
-                                                <span class="opt-icon">🎧</span>
-                                                <div class="opt-meta">
-                                                    <span class="opt-name">Слухач</span>
-                                                    <span class="opt-desc">Базовий плеєр, пошук та плейлисти</span>
-                                                </div>
-                                            </button>
-                                            <button class="role-option-btn role-artist" data-role="artist">
-                                                <span class="opt-icon">🎙️</span>
-                                                <div class="opt-meta">
-                                                    <span class="opt-name">Виконавець</span>
-                                                    <span class="opt-desc">Спеціальний статус та авторські мікси</span>
-                                                </div>
-                                            </button>
-                                            <button class="role-option-btn role-moderator" data-role="moderator">
-                                                <span class="opt-icon">🛡️</span>
-                                                <div class="opt-meta">
-                                                    <span class="opt-name">Модератор</span>
-                                                    <span class="opt-desc">Очищення кешу та модерація треків</span>
-                                                </div>
-                                            </button>
-                                            <button class="role-option-btn role-admin" data-role="admin" id="role-option-admin-btn">
-                                                <span class="opt-icon">👑</span>
-                                                <div class="opt-meta">
-                                                    <span class="opt-name">Адміністратор</span>
-                                                    <span class="opt-desc">Всі переваги: Lossless HQ, DSP Bass Boost</span>
-                                                </div>
-                                                <span class="opt-active-check">✓</span>
-                                            </button>
+                                        <div class="sc-role-badge role-listener" id="sc-current-role-badge" title="Ваша роль у SoundFlow">
+                                            <span class="role-icon" id="sc-role-icon">🎧</span>
+                                            <span class="role-title" id="sc-role-title">СЛУХАЧ</span>
                                         </div>
                                     </div>
                                 </div>
@@ -497,18 +462,16 @@
                                         </div>
                                     </div>
 
-                                    <!-- Perk 3: Role Switcher & Override -->
+                                    <!-- Perk 3: Owner Console Access -->
                                     <div class="admin-perk-card">
                                         <div class="perk-icon-box cyan">👑</div>
                                         <div class="perk-info">
-                                            <h4>Керування ролями профілю</h4>
-                                            <p>Миттєво змініть вашу поточну роль, яка відображається у профілі та навігації:</p>
-                                            <div class="role-pills-selector">
-                                                <button class="role-pill-btn" data-role-select="listener">🎧 Слухач</button>
-                                                <button class="role-pill-btn" data-role-select="artist">🎙️ Виконавець</button>
-                                                <button class="role-pill-btn" data-role-select="moderator">🛡️ Модератор</button>
-                                                <button class="role-pill-btn active" data-role-select="admin">👑 Адміністратор</button>
+                                            <div class="perk-header-row">
+                                                <h4>SoundFlow Master Console</h4>
+                                                <button class="btn-primary-sm" id="btn-open-owner-console-perk" style="padding: 4px 10px; font-size: 0.75rem;">Відкрити консоль</button>
                                             </div>
+                                            <p>Керування користувачами, ролями за унікальними ID та оптимізацією пам'яті (Ctrl+Shift+C).</p>
+                                            <span class="perk-badge active">SECRET OWNER ROOT</span>
                                         </div>
                                     </div>
 
@@ -878,23 +841,110 @@
         </div>
     </div>
 
-    <!-- MODAL: SECRET ROLE MANAGER -->
-    <div class="modal-overlay" id="modal-secret-role" style="display: none;">
-        <div class="modal-card">
-            <h3>👑 Керування Ролями (Secret Console)</h3>
-            <p>Призначення ролі за унікальним ID користувача SoundFlow:</p>
-            <label style="font-size:0.78rem; color:var(--text-muted); margin-bottom:-6px;">ID користувача (наприклад: SF-104928 або залиште порожнім для себе):</label>
-            <input type="text" id="input-secret-target-id" placeholder="SF-XXXXXX" maxlength="15">
-            <label style="font-size:0.78rem; color:var(--text-muted); margin-bottom:-6px;">Оберіть роль для призначення:</label>
-            <select id="select-secret-target-role" style="background:var(--bg-tertiary, #121520); color:var(--text-primary, #fff); border:1px solid var(--border-color, rgba(255,255,255,0.1)); border-radius:6px; padding:8px 10px; font-size:0.85rem; outline:none;">
-                <option value="admin">👑 Адміністратор (admin)</option>
-                <option value="moderator">🛡️ Модератор (moderator)</option>
-                <option value="artist">🎙️ Виконавець (artist)</option>
-                <option value="listener">🎧 Слухач (listener)</option>
-            </select>
-            <div class="modal-actions">
-                <button class="btn-secondary" id="btn-cancel-secret-role">Скасувати</button>
-                <button class="btn-primary" id="btn-apply-secret-role">Застосувати роль</button>
+    <!-- MODAL: SOUNDFLOW OWNER CONSOLE -->
+    <div class="modal-overlay" id="modal-owner-console" style="display: none;">
+        <div class="modal-card owner-console-card">
+            <div class="owner-console-header">
+                <div class="console-title-area">
+                    <span class="console-dot-green"></span>
+                    <h3>👑 SoundFlow Master Owner Console</h3>
+                    <span class="console-tag-pill">ROOT ACCESS</span>
+                </div>
+                <button class="console-close-btn" id="btn-close-owner-console" title="Закрити консоль">✕</button>
+            </div>
+
+            <!-- AUTH SCREEN (shown if session is not yet authenticated) -->
+            <div id="console-auth-screen" class="console-auth-screen" style="display: none;">
+                <div class="auth-lock-icon">🔒</div>
+                <h4>Вхід до консолі власника</h4>
+                <p>Ця панель доступна тільки власнику SoundFlow. Введіть майстер-пароль для автентифікації:</p>
+                <div class="console-auth-input-row">
+                    <input type="password" id="input-console-master-key" placeholder="Введіть Master Password..." autocomplete="off">
+                    <button class="btn-primary" id="btn-console-unlock">Розблокувати</button>
+                </div>
+                <div id="console-auth-error" class="console-auth-error" style="display: none;">Невірний пароль доступу!</div>
+            </div>
+
+            <!-- MAIN CONSOLE INTERFACE -->
+            <div id="console-main-screen" class="console-main-screen">
+                <!-- TOP STATS BAR -->
+                <div class="console-stats-bar">
+                    <div class="cstat-item">
+                        <span class="cstat-label">RAM ОЗУ:</span>
+                        <span class="cstat-val" id="console-ram-stat">~210 MB</span>
+                    </div>
+                    <div class="cstat-item">
+                        <span class="cstat-label">КОРИСТУВАЧІ:</span>
+                        <span class="cstat-val" id="console-users-count">0</span>
+                    </div>
+                    <div class="cstat-actions">
+                        <button class="btn-console-act" id="btn-console-trim-ram" title="Очистити робочі набори пам'яті (EmptyWorkingSet)">
+                            🧹 Очистити RAM
+                        </button>
+                        <button class="btn-console-act" id="btn-console-refresh-users" title="Оновити список користувачів">
+                            🔄 Оновити базу
+                        </button>
+                    </div>
+                </div>
+
+                <!-- USERS DATABASE TABLE -->
+                <div class="console-section-title">
+                    <span>📋 База користувачів SoundFlow</span>
+                    <span class="console-hint">(Клікніть на ID для автозаповнення)</span>
+                </div>
+                <div class="console-users-table-wrap">
+                    <table class="console-users-table">
+                        <thead>
+                            <tr>
+                                <th>Унікальний ID</th>
+                                <th>Нікнейм</th>
+                                <th>Email / Провайдер</th>
+                                <th>Роль</th>
+                                <th>Швидка дія</th>
+                            </tr>
+                        </thead>
+                        <tbody id="console-users-tbody">
+                            <tr><td colspan="5" style="text-align:center; padding:16px;">Завантаження користувачів...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- ROLE ASSIGNMENT CONTROL PANEL -->
+                <div class="console-role-assign-box">
+                    <div class="console-section-title">
+                        <span>⚡ Призначення ролі за ID користувача</span>
+                    </div>
+                    <div class="console-assign-controls">
+                        <div class="cassign-field">
+                            <label>ID користувача:</label>
+                            <input type="text" id="input-console-target-id" placeholder="SF-XXXXXX" maxlength="15">
+                        </div>
+                        <div class="cassign-field">
+                            <label>Призначити роль:</label>
+                            <select id="select-console-target-role">
+                                <option value="admin">👑 Адміністратор (admin)</option>
+                                <option value="moderator">🛡️ Модератор (moderator)</option>
+                                <option value="artist">🎙️ Виконавець (artist)</option>
+                                <option value="listener" selected>🎧 Слухач (listener)</option>
+                            </select>
+                        </div>
+                        <div class="cassign-submit">
+                            <button class="btn-primary" id="btn-apply-console-role">Зберегти роль</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TERMINAL LOG OUTPUT -->
+                <div class="console-terminal-wrap">
+                    <div class="terminal-bar">
+                        <span class="terminal-title">📟 Owner System Log</span>
+                        <button class="terminal-clear" id="btn-clear-terminal">Clear</button>
+                    </div>
+                    <div class="console-terminal-log" id="console-terminal-log">
+                        <div class="t-line info">[SYSTEM] SoundFlow v1.4.0 Kernel Active.</div>
+                        <div class="t-line info">[SECURITY] Owner Console Ready.</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
