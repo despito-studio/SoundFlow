@@ -29,8 +29,8 @@ class AppApi:
         query = self.genres_map.get(genre_key, self.genres_map["lofi"])
         return self.engine.search(query, source="all", limit=16)
 
-    def get_stream(self, track):
-        return self.engine.get_stream_url(track)
+    def get_stream(self, track, force_refresh=False):
+        return self.engine.get_stream_url(track, force_refresh=force_refresh)
 
     def get_similar_tracks(self, track, limit=10, exclude_ids=None):
         return self.engine.get_similar_tracks(track, limit=limit, exclude_ids=exclude_ids)

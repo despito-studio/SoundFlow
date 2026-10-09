@@ -20,11 +20,11 @@ class MusicEngine:
             "ignoreerrors": True,
         }
 
-        # Playback extraction options
+        # Playback extraction options: prioritize progressive HTTP/HTTPS audio and exclude HLS/m3u8
         self.playback_opts = {
             "quiet": True,
             "no_warnings": True,
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
+            "format": "bestaudio[protocol^=http]/bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
             "noplaylist": True,
             "skip_download": True,
             "ignoreerrors": True,
@@ -38,9 +38,13 @@ class MusicEngine:
             return w
         candidates = [
             os.path.expanduser(r"~/.gemini/antigravity/bin/nodejs/node.exe"),
+            os.path.expanduser(r"~\AppData\Local\Programs\nodejs\node.exe"),
             r"C:\Program Files\nodejs\node.exe",
             r"C:\Program Files (x86)\nodejs\node.exe",
         ]
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            candidates.append(os.path.join(local_appdata, "Programs", "nodejs", "node.exe"))
         for c in candidates:
             if os.path.exists(c):
                 return c
@@ -106,6 +110,8 @@ class MusicEngine:
                 for e in raw_entries:
                     if not e or not e.get("title"):
                         continue
+                    if e.get("live_status") in ("is_live", "is_upcoming") or e.get("is_live"):
+                        continue
                     vid_id = e.get("id") or str(abs(hash(e.get("url", ""))))
                     track_url = e.get("url")
                     if not track_url or not track_url.startswith("http"):
@@ -163,19 +169,21 @@ class MusicEngine:
         self.search_cache[cache_key] = {"results": results, "time": now}
         return results
 
-    def get_stream_url(self, track_info):
-        """Resolves direct streamable audio URL for the given track info."""
+    def get_stream_url(self, track_info, force_refresh=False):
+        """Resolves direct streamable progressive audio URL for the given track info."""
         if not track_info:
             return None
 
         track_id = track_info.get("id")
         target_url = track_info.get("url")
 
-        # Check memory cache
+        if force_refresh and track_id:
+            self.stream_cache.pop(track_id, None)
+
         now = time.time()
-        if track_id and track_id in self.stream_cache:
+        if not force_refresh and track_id and track_id in self.stream_cache:
             cached = self.stream_cache[track_id]
-            if cached["expires_at"] > now:
+            if cached.get("expires_at", 0) > now:
                 return cached["stream_url"]
 
         if not target_url:
@@ -187,28 +195,63 @@ class MusicEngine:
                 if not info:
                     return None
 
-                stream_url = info.get("url")
+                # Discard 24/7 live streams that cannot be played progressively
+                if info.get("is_live"):
+                    return None
 
-                # If url not directly at top level, check formats
-                if not stream_url and "formats" in info:
-                    # Prefer audio-only formats (m4a, webm/opus)
-                    audio_formats = [
-                        f for f in info["formats"]
-                        if f.get("vcodec") == "none" and f.get("url")
-                    ]
-                    if audio_formats:
-                        # Sort by audio bitrate
-                        audio_formats.sort(key=lambda x: x.get("abr") or 0, reverse=True)
-                        stream_url = audio_formats[0]["url"]
-                    elif info["formats"]:
-                        stream_url = info["formats"][-1].get("url")
+                stream_url = None
+
+                # 1. Filter formats for direct progressive HTTP/HTTPS audio (exclude m3u8)
+                formats = info.get("formats", [])
+                if formats:
+                    valid_audio = []
+                    for f in formats:
+                        u = f.get("url") or ""
+                        proto = f.get("protocol") or ""
+                        if not u.startswith("http"):
+                            continue
+                        if ".m3u8" in u or "m3u8" in proto:
+                            continue
+                        if f.get("acodec") != "none" or f.get("vcodec") == "none":
+                            valid_audio.append(f)
+
+                    if valid_audio:
+                        # Prefer audio-only (vcodec == 'none'), then mp3/m4a/opus, then highest bitrate
+                        valid_audio.sort(
+                            key=lambda x: (
+                                1 if x.get("vcodec") == "none" else 0,
+                                1 if x.get("ext") in ("mp3", "m4a") else 0,
+                                x.get("abr") or x.get("tbr") or 0
+                            ),
+                            reverse=True
+                        )
+                        stream_url = valid_audio[0]["url"]
+
+                # 2. Fallback to top-level URL if not m3u8
+                if not stream_url:
+                    top_url = info.get("url")
+                    if top_url and ".m3u8" not in top_url:
+                        stream_url = top_url
 
                 if stream_url:
-                    # Cache stream URL for 2 hours
+                    # Calculate safe cache TTL based on expire timestamp if present in query string
+                    ttl = 3600  # Default 1 hour
+                    try:
+                        import urllib.parse
+                        parsed = urllib.parse.urlparse(stream_url)
+                        qs = urllib.parse.parse_qs(parsed.query)
+                        if "expire" in qs:
+                            exp_ts = float(qs["expire"][0])
+                            remaining = exp_ts - now
+                            if remaining > 120:
+                                ttl = min(3600, remaining - 60)
+                    except Exception:
+                        pass
+
                     if track_id:
                         self.stream_cache[track_id] = {
                             "stream_url": stream_url,
-                            "expires_at": now + 7200
+                            "expires_at": now + ttl
                         }
                     return stream_url
 

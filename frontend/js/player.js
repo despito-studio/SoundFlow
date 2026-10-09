@@ -1,6 +1,7 @@
 /**
  * SoundFlow Audio Playback Engine
- * Uses native HTML5 Audio element with streaming buffer and preloading.
+ * Uses native HTML5 Audio element with direct progressive streaming, robust error-recovery,
+ * seamless track transitions, and auto-refreshed stream caching.
  */
 class SoundFlowPlayer {
     constructor() {
@@ -21,10 +22,11 @@ class SoundFlowPlayer {
 
         this.prefetchedUrl = null;
         this.prefetchedTrackId = null;
+        this._prefetchedSimilarTrackId = null;
 
-        this.audioCtx = null;
-        this.bassFilter = null;
-        this.trebleFilter = null;
+        this.currentRequestId = 0;
+        this._lastErrorRetried = false;
+
         this.bassBoostEnabled = true;
         this.bassGain = 6;
         this.hqAudioEnabled = true;
@@ -35,39 +37,9 @@ class SoundFlowPlayer {
         this.setupMediaSession();
     }
 
-    setupAudioContext() {
-        if (this.audioCtx) return;
-        try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-            this.audioCtx = new AudioContext();
-            this.source = this.audioCtx.createMediaElementSource(this.audio);
-            
-            this.bassFilter = this.audioCtx.createBiquadFilter();
-            this.bassFilter.type = 'lowshelf';
-            this.bassFilter.frequency.value = 120;
-            this.bassFilter.gain.value = this.bassBoostEnabled ? this.bassGain : 0;
-
-            this.trebleFilter = this.audioCtx.createBiquadFilter();
-            this.trebleFilter.type = 'peaking';
-            this.trebleFilter.frequency.value = 3500;
-            this.trebleFilter.gain.value = 2;
-
-            this.source.connect(this.bassFilter);
-            this.bassFilter.connect(this.trebleFilter);
-            this.trebleFilter.connect(this.audioCtx.destination);
-        } catch (e) {
-            console.warn("WebAudio DSP init error:", e);
-        }
-    }
-
     setBassBoost(enabled, gain = 6) {
         this.bassBoostEnabled = enabled;
         this.bassGain = gain;
-        if (!this.audioCtx) this.setupAudioContext();
-        if (this.bassFilter) {
-            this.bassFilter.gain.value = enabled ? gain : 0;
-        }
     }
 
     setupAudioListeners() {
@@ -94,12 +66,30 @@ class SoundFlowPlayer {
         });
 
         this.audio.addEventListener('error', (e) => {
-            console.error('Audio playback error:', e);
-            this.showLoading(false);
-            if (window.soundFlowApp) {
-                window.soundFlowApp.showToast('Помилка відтворення треку. Перехід до наступного...');
+            // Ignore reset / unmount events with empty src
+            const src = this.audio.currentSrc || this.audio.src || '';
+            if (!src || src.endsWith('/about:blank') || src === window.location.href) {
+                return;
             }
-            setTimeout(() => this.next(), 1000);
+
+            console.error('Audio element playback error:', e);
+            this.showLoading(false);
+
+            // Auto-retry once with a force-refreshed direct stream URL
+            if (this.currentTrack && !this._lastErrorRetried && this.currentIndex >= 0) {
+                this._lastErrorRetried = true;
+                console.log('Stream error encountered. Attempting fresh URL retry...');
+                setTimeout(() => {
+                    this.playTrackAtIndex(this.currentIndex, true);
+                }, 400);
+                return;
+            }
+
+            this._lastErrorRetried = false;
+            if (window.soundFlowApp) {
+                window.soundFlowApp.showToast('Помилка аудіопотоку. Перехід до наступного треку...');
+            }
+            setTimeout(() => this.next(), 900);
         });
     }
 
@@ -110,7 +100,7 @@ class SoundFlowPlayer {
             navigator.mediaSession.setActionHandler('previoustrack', () => this.prev());
             navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
             navigator.mediaSession.setActionHandler('seekto', (details) => {
-                if (details.seekTime) this.seek(details.seekTime);
+                if (details.seekTime !== undefined) this.seek(details.seekTime);
             });
         }
     }
@@ -130,7 +120,8 @@ class SoundFlowPlayer {
     setQueue(tracks, startIndex = 0) {
         this.queue = Array.isArray(tracks) ? [...tracks] : [];
         if (this.queue.length > 0) {
-            this.playTrackAtIndex(startIndex);
+            const validIndex = Math.max(0, Math.min(startIndex, this.queue.length - 1));
+            this.playTrackAtIndex(validIndex);
         }
         if (window.soundFlowApp) {
             window.soundFlowApp.updateQueueDrawer();
@@ -149,33 +140,77 @@ class SoundFlowPlayer {
         }
     }
 
-    async playTrackAtIndex(index) {
+    async playTrackAtIndex(index, forceRefresh = false) {
         if (index < 0 || index >= this.queue.length) return;
 
+        const reqId = ++this.currentRequestId;
         this.currentIndex = index;
         const track = this.queue[index];
         this.currentTrack = track;
         this.isFetchingSimilar = false;
+        if (forceRefresh) {
+            this._lastErrorRetried = true;
+        }
 
         this.updateNowPlayingUI(track);
         this.showLoading(true);
 
         try {
+            // Safely unload previous audio stream before requesting the new one
+            try {
+                this.audio.pause();
+                this.audio.removeAttribute('src');
+                this.audio.load();
+            } catch (e) {
+                // Ignore transient pause/reset errors
+            }
+
             let streamUrl = null;
 
             // Check if we already prefetched this track
-            if (this.prefetchedTrackId === track.id && this.prefetchedUrl) {
+            if (!forceRefresh && this.prefetchedTrackId === track.id && this.prefetchedUrl) {
                 streamUrl = this.prefetchedUrl;
+                this.prefetchedUrl = null;
+                this.prefetchedTrackId = null;
             } else if (window.pywebview && window.pywebview.api) {
-                streamUrl = await window.pywebview.api.get_stream(track);
+                streamUrl = await window.pywebview.api.get_stream(track, forceRefresh);
+            }
+
+            // Check if user selected another track while resolving stream URL
+            if (this.currentRequestId !== reqId) {
+                return;
             }
 
             if (!streamUrl) {
                 throw new Error('Не вдалося отримати аудіопотік');
             }
 
+            // Reset media element to beginning with fresh source
             this.audio.src = streamUrl;
-            await this.audio.play();
+            this.audio.currentTime = 0;
+            this.audio.load();
+
+            try {
+                const playPromise = this.audio.play();
+                if (playPromise !== undefined) {
+                    await playPromise;
+                }
+            } catch (playErr) {
+                if (this.currentRequestId !== reqId) {
+                    return;
+                }
+                if (playErr.name === 'AbortError') {
+                    // Ignored: superseded by a newer track selection
+                    return;
+                }
+                throw playErr;
+            }
+
+            if (this.currentRequestId !== reqId) {
+                return;
+            }
+
+            this._lastErrorRetried = false;
             this.showLoading(false);
             this.updateMediaSession(track);
 
@@ -188,7 +223,17 @@ class SoundFlowPlayer {
             }
 
         } catch (err) {
+            if (this.currentRequestId !== reqId) {
+                return;
+            }
             console.error('Play error:', err);
+
+            // If first attempt failed, retry once with force_refresh
+            if (!forceRefresh && window.pywebview && window.pywebview.api) {
+                console.warn('Retrying playTrackAtIndex with force-refreshed stream...');
+                return this.playTrackAtIndex(index, true);
+            }
+
             this.showLoading(false);
             if (window.soundFlowApp) {
                 window.soundFlowApp.showToast('Не вдалося відтворити трек');
@@ -196,22 +241,36 @@ class SoundFlowPlayer {
         }
     }
 
-    play() {
-        if (!this.audioCtx) {
-            this.setupAudioContext();
-        } else if (this.audioCtx.state === 'suspended') {
-            this.audioCtx.resume();
-        }
-
-        if (this.audio.src) {
-            this.audio.play().catch(e => console.warn(e));
+    async play() {
+        const src = this.audio.currentSrc || this.audio.src || '';
+        if (src && !src.endsWith('/about:blank') && src !== window.location.href) {
+            try {
+                if (this.audio.ended) {
+                    this.audio.currentTime = 0;
+                }
+                const playPromise = this.audio.play();
+                if (playPromise !== undefined) {
+                    await playPromise;
+                }
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    console.warn('Play resume error:', e);
+                    if (this.currentIndex >= 0 && this.currentIndex < this.queue.length) {
+                        this.playTrackAtIndex(this.currentIndex, true);
+                    }
+                }
+            }
+        } else if (this.currentIndex >= 0 && this.currentIndex < this.queue.length) {
+            this.playTrackAtIndex(this.currentIndex);
         } else if (this.queue.length > 0) {
             this.playTrackAtIndex(0);
         }
     }
 
     pause() {
-        this.audio.pause();
+        try {
+            this.audio.pause();
+        } catch (e) {}
     }
 
     togglePlayPause() {
@@ -326,7 +385,7 @@ class SoundFlowPlayer {
     }
 
     seek(timeSeconds) {
-        if (this.audio.duration) {
+        if (this.audio.duration && !isNaN(this.audio.duration)) {
             this.audio.currentTime = Math.max(0, Math.min(timeSeconds, this.audio.duration));
         }
     }
@@ -353,7 +412,11 @@ class SoundFlowPlayer {
     onTrackEnded() {
         if (this.repeat === 'one') {
             this.audio.currentTime = 0;
-            this.audio.play();
+            this.audio.play().catch(e => {
+                if (this.currentIndex >= 0) {
+                    this.playTrackAtIndex(this.currentIndex, true);
+                }
+            });
         } else {
             this.next();
         }
@@ -381,10 +444,13 @@ class SoundFlowPlayer {
                 if (this.currentIndex < this.queue.length - 1 && !this.prefetchedUrl) {
                     this.prefetchNextTrack();
                 } else if (this.currentIndex === this.queue.length - 1 && this.autoplay && !this.isFetchingSimilar && window.soundFlowApp) {
-                    this.isFetchingSimilar = true;
-                    window.soundFlowApp.fetchAndAppendSimilarTracks(this.currentTrack).finally(() => {
-                        this.isFetchingSimilar = false;
-                    });
+                    if (this._prefetchedSimilarTrackId !== this.currentTrack?.id) {
+                        this._prefetchedSimilarTrackId = this.currentTrack?.id;
+                        this.isFetchingSimilar = true;
+                        window.soundFlowApp.fetchAndAppendSimilarTracks(this.currentTrack).finally(() => {
+                            this.isFetchingSimilar = false;
+                        });
+                    }
                 }
             }
         }
@@ -394,7 +460,7 @@ class SoundFlowPlayer {
         const buffer = document.getElementById('seekbar-buffer');
         if (!buffer || !this.audio.duration) return;
 
-        if (this.audio.buffered.length > 0) {
+        if (this.audio.buffered && this.audio.buffered.length > 0) {
             const bufferedEnd = this.audio.buffered.end(this.audio.buffered.length - 1);
             const duration = this.audio.duration;
             buffer.style.width = `${(bufferedEnd / duration) * 100}%`;
@@ -407,7 +473,7 @@ class SoundFlowPlayer {
             const nextTrack = this.queue[nextIdx];
             try {
                 this.prefetchedTrackId = nextTrack.id;
-                this.prefetchedUrl = await window.pywebview.api.get_stream(nextTrack);
+                this.prefetchedUrl = await window.pywebview.api.get_stream(nextTrack, false);
             } catch (e) {
                 console.warn('Pre-fetch failed', e);
             }

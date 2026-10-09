@@ -10,6 +10,7 @@ from backend.api import AppApi
 
 # Chromium & WebView2 memory and CPU optimization flags (Optimized for 200-250 MB RAM budget)
 os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+    "--autoplay-policy=no-user-gesture-required "
     "--disable-features=Translate,OptimizationHints,MediaRouter,CalculateNativeWinOcclusion "
     "--renderer-process-limit=1 "
     "--process-per-site "

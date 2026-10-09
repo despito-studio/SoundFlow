@@ -518,6 +518,10 @@ class SoundFlowApp {
 
             row.addEventListener('click', (e) => {
                 if (e.target.closest('[data-action]')) return;
+                if (this.player.currentTrack && this.player.currentTrack.id === track.id) {
+                    this.player.togglePlayPause();
+                    return;
+                }
                 if (this.currentView === 'search') {
                     this.playFromSearch(track, tracks, idx);
                 } else {
@@ -826,6 +830,12 @@ class SoundFlowApp {
 
     async playFromSearch(selectedTrack, searchTracks = [], selectedIdx = 0) {
         if (!selectedTrack) return;
+
+        // If clicking the track that is already playing or loaded, toggle play/pause
+        if (this.player.currentTrack && this.player.currentTrack.id === selectedTrack.id) {
+            this.player.togglePlayPause();
+            return;
+        }
 
         if (this.player.autoplay) {
             // Immediately start playing the chosen track
