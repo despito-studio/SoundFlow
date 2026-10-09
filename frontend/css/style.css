@@ -2873,5 +2873,17 @@ input:checked + .slider:before { transform: translateX(18px); }
     padding-left: 8px;
 }
 
+/* ==========================================
+   AUTHENTICATION & PROFILE ACCESS GUARDS
+   ========================================== */
+#nav-item-profile {
+    display: none !important;
+}
 
+body.user-logged-in #nav-item-profile {
+    display: flex !important;
+}
 
+body:not(.user-logged-in) #profile-view {
+    display: none !important;
+}

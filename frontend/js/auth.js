@@ -10,16 +10,19 @@ class SoundFlowAuth {
     constructor() {
         this.clerk = null;
         this.user = null;
+        if (document.body) document.body.classList.remove('user-logged-in');
         this.readyPromise = this.init();
     }
 
     async init() {
+        if (document.body) document.body.classList.remove('user-logged-in');
         this.renderGuestState();
 
         try {
             await this.ensureClerkLoaded();
             if (!window.Clerk) {
                 console.warn("[SoundFlow Auth] Clerk not available.");
+                this.renderGuestState();
                 return;
             }
 
@@ -115,6 +118,14 @@ class SoundFlowAuth {
     }
 
     renderGuestState() {
+        if (document.body) document.body.classList.remove('user-logged-in');
+        const profileNavItem = document.getElementById('nav-item-profile');
+        if (profileNavItem) profileNavItem.style.display = 'none';
+
+        if (window.soundFlowApp && window.soundFlowApp.currentView === 'profile') {
+            window.soundFlowApp.switchView('home');
+        }
+
         const authContainer = document.getElementById('auth-container');
         if (!authContainer) return;
 
@@ -220,6 +231,7 @@ class SoundFlowAuth {
             });
 
             // Show Profile tab in sidebar when logged in
+            if (document.body) document.body.classList.add('user-logged-in');
             const profileNavItem = document.getElementById('nav-item-profile');
             if (profileNavItem) profileNavItem.style.display = 'flex';
 
@@ -241,9 +253,7 @@ class SoundFlowAuth {
 
         } else {
             // Signed out / Guest
-            this.renderGuestState();
-
-            // Hide Profile tab in sidebar for guests
+            if (document.body) document.body.classList.remove('user-logged-in');
             const profileNavItem = document.getElementById('nav-item-profile');
             if (profileNavItem) profileNavItem.style.display = 'none';
 
@@ -251,6 +261,8 @@ class SoundFlowAuth {
             if (window.soundFlowApp && window.soundFlowApp.currentView === 'profile') {
                 window.soundFlowApp.switchView('home');
             }
+
+            this.renderGuestState();
 
             // Switch to guest library
             if (window.pywebview && window.pywebview.api) {

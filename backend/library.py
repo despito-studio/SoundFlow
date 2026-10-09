@@ -239,8 +239,8 @@ class LibraryManager:
             "banner_preset": "beige",
             "banner_url": "",
             "avatar_url": "",
-            "followers": 1420 if is_admin else 0,
-            "following": 2 if is_admin else 0,
+            "followers": 0,
+            "following": 0,
             "hq_audio": is_admin,
             "bass_boost": is_admin,
             "bass_level": 6 if is_admin else 0
@@ -336,27 +336,7 @@ class LibraryManager:
         }
 
     def get_friends(self):
-        default_friends = [
-            {
-                "id": "friend_sb161",
-                "name": "sb161",
-                "avatar_url": "https://api.dicebear.com/7.x/bottts/svg?seed=sb161",
-                "role": "artist",
-                "status": "online",
-                "current_track": "Synthwave Sunset Drive",
-                "added_at": time.time() - 86400 * 3
-            },
-            {
-                "id": "friend_rura",
-                "name": "Rura",
-                "avatar_url": "https://api.dicebear.com/7.x/bottts/svg?seed=Rura",
-                "role": "listener",
-                "status": "listening",
-                "current_track": "Lo-Fi Beats to Relax/Study to",
-                "added_at": time.time() - 86400 * 1
-            }
-        ]
-        return self.data.setdefault("friends", default_friends)
+        return self.data.setdefault("friends", [])
 
     def add_friend(self, friend_data):
         friends = self.get_friends()

@@ -65,6 +65,7 @@ class SoundFlowApp {
                     if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
                         window.soundFlowAuth.openSignIn();
                     }
+                    this.switchView('home');
                     return;
                 }
                 this.switchView(view);
@@ -112,6 +113,9 @@ class SoundFlowApp {
                 this.showToast('Для доступу до вкладки Профіль необхідно увійти в акаунт 🔒');
                 if (window.soundFlowAuth && typeof window.soundFlowAuth.openSignIn === 'function') {
                     window.soundFlowAuth.openSignIn();
+                }
+                if (this.currentView === 'profile' || !this.currentView) {
+                    this.switchView('home');
                 }
                 return;
             }
@@ -1064,17 +1068,17 @@ class SoundFlowApp {
     // ==========================================
     setupProfile() {
         this.profile = {
-            name: "FEODAL",
+            name: "Слухач",
             role: "listener", // listener | artist | moderator | admin
             sf_id: "",
             banner_preset: "beige",
             banner_url: "",
             avatar_url: "assets/icon.png",
-            followers: 1420,
-            following: 2,
-            hq_audio: true,
-            bass_boost: true,
-            bass_level: 6
+            followers: 0,
+            following: 0,
+            hq_audio: false,
+            bass_boost: false,
+            bass_level: 0
         };
 
         // Tab switching in profile view
