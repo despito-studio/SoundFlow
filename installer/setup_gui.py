@@ -276,11 +276,14 @@ class SoundFlowInstaller:
     def create_shortcut(self, target_path, shortcut_path):
         """Creates a Windows shortcut (.lnk) using PowerShell and WScript.Shell."""
         try:
-            icon_file = os.path.join(os.path.dirname(target_path), "assets", "icon.ico")
-            if not os.path.exists(icon_file):
-                icon_file = os.path.join(os.path.dirname(target_path), "_internal", "assets", "icon.ico")
-            if not os.path.exists(icon_file):
-                icon_file = target_path
+            candidates = [
+                os.path.join(os.path.dirname(target_path), "SoundFlow.ico"),
+                os.path.join(os.path.dirname(target_path), "assets", "SoundFlow.ico"),
+                os.path.join(os.path.dirname(target_path), "assets", "icon.ico"),
+                os.path.join(os.path.dirname(target_path), "_internal", "assets", "icon.ico"),
+                target_path
+            ]
+            icon_file = next((c for c in candidates if os.path.exists(c)), target_path)
 
             os.makedirs(os.path.dirname(shortcut_path), exist_ok=True)
 
@@ -297,6 +300,16 @@ class SoundFlowInstaller:
             $s.IconLocation = '{esc_icon},0'
             $s.Description = 'SoundFlow Music Player'
             $s.Save()
+
+            Add-Type -TypeDefinition @"
+            using System;
+            using System.Runtime.InteropServices;
+            public class WinShell {{
+                [DllImport("shell32.dll")]
+                public static extern void SHChangeNotify(int wEventId, int uFlags, IntPtr dwItem1, IntPtr dwItem2);
+            }}
+"@
+            [WinShell]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
             '''
             subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                            creationflags=subprocess.CREATE_NO_WINDOW, check=False)
