@@ -1,0 +1,698 @@
+import { ScrollView, ListView, AboutSlint, Palette } from "std-widgets.slint";
+import { TrackRow, PlaylistRow, DownloadRow, RankRow, StatMetric, DailyRow } from "models.slint";
+export { TrackRow, PlaylistRow, DownloadRow, RankRow, StatMetric, DailyRow } from "models.slint";
+import { Theme, SFButton, SFField, SFSlider, SFPanel, SFCover, SFTitle, SFText, SFMuted } from "controls.slint";
+import { TrackItem } from "track-item.slint";
+import { HomeView } from "home.slint";
+export { SoundFlowTray } from "tray.slint";
+
+export component AppWindow inherits Window {
+    title: "SoundFlow";
+    icon: @image-url("../resources/icon.png");
+    preferred-width: 1100px; preferred-height: 680px;
+    min-width: 840px; min-height: 560px;
+    background: Theme.canvas;
+    default-font-family: "Segoe UI";
+    default-font-size: 14px;
+
+    in-out property <string> view: "home";
+    in-out property <[TrackRow]> tracks;
+    in-out property <[PlaylistRow]> playlists;
+    in-out property <[DownloadRow]> downloads;
+    in-out property <[RankRow]> artists;
+    in-out property <[RankRow]> top-tracks;
+    in-out property <[RankRow]> providers;
+    in-out property <[StatMetric]> metrics;
+    in-out property <[DailyRow]> daily;
+    in-out property <bool> task-loading;
+    in-out property <string> message;
+    in-out property <bool> dark;
+    in-out property <bool> reduced-motion;
+    in-out property <bool> close-to-tray: true;
+    in-out property <bool> media-hotkeys: true;
+    in-out property <string> profile-name: "Слухач";
+    in-out property <bool> cloud-configured;
+    in-out property <bool> cloud-signed-in;
+    in-out property <string> cloud-name;
+    in-out property <string> cloud-email;
+    in-out property <string> cloud-url;
+    in-out property <bool> subscription-active;
+    in-out property <string> subscription-message;
+    in-out property <TrackRow> current-track;
+    in-out property <bool> playing;
+    in-out property <bool> loading;
+    in-out property <float> position;
+    in-out property <float> duration;
+    in-out property <float> volume: 0.75;
+    in-out property <bool> shuffle;
+    in-out property <string> repeat-mode: "off";
+    in-out property <TrackRow> flow-track;
+    in-out property <int> flow-index;
+    in-out property <int> flow-count;
+    in-out property <bool> flow-playing;
+    in-out property <float> flow-progress;
+    in-out property <string> flow-genre: "lofi";
+    in-out property <string> search-query;
+    in-out property <string> search-source: "all";
+    in-out property <string> modal-kind;
+    in-out property <string> modal-title;
+    in-out property <string> modal-description;
+    in-out property <string> modal-value;
+    in-out property <string> modal-error;
+    in-out property <bool> modal-open;
+    in-out property <bool> modal-busy;
+    in-out property <[TrackRow]> match-tracks;
+
+    callback navigate(string);
+    callback search(string, string);
+    callback select-playlist(string);
+    callback play-track(string);
+    callback like-track(string);
+    callback add-track(string);
+    callback download-track(string);
+    callback flow-action(string);
+    callback player-action(string);
+    callback seek(float);
+    callback set-volume(float);
+    callback action(string, string);
+    callback modal-submit(string);
+    callback modal-action(string, string);
+    callback sign-in(string, string);
+    callback sign-up(string, string, string);
+    callback configure-cloud(string);
+    callback sync-library(string);
+    callback sign-out();
+
+    private property <length> side-width: root.width < 1000px ? 170px : 188px;
+    private property <length> workspace-width: root.width - side-width;
+    private property <length> content-inset: root.width < 1000px ? 16px : 24px;
+    private property <string> download-url;
+    private property <string> edited-name;
+    private property <string> auth-name;
+    private property <string> auth-email;
+    private property <string> auth-password;
+    private property <bool> register-mode;
+    private property <string> server-url;
+    private property <string> stats-period: "30d";
+    private property <string> stats-source: "all";
+    private property <bool> player-options;
+    private property <bool> app-menu;
+    private property <int> search-focus-request;
+    init => {
+        Theme.dark = root.dark; Theme.reduced-motion = root.reduced-motion; Theme.modal-open = root.modal-open;
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed dark => { Theme.dark = root.dark; Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+    changed reduced-motion => { Theme.reduced-motion = root.reduced-motion; }
+    changed modal-open => { Theme.modal-open = root.modal-open; if !root.modal-open { app-focus.focus(); } }
+    forward-focus: app-focus;
+
+    app-focus := FocusScope {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape {
+                if root.modal-open { root.modal-action("close", ""); }
+                root.player-options = false; root.app-menu = false;
+                return accept;
+            }
+            if event.modifiers.control && (event.text == "k" || event.text == "K") && !root.modal-open {
+                root.navigate("search"); root.search-focus-request += 1; return accept;
+            }
+            return reject;
+        }
+        key-pressed(event) => {
+            if root.modal-open { return reject; }
+            if root.view == "flow" {
+                if event.text == Key.LeftArrow { root.flow-action("skip"); return accept; }
+                if event.text == Key.RightArrow { root.flow-action("like"); return accept; }
+                if event.text == " " { root.flow-action("play"); return accept; }
+            } else if event.text == " " {
+                root.player-action("toggle"); return accept;
+            }
+            return reject;
+        }
+
+        sidebar := Rectangle {
+            x: 0px; y: 0px;
+            width: root.side-width;
+            height: parent.height;
+            background: Theme.sidebar;
+            accessible-role: navigation;
+            accessible-label: "Бібліотека та налаштування";
+            Image { x: 18px; y: 18px; width: 34px; height: 34px; source: @image-url("../resources/icon.png"); accessible-role: none; }
+            SFText { x: 61px; y: 23px; height: 22px; width: parent.width - 68px; text: "SoundFlow"; font-size: 18px; font-weight: 700; }
+            SFMuted { x: 19px; y: 80px; width: parent.width - 30px; height: 16px; text: "БІБЛІОТЕКА"; font-size: 10px; font-weight: 600; }
+            VerticalLayout {
+                x: 10px; y: 103px; width: parent.width - 20px;
+                height: 198px; spacing: 6px;
+                SFButton { width: root.side-width - 20px; left-align: true; text: "♡   Улюблене"; label: "Улюблені пісні"; flat: true; checkable: true; active: root.view == "liked"; clicked => { root.navigate("liked"); } }
+                SFButton { width: root.side-width - 20px; left-align: true; text: "♫   Плейлисти"; flat: true; checkable: true; active: root.view == "playlists" || root.view == "playlist"; clicked => { root.navigate("playlists"); } }
+                SFButton { width: root.side-width - 20px; left-align: true; text: "↓   Завантаження"; flat: true; checkable: true; active: root.view == "downloads"; clicked => { root.navigate("downloads"); } }
+                SFButton { width: root.side-width - 20px; left-align: true; text: "↺   Історія"; flat: true; checkable: true; active: root.view == "history"; clicked => { root.navigate("history"); } }
+            }
+            Rectangle { x: 18px; y: 319px; width: parent.width - 36px; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                x: 18px; y: 335px; width: parent.width - 30px; height: 34px;
+                SFMuted { text: "ТВОЇ ПЛЕЙЛИСТИ"; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                SFButton { text: "+"; label: "Створити плейлист"; icon: true; flat: true; width: 34px; height: 34px; clicked => { root.action("create-playlist", ""); } }
+            }
+            for playlist[index] in root.playlists : SFButton {
+                visible: index < 3 && root.height > 640px;
+                x: 10px; y: 377px + index * 40px;
+                width: parent.width - 20px; height: 36px;
+                text: playlist.name; label: "Плейлист «" + playlist.name + "», " + playlist.count + " пісень";
+                flat: true;
+                clicked => { root.select-playlist(playlist.id); }
+            }
+            VerticalLayout {
+                x: 10px; y: parent.height - 150px; width: parent.width - 20px;
+                height: 86px; spacing: 6px;
+                SFButton { width: root.side-width - 20px; left-align: true; text: "↗   Підключення"; flat: true; checkable: true; active: root.view == "connections"; clicked => { root.navigate("connections"); } }
+                SFButton { width: root.side-width - 20px; left-align: true; text: "⚙   Налаштування"; flat: true; checkable: true; active: root.view == "settings"; clicked => { root.navigate("settings"); } }
+            }
+            Rectangle { x: 18px; y: parent.height - 53px; width: parent.width - 36px; height: 1px; background: Theme.line; }
+            SFText { x: 18px; y: parent.height - 42px; width: parent.width - 36px; height: 18px; text: root.cloud-signed-in ? root.cloud-name : root.profile-name; font-size: 13px; font-weight: 600; }
+            SFMuted { x: 18px; y: parent.height - 23px; width: parent.width - 36px; height: 15px; text: root.cloud-signed-in ? "SoundFlow Account" : "Локальна бібліотека"; font-size: 11px; }
+        }
+
+        // Insets are measured from the workspace, so neither floating control
+        // spans the window or covers the scrollable content.
+        navbar := Rectangle {
+            x: root.side-width + (root.workspace-width - self.width) / 2;
+            y: 13px;
+            width: min(590px, root.workspace-width - 2 * root.content-inset);
+            height: 53px;
+            border-radius: 18px;
+            background: Theme.surface;
+            border-width: 1px; border-color: Theme.line;
+            drop-shadow-blur: 17px; drop-shadow-offset-y: 4px; drop-shadow-color: #0000000e;
+            accessible-role: navigation;
+            accessible-label: "Основна навігація";
+            HorizontalLayout {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                padding: 6px; spacing: 3px;
+                SFButton { text: "Головна"; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "home"; clicked => { root.navigate("home"); } }
+                SFButton { text: "Пошук"; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "search"; clicked => { root.navigate("search"); } }
+                SFButton { text: "Flow"; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "flow"; clicked => { root.navigate("flow"); } }
+                SFButton { text: "Статистика"; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "stats"; clicked => { root.navigate("stats"); } }
+                SFButton { width: 40px; text: "···"; icon: true; flat: true; label: "Меню SoundFlow"; clicked => { root.app-menu = !root.app-menu; } }
+            }
+        }
+
+        content := Rectangle {
+            x: root.side-width + root.content-inset;
+            y: 84px;
+            width: root.workspace-width - 2 * root.content-inset;
+            height: parent.height - self.y - 108px;
+            accessible-role: main;
+            accessible-label: "Вміст SoundFlow";
+
+            if root.view == "home" : HomeView {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                name: root.profile-name; compact: root.height < 780px;
+                navigate(view) => { root.navigate(view); }
+                discover(query) => { root.search(query, "all"); }
+                flow(genre) => { root.flow-action("genre:" + genre); root.navigate("flow"); }
+            }
+
+            if root.view == "search" || root.view == "liked" || root.view == "playlist" || root.view == "history" : Rectangle {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                private property <length> list-top: root.view == "search" ? 150px : 97px;
+                SFTitle { x: 0px; y: 0px; width: parent.width; height: 36px; text: root.view == "search" ? "Знайди свій звук" : root.view == "liked" ? "Улюблене" : root.view == "history" ? "Нещодавно слухав" : "Твій плейлист"; }
+                SFMuted { x: 0px; y: 40px; width: parent.width; height: 21px; text: root.view == "search" ? "Назва, виконавець або посилання на пісню." : root.tracks.length + " пісень у бібліотеці"; }
+                if root.view == "search" : HorizontalLayout {
+                    x: 0px; y: 77px; width: parent.width; height: 43px; spacing: 8px;
+                    SFField { horizontal-stretch: 1; text <=> root.search-query; label: "Пошук пісень"; placeholder: "Пісня, артист або URL"; input-type: InputType.search; focus-request: root.search-focus-request; accepted(query) => { root.search(query, root.search-source); } }
+                    SFButton { text: "Знайти"; primary: true; enabled: !root.task-loading; clicked => { root.search(root.search-query, root.search-source); } }
+                    SFButton { text: "Усі"; checkable: true; active: root.search-source == "all"; clicked => { root.search-source = "all"; root.search(root.search-query, "all"); } }
+                    SFButton { text: "SC"; label: "Шукати у SoundCloud"; checkable: true; active: root.search-source == "soundcloud"; clicked => { root.search-source = "soundcloud"; root.search(root.search-query, "soundcloud"); } }
+                    SFButton { text: "YouTube"; checkable: true; active: root.search-source == "youtube"; clicked => { root.search-source = "youtube"; root.search(root.search-query, "youtube"); } }
+                }
+                if root.view == "playlist" : HorizontalLayout {
+                    x: 0px; y: 58px; width: parent.width; height: 37px; spacing: 6px; alignment: start;
+                    SFButton { text: "Відтворити всі"; primary: true; enabled: root.tracks.length > 0; clicked => { root.action("play-playlist", ""); } }
+                    SFButton { text: "Перейменувати"; flat: true; clicked => { root.action("rename-playlist", ""); } }
+                    SFButton { text: "Видалити"; flat: true; danger: true; clicked => { root.action("delete-playlist", ""); } }
+                }
+                ListView {
+                    x: 0px; y: parent.list-top; width: parent.width; height: parent.height - self.y;
+                    horizontal-scrollbar-policy: always-off;
+                    for track in root.tracks : TrackItem {
+                        track: track; current: track.id == root.current-track.id; removable: root.view == "playlist";
+                        play(id) => { root.play-track(id); }
+                        like(id) => { root.like-track(id); }
+                        add(id) => { root.add-track(id); }
+                        download(id) => { root.download-track(id); }
+                        remove(id) => { root.action("remove-track", id); }
+                    }
+                }
+                if root.tracks.length == 0 : SFPanel {
+                    x: 0px; y: parent.list-top; width: parent.width; height: min(175px, parent.height - self.y);
+                    VerticalLayout {
+                        padding: 20px; spacing: 10px; alignment: center;
+                        SFText { text: root.task-loading ? "Шукаємо музику…" : root.view == "search" ? "Улюблений звук починається з пошуку" : "Тут з’являться твої пісні"; font-size: 17px; font-weight: 600; horizontal-alignment: center; }
+                        SFMuted { text: root.view == "search" ? "YouTube та SoundCloud. Spotify — через вибір доступного джерела." : "Знайди пісню та додай її у свою бібліотеку."; horizontal-alignment: center; wrap: word-wrap; }
+                        if root.view != "search" : SFButton { text: "Знайти музику"; clicked => { root.navigate("search"); } }
+                    }
+                }
+            }
+
+            if root.view == "playlists" : Rectangle {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                HorizontalLayout { x: 0px; y: 0px; width: parent.width; height: 44px; SFTitle { text: "Плейлисти"; } SFButton { text: "+ Створити"; primary: true; clicked => { root.action("create-playlist", ""); } } }
+                SFMuted { x: 0px; y: 49px; width: parent.width; height: 21px; text: "Уся твоя музика, зібрана разом."; }
+                ListView {
+                    x: 0px; y: 85px; width: parent.width; height: parent.height - self.y;
+                    horizontal-scrollbar-policy: always-off;
+                    for playlist in root.playlists : SFPanel {
+                        preferred-height: 81px;
+                        HorizontalLayout {
+                            padding: 12px; spacing: 12px;
+                            SFCover { width: 52px; height: 52px; artwork: playlist.artwork; }
+                            VerticalLayout { alignment: center; spacing: 4px; SFText { text: playlist.name; font-weight: 600; } SFMuted { text: playlist.count + " пісень"; } }
+                            SFButton { text: "Відкрити"; clicked => { root.select-playlist(playlist.id); } }
+                        }
+                    }
+                }
+                if root.playlists.length == 0 : SFMuted { x: 0px; y: 102px; width: parent.width; text: "Створи перший плейлист кнопкою вище."; }
+            }
+
+            if root.view == "downloads" : Rectangle {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                SFTitle { x: 0px; y: 0px; width: parent.width; height: 36px; text: "Завантаження"; }
+                SFMuted { x: 0px; y: 42px; width: parent.width; height: 38px; text: "SoundCloud і YouTube — за посиланням. Для Spotify обери відповідний запис з іншого джерела."; wrap: word-wrap; }
+                HorizontalLayout {
+                    x: 0px; y: 91px; width: parent.width; height: 44px; spacing: 9px;
+                    SFField { text <=> root.download-url; label: "Посилання для завантаження"; placeholder: "Встав посилання на пісню"; accepted(url) => { root.action("download-url", url); } }
+                    SFButton { text: "Завантажити"; primary: true; enabled: !root.task-loading && root.download-url != ""; clicked => { root.action("download-url", root.download-url); } }
+                    SFButton { text: "Відкрити папку"; flat: true; clicked => { root.action("open-downloads", ""); } }
+                }
+                ListView {
+                    x: 0px; y: 159px; width: parent.width; height: parent.height - self.y;
+                    horizontal-scrollbar-policy: always-off;
+                    for job in root.downloads : SFPanel {
+                        preferred-height: 97px;
+                        HorizontalLayout {
+                            padding: 12px; spacing: 12px;
+                            SFCover { width: 47px; height: 47px; artwork: job.artwork; }
+                            VerticalLayout {
+                                spacing: 4px;
+                                SFText { text: job.title; font-weight: 600; }
+                                SFMuted { text: job.status + "  ·  " + job.details; }
+                                Rectangle {
+                                    height: 4px; border-radius: 2px; background: Theme.line;
+                                    accessible-role: progress-indicator; accessible-label: "Завантаження «" + job.title + "»"; accessible-value: "" + job.progress; accessible-value-minimum: 0; accessible-value-maximum: 100;
+                                    Rectangle { x: 0px; y: 0px; width: parent.width * min(1, max(0, job.progress / 100)); height: parent.height; border-radius: 2px; background: Theme.ink; }
+                                }
+                            }
+                            if job.cancellable : SFButton { text: "Скасувати"; clicked => { root.action("cancel-download", job.id); } }
+                        }
+                    }
+                }
+                if root.downloads.length == 0 : SFMuted { x: 0px; y: 177px; width: parent.width; text: "Черга порожня. Додай посилання або обери пісню у пошуку."; wrap: word-wrap; }
+            }
+
+            if root.view == "flow" : Rectangle {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                HorizontalLayout { x: 0px; y: 0px; width: parent.width; height: 38px; SFTitle { text: "Flow"; } SFButton { text: "Оновити добірку"; flat: true; clicked => { root.flow-action("refresh"); } } }
+                SFMuted { x: 0px; y: 43px; width: parent.width; height: 22px; text: "Слухай уривок. Ліворуч — пропустити, праворуч — вподобати."; }
+                HorizontalLayout {
+                    x: 0px; y: 76px; width: parent.width; height: 40px; spacing: 5px;
+                    SFButton { text: "Lo-fi"; checkable: true; active: root.flow-genre == "lofi"; clicked => { root.flow-action("genre:lofi"); } }
+                    SFButton { text: "Deep house"; checkable: true; active: root.flow-genre == "deep"; clicked => { root.flow-action("genre:deep"); } }
+                    SFButton { text: "Ambient"; checkable: true; active: root.flow-genre == "ambient"; clicked => { root.flow-action("genre:ambient"); } }
+                    SFButton { text: "Synthwave"; checkable: true; active: root.flow-genre == "synthwave"; clicked => { root.flow-action("genre:synthwave"); } }
+                    SFButton { text: "Українська"; checkable: true; active: root.flow-genre == "ua"; clicked => { root.flow-action("genre:ua"); } }
+                    SFButton { text: "Rock"; checkable: true; active: root.flow-genre == "rock"; clicked => { root.flow-action("genre:rock"); } }
+                }
+                SFPanel {
+                    x: (parent.width - self.width) / 2; y: 137px;
+                    width: min(650px, parent.width);
+                    height: parent.height - self.y;
+                    SwipeGestureHandler {
+                        enabled: !root.modal-open && root.flow-track.id != "";
+                        handle-swipe-left: true; handle-swipe-right: true;
+                        swiped => {
+                            if self.current-position.x > self.pressed-position.x + 50px { root.flow-action("like"); }
+                            else if self.current-position.x < self.pressed-position.x - 50px { root.flow-action("skip"); }
+                        }
+                        HorizontalLayout {
+                            padding: 20px; spacing: 25px;
+                            SFCover { width: min(230px, parent.height - 40px); height: self.width; artwork: root.flow-track.artwork; }
+                            VerticalLayout {
+                                spacing: 10px; alignment: center;
+                                SFMuted { text: root.flow-count > 0 ? "ВІДКРИТТЯ " + (root.flow-index + 1) + " / " + root.flow-count : "НОВІ ВІДКРИТТЯ"; font-size: 11px; }
+                                SFTitle { text: root.flow-track.id == "" ? root.task-loading ? "Шукаємо твій звук…" : "Почни з настрою" : root.flow-track.title; font-size: 23px; wrap: word-wrap; }
+                                SFMuted { text: root.flow-track.artist; font-size: 15px; wrap: word-wrap; }
+                                SFMuted { text: root.flow-track.id == "" ? "Обери жанр зверху, щоб відкрити добірку." : root.flow-track.source + " · уривок до 30 секунд"; wrap: word-wrap; }
+                                Rectangle { height: 4px; border-radius: 2px; background: Theme.line; Rectangle { x: 0px; y: 0px; width: parent.width * min(1, max(0, root.flow-progress)); height: parent.height; border-radius: 2px; background: Theme.ink; } }
+                                HorizontalLayout {
+                                    spacing: 6px; alignment: start;
+                                    SFButton { text: "×"; label: "Пропустити пісню"; icon: true; enabled: root.flow-track.id != ""; clicked => { root.flow-action("skip"); } }
+                                    SFButton { text: root.flow-playing ? "Ⅱ" : "▶"; label: root.flow-playing ? "Призупинити уривок" : "Відтворити уривок"; primary: true; icon: true; enabled: root.flow-track.id != ""; clicked => { root.flow-action("play"); } }
+                                    SFButton { text: "♡"; label: "Вподобати пісню та перейти до наступної"; icon: true; enabled: root.flow-track.id != ""; clicked => { root.flow-action("like"); } }
+                                    SFButton { text: "+"; label: "Додати пісню до плейлиста"; icon: true; enabled: root.flow-track.id != ""; clicked => { root.flow-action("save"); } }
+                                }
+                                SFMuted { text: "← пропустити   → вподобати   Пробіл — слухати"; font-size: 11px; wrap: word-wrap; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.view == "stats" : ScrollView {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                content-width: self.width; horizontal-scrollbar-policy: always-off;
+                VerticalLayout {
+                    padding-right: 10px; spacing: 18px;
+                    SFTitle { text: "Твій музичний портрет"; }
+                    if !root.subscription-active : SFPanel {
+                        preferred-height: 272px;
+                        VerticalLayout {
+                            padding: 27px; spacing: 14px; alignment: center;
+                            SFMuted { text: "SOUNDFLOW PLUS"; font-size: 11px; font-weight: 600; }
+                            SFTitle { text: "Ти слухаєш. Музика розповідає."; font-size: 25px; wrap: word-wrap; }
+                            SFMuted { text: "Улюблені артисти, пісні та час прослуховування з різних джерел. Статистика доступна з Plus за $1 на місяць."; wrap: word-wrap; }
+                            HorizontalLayout {
+                                alignment: start; spacing: 9px;
+                                SFButton { text: "Підключити Plus · $1/міс"; primary: true; enabled: root.cloud-signed-in; clicked => { root.action("checkout", ""); } }
+                                SFButton { text: "Відновити підписку"; enabled: root.cloud-signed-in; clicked => { root.action("refresh-subscription", ""); } }
+                            }
+                            SFMuted { text: root.subscription-message != "" ? root.subscription-message : root.cloud-signed-in ? "Підписка перевіряється через твій SoundFlow Account." : "Спочатку підключи SoundFlow Account у налаштуваннях."; wrap: word-wrap; }
+                        }
+                    }
+                    if root.subscription-active : VerticalLayout {
+                        spacing: 17px;
+                        HorizontalLayout {
+                            height: 41px; spacing: 6px;
+                            SFButton { text: "7 днів"; checkable: true; active: root.stats-period == "7d"; clicked => { root.stats-period = "7d"; root.action("stats-period", "7d"); } }
+                            SFButton { text: "30 днів"; checkable: true; active: root.stats-period == "30d"; clicked => { root.stats-period = "30d"; root.action("stats-period", "30d"); } }
+                            SFButton { text: "Увесь час"; checkable: true; active: root.stats-period == "all"; clicked => { root.stats-period = "all"; root.action("stats-period", "all"); } }
+                            SFButton { text: "Імпортувати історію"; flat: true; clicked => { root.action("import-listening", ""); } }
+                        }
+                        HorizontalLayout {
+                            height: 39px; spacing: 5px;
+                            SFButton { text: "Усі"; checkable: true; active: root.stats-source == "all"; clicked => { root.stats-source = "all"; root.action("stats-source", "all"); } }
+                            SFButton { text: "Spotify"; checkable: true; active: root.stats-source == "spotify"; clicked => { root.stats-source = "spotify"; root.action("stats-source", "spotify"); } }
+                            SFButton { text: "SoundCloud"; checkable: true; active: root.stats-source == "soundcloud"; clicked => { root.stats-source = "soundcloud"; root.action("stats-source", "soundcloud"); } }
+                            SFButton { text: "YouTube"; checkable: true; active: root.stats-source == "youtube"; clicked => { root.stats-source = "youtube"; root.action("stats-source", "youtube"); } }
+                            SFButton { text: "Локальні"; checkable: true; active: root.stats-source == "local"; clicked => { root.stats-source = "local"; root.action("stats-source", "local"); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            for metric in root.metrics : SFPanel {
+                                preferred-height: 100px;
+                                VerticalLayout { padding: 16px; spacing: 5px; SFTitle { text: metric.value; font-size: 26px; } SFMuted { text: metric.label; } }
+                            }
+                        }
+                        SFPanel {
+                            min-height: 190px;
+                            VerticalLayout {
+                                padding: 18px; spacing: 12px;
+                                SFText { height: 23px; text: "Ритм прослуховування"; font-size: 17px; font-weight: 600; }
+                                HorizontalLayout {
+                                    height: 110px; spacing: 4px;
+                                    for day in root.daily : Rectangle {
+                                        min-width: 3px;
+                                        accessible-role: text;
+                                        accessible-label: day.label + ": " + day.value;
+                                        Rectangle { x: 0px; y: parent.height * (1 - min(1, max(0, day.level))); width: parent.width; height: max(2px, parent.height * min(1, max(0, day.level))); border-radius: min(4px, self.width / 2); background: Theme.ink; }
+                                    }
+                                }
+                                if root.daily.length > 0 : HorizontalLayout {
+                                    height: 16px;
+                                    SFMuted { text: root.daily[0].label; font-size: 11px; }
+                                    SFMuted { text: root.daily[root.daily.length - 1].label; font-size: 11px; horizontal-alignment: right; }
+                                }
+                                if root.daily.length == 0 : SFMuted { text: "Статистика з’явиться після прослуховування."; }
+                            }
+                        }
+                        SFPanel {
+                            VerticalLayout {
+                                padding: 18px; spacing: 8px;
+                                SFText { text: "Улюблені артисти"; font-size: 17px; font-weight: 600; }
+                                for artist[index] in root.artists : HorizontalLayout { height: 31px; SFMuted { width: 25px; text: "" + (index + 1); } SFText { text: artist.label; } SFMuted { text: artist.detail; horizontal-alignment: right; } }
+                            }
+                        }
+                        SFPanel {
+                            VerticalLayout {
+                                padding: 18px; spacing: 8px;
+                                SFText { text: "Найчастіше слухаєш"; font-size: 17px; font-weight: 600; }
+                                for track[index] in root.top-tracks : HorizontalLayout { height: 31px; SFMuted { width: 25px; text: "" + (index + 1); } SFText { text: track.label; } SFMuted { text: track.detail; horizontal-alignment: right; } }
+                            }
+                        }
+                        SFPanel {
+                            VerticalLayout {
+                                padding: 18px; spacing: 8px;
+                                SFText { text: "Твої джерела"; font-size: 17px; font-weight: 600; }
+                                for provider in root.providers : HorizontalLayout { height: 31px; SFText { text: provider.label; } SFMuted { text: provider.detail; horizontal-alignment: right; } }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.view == "settings" : ScrollView {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                content-width: self.width; horizontal-scrollbar-policy: always-off;
+                VerticalLayout {
+                    padding-right: 10px; spacing: 18px;
+                    SFTitle { text: "Налаштування"; }
+                    SFPanel {
+                        VerticalLayout {
+                            padding: 20px; spacing: 14px;
+                            SFText { text: "Як тобі зручно"; font-size: 18px; font-weight: 600; }
+                            HorizontalLayout {
+                                SFText { text: "Вигляд"; vertical-alignment: center; }
+                                SFButton { text: "Світлий"; checkable: true; active: !root.dark; clicked => { root.action("set-theme", "light"); } }
+                                SFButton { text: "Темний"; checkable: true; active: root.dark; clicked => { root.action("set-theme", "dark"); } }
+                            }
+                            HorizontalLayout {
+                                VerticalLayout { SFText { text: "Менше руху"; } SFMuted { text: "Прибирає переходи та анімації."; } }
+                                SFButton { text: root.reduced-motion ? "Увімкнено" : "Вимкнено"; label: "Менше руху: " + (root.reduced-motion ? "увімкнено" : "вимкнено"); checkable: true; active: root.reduced-motion; clicked => { root.action("set-reduced-motion", root.reduced-motion ? "false" : "true"); } }
+                            }
+                            HorizontalLayout {
+                                VerticalLayout { SFText { text: "Згортати у трей"; } SFMuted { text: "Після закриття вікна музика продовжує грати."; } }
+                                SFButton { text: root.close-to-tray ? "Увімкнено" : "Вимкнено"; label: "Згортати у трей: " + (root.close-to-tray ? "увімкнено" : "вимкнено"); checkable: true; active: root.close-to-tray; clicked => { root.action("set-close-to-tray", root.close-to-tray ? "false" : "true"); } }
+                            }
+                            HorizontalLayout {
+                                VerticalLayout { SFText { text: "Медіаклавіші"; } SFMuted { text: "Керування з клавіатури працює у фоновому режимі."; } }
+                                SFButton { text: root.media-hotkeys ? "Увімкнено" : "Вимкнено"; label: "Медіаклавіші: " + (root.media-hotkeys ? "увімкнено" : "вимкнено"); checkable: true; active: root.media-hotkeys; clicked => { root.action("set-media-hotkeys", root.media-hotkeys ? "false" : "true"); } }
+                            }
+                            HorizontalLayout {
+                                SFField { text <=> root.edited-name; label: "Твоє ім’я"; placeholder: root.profile-name; accepted(name) => { root.action("update-profile", name); } }
+                                SFButton { text: "Зберегти ім’я"; enabled: root.edited-name != ""; clicked => { root.action("update-profile", root.edited-name); } }
+                            }
+                        }
+                    }
+                    SFPanel {
+                        VerticalLayout {
+                            padding: 20px; spacing: 14px;
+                            SFText { text: "Бібліотека"; font-size: 18px; font-weight: 600; }
+                            SFMuted { text: "Локальні файли, резервна копія та історія прослуховування."; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 7px;
+                                SFButton { text: "Додати папку музики"; clicked => { root.action("scan-local", ""); } }
+                                SFButton { text: "Експортувати"; clicked => { root.action("export-library", ""); } }
+                                SFButton { text: "Імпортувати"; clicked => { root.action("import-library", ""); } }
+                                SFButton { text: "Очистити історію"; danger: true; flat: true; clicked => { root.action("clear-history", ""); } }
+                            }
+                        }
+                    }
+                    SFPanel {
+                        VerticalLayout {
+                            padding: 20px; spacing: 13px;
+                            SFText { text: "SoundFlow Account"; font-size: 18px; font-weight: 600; }
+                            SFMuted { text: "Підключи власний сервер SoundFlow для облікового запису, бібліотеки та Plus."; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                SFField { text <=> root.server-url; label: "Адреса сервера SoundFlow"; placeholder: root.cloud-url != "" ? root.cloud-url : "https://твій-сервер.example"; accepted(url) => { root.configure-cloud(url); } }
+                                SFButton { text: "Підключити сервер"; enabled: root.server-url != "" && !root.task-loading; clicked => { root.configure-cloud(root.server-url); } }
+                            }
+                            if root.cloud-signed-in : VerticalLayout {
+                                spacing: 12px;
+                                SFText { text: root.cloud-name + " · " + root.cloud-email; font-weight: 600; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    spacing: 7px;
+                                    SFButton { text: "Надіслати бібліотеку"; enabled: !root.task-loading; clicked => { root.sync-library("push"); } }
+                                    SFButton { text: "Отримати з хмари"; enabled: !root.task-loading; clicked => { root.sync-library("pull"); } }
+                                    SFButton { text: "Вийти"; flat: true; enabled: !root.task-loading; clicked => { root.sign-out(); } }
+                                }
+                                SFMuted { text: "Отримання з хмари замінить локальну бібліотеку після підтвердження та збереження копії."; wrap: word-wrap; }
+                            }
+                            if !root.cloud-signed-in && root.cloud-configured : VerticalLayout {
+                                spacing: 10px;
+                                HorizontalLayout {
+                                    spacing: 7px; alignment: start;
+                                    SFButton { text: "Увійти"; checkable: true; active: !root.register-mode; clicked => { root.register-mode = false; root.auth-password = ""; } }
+                                    SFButton { text: "Створити акаунт"; checkable: true; active: root.register-mode; clicked => { root.register-mode = true; root.auth-password = ""; } }
+                                }
+                                if root.register-mode : SFField { text <=> root.auth-name; label: "Ім’я для нового акаунта"; placeholder: "Твоє ім’я"; }
+                                SFField { text <=> root.auth-email; label: "Електронна пошта"; placeholder: "Електронна пошта"; }
+                                SFField { text <=> root.auth-password; label: "Пароль"; placeholder: "Пароль"; input-type: password; accepted(password) => { if root.register-mode { root.sign-up(root.auth-name, root.auth-email, password); } else { root.sign-in(root.auth-email, password); } root.auth-password = ""; } }
+                                SFButton { text: root.register-mode ? "Зареєструватися" : "Увійти в SoundFlow"; primary: true; enabled: !root.task-loading && root.auth-email != "" && root.auth-password != ""; clicked => { if root.register-mode { root.sign-up(root.auth-name, root.auth-email, root.auth-password); } else { root.sign-in(root.auth-email, root.auth-password); } root.auth-password = ""; } }
+                            }
+                        }
+                    }
+                    SFPanel {
+                        HorizontalLayout {
+                            padding: 16px; spacing: 12px;
+                            Image { width: 40px; height: 40px; source: @image-url("../resources/icon.png"); accessible-role: none; }
+                            VerticalLayout { SFText { text: "SoundFlow"; font-weight: 600; } SFMuted { text: "Нативний музичний застосунок"; } }
+                            SFButton { text: "Про застосунок"; clicked => { root.action("about", ""); } }
+                        }
+                    }
+                }
+            }
+
+            if root.view == "connections" : ScrollView {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                content-width: self.width; horizontal-scrollbar-policy: always-off;
+                VerticalLayout {
+                    padding-right: 10px; spacing: 18px;
+                    SFTitle { text: "Твоя музика звідусіль"; }
+                    SFMuted { text: "Імпортуй плейлисти та шукай пісні з різних сервісів у спільній бібліотеці."; wrap: word-wrap; }
+                    for service in [ { name: "Spotify", key: "spotify", description: "Імпорт плейлиста за посиланням. Для відтворення й завантаження обирається запис у SoundCloud або YouTube." }, { name: "SoundCloud", key: "soundcloud", description: "Пісні та плейлисти за посиланням або профілем." }, { name: "YouTube", key: "youtube", description: "Відео, музика та плейлисти за посиланням." } ] : SFPanel {
+                        preferred-height: 135px;
+                        VerticalLayout {
+                            padding: 18px; spacing: 10px;
+                            HorizontalLayout { SFText { text: service.name; font-size: 20px; font-weight: 600; } SFButton { text: "Імпортувати"; clicked => { root.action("import-provider", service.key); } } }
+                            SFMuted { text: service.description; wrap: word-wrap; }
+                        }
+                    }
+                }
+            }
+        }
+
+        player := Rectangle {
+            x: root.side-width + (root.workspace-width - self.width) / 2;
+            y: parent.height - 93px;
+            width: min(980px, root.workspace-width - 2 * root.content-inset);
+            height: 78px;
+            border-radius: 20px;
+            background: Theme.surface;
+            border-width: 1px; border-color: Theme.line;
+            drop-shadow-blur: 22px; drop-shadow-offset-y: 3px; drop-shadow-color: #00000012;
+            accessible-role: region;
+            accessible-label: "Музичний плеєр";
+            HorizontalLayout {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                padding-left: 14px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px; spacing: 8px;
+                SFCover { width: 47px; height: 47px; artwork: root.current-track.artwork; }
+                VerticalLayout {
+                    width: min(206px, root.workspace-width * 0.22); alignment: center; spacing: 3px;
+                    SFText { text: root.current-track.id == "" ? "Обери пісню" : root.current-track.title; font-size: 13px; font-weight: 600; }
+                    SFMuted { text: root.loading ? "Готуємо звук…" : root.current-track.id == "" ? "Музика починається тут" : root.current-track.artist; font-size: 12px; }
+                }
+                SFButton { text: root.current-track.liked ? "♥" : "♡"; label: root.current-track.liked ? "Прибрати поточну пісню з улюбленого" : "Вподобати поточну пісню"; checkable: true; checked: root.current-track.liked; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.like-track(root.current-track.id); } }
+                SFButton { text: "‹"; label: "Попередня пісня"; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.player-action("previous"); } }
+                SFButton { text: root.playing ? "Ⅱ" : "▶"; label: root.playing ? "Призупинити" : "Відтворити"; primary: true; icon: true; enabled: root.current-track.id != ""; clicked => { root.player-action("toggle"); } }
+                SFButton { text: "›"; label: "Наступна пісня"; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.player-action("next"); } }
+                VerticalLayout {
+                    horizontal-stretch: 1; min-width: 60px; spacing: 0px; alignment: center;
+                    SFSlider { value: root.position; maximum: root.duration; step: 5; label: "Позиція відтворення у секундах"; enabled: root.current-track.id != ""; released(value) => { root.seek(value); } changed(value) => { if !self.enabled { return; } } }
+                    HorizontalLayout {
+                        height: 16px;
+                        SFMuted { text: Math.floor(root.position / 60) + ":" + (mod(Math.floor(root.position), 60) < 10 ? "0" : "") + mod(Math.floor(root.position), 60); font-size: 10px; }
+                        SFMuted { text: Math.floor(root.duration / 60) + ":" + (mod(Math.floor(root.duration), 60) < 10 ? "0" : "") + mod(Math.floor(root.duration), 60); font-size: 10px; horizontal-alignment: right; }
+                    }
+                }
+                if root.width >= 1200px : SFSlider { width: 72px; label: "Гучність"; value: root.volume; maximum: 1; step: 0.05; changed(value) => { root.set-volume(value); } released(value) => { root.set-volume(value); } }
+                SFButton { text: "···"; label: "Додаткові налаштування плеєра"; icon: true; flat: true; clicked => { root.player-options = !root.player-options; } }
+            }
+        }
+
+        if root.player-options : SFPanel {
+            x: player.x + player.width - self.width;
+            y: root.height - 249px; width: 260px; height: 146px;
+            drop-shadow-blur: 20px; drop-shadow-color: #00000018;
+            VerticalLayout {
+                padding: 13px; spacing: 8px;
+                HorizontalLayout { SFMuted { width: 61px; text: "Гучність"; vertical-alignment: center; } SFSlider { value: root.volume; maximum: 1; step: 0.05; label: "Гучність"; changed(value) => { root.set-volume(value); } released(value) => { root.set-volume(value); } } }
+                HorizontalLayout { spacing: 7px; SFButton { text: "Випадково"; checkable: true; active: root.shuffle; clicked => { root.player-action("shuffle"); } } SFButton { text: root.repeat-mode == "one" ? "Повтор однієї" : "Повтор"; label: root.repeat-mode == "one" ? "Повтор однієї пісні" : root.repeat-mode == "all" ? "Повтор усіх пісень" : "Повтор вимкнено"; checkable: true; active: root.repeat-mode != "off"; clicked => { root.player-action("repeat"); } } }
+                SFButton { text: "Черга відтворення"; flat: true; clicked => { root.player-action("queue"); root.player-options = false; } }
+            }
+        }
+
+        if root.app-menu : SFPanel {
+            x: navbar.x + navbar.width - self.width; y: 74px; width: 210px; height: 109px;
+            drop-shadow-blur: 20px; drop-shadow-color: #00000018;
+            VerticalLayout {
+                padding: 8px; spacing: 5px;
+                SFButton { text: "Налаштування"; flat: true; clicked => { root.navigate("settings"); root.app-menu = false; } }
+                SFButton { text: "Про SoundFlow"; flat: true; clicked => { root.action("about", ""); root.app-menu = false; } }
+            }
+        }
+        if root.message != "" : SFPanel {
+            x: root.side-width + (root.workspace-width - self.width) / 2;
+            y: root.height - 155px; width: min(650px, root.workspace-width - 48px); height: 50px;
+            accessible-role: region; accessible-label: "Повідомлення"; accessible-live-region: polite;
+            HorizontalLayout { padding-left: 14px; padding-right: 6px; spacing: 8px; SFText { text: root.message; font-size: 13px; vertical-alignment: center; } SFButton { text: "×"; label: "Закрити повідомлення"; icon: true; flat: true; clicked => { root.action("dismiss-message", ""); } } }
+        }
+    }
+
+    if root.modal-open : FocusScope {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { if !root.modal-busy { root.modal-action("close", ""); } return accept; }
+            return reject;
+        }
+        Rectangle {
+            x: 0px; y: 0px; width: parent.width; height: parent.height; background: #00000055;
+            TouchArea { clicked => { if !root.modal-busy { root.modal-action("close", ""); } } }
+        }
+        SFPanel {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: min(650px, parent.width - 80px);
+            height: min(root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : 310px, parent.height - 70px);
+            drop-shadow-blur: 30px; drop-shadow-color: #00000025;
+            accessible-role: region; accessible-label: root.modal-title;
+            TouchArea { }
+            FocusScope { width: 0px; height: 0px; changed has-focus => { if self.has-focus { dialog-cancel.focus(); } } }
+            VerticalLayout {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                padding: 24px; spacing: 13px;
+                HorizontalLayout { height: 40px; SFTitle { text: root.modal-title; font-size: 22px; } dialog-close := SFButton { text: "×"; label: "Закрити діалог"; icon: true; flat: true; modal-control: true; enabled: !root.modal-busy; init => { self.focus(); } clicked => { root.modal-action("close", ""); } } }
+                SFMuted { text: root.modal-description; wrap: word-wrap; }
+                if root.modal-kind == "about" : VerticalLayout {
+                    spacing: 15px;
+                    HorizontalLayout { spacing: 14px; Image { width: 64px; height: 64px; source: @image-url("../resources/icon.png"); accessible-role: none; } VerticalLayout { SFTitle { text: "SoundFlow"; font-size: 24px; } SFMuted { text: "Нативний музичний застосунок · Rust"; } } }
+                    SFMuted { text: "Клавіші: Ctrl+K — пошук, Пробіл — відтворення, Esc — закрити діалог. У Flow: ← пропустити, → вподобати."; wrap: word-wrap; }
+                    AboutSlint { }
+                }
+                if root.modal-kind == "match" : ListView {
+                    horizontal-scrollbar-policy: always-off;
+                    for track in root.match-tracks : TrackItem {
+                        track: track; modal-control: true;
+                        play(id) => { root.modal-action("select-match", id); }
+                        like(id) => { root.like-track(id); }
+                        add(id) => { root.add-track(id); }
+                        download(id) => { root.modal-action("download-match", id); }
+                    }
+                }
+                if root.modal-kind == "queue" : ListView {
+                    horizontal-scrollbar-policy: always-off;
+                    for track in root.match-tracks : SFButton { text: track.title + " · " + track.artist; left-align: true; horizontal-stretch: 1; modal-control: true; clicked => { root.modal-action("play-queue", track.id); } }
+                }
+                if root.modal-kind == "add-to-playlist" : ListView {
+                    horizontal-scrollbar-policy: always-off;
+                    for playlist in root.playlists : SFButton { text: playlist.name + "  ·  " + playlist.count + " пісень"; modal-control: true; clicked => { root.modal-action("select-playlist", playlist.id); } }
+                }
+                if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" && root.modal-kind != "confirm" : SFField {
+                    text <=> root.modal-value; label: root.modal-title; placeholder: "Введи значення"; modal-control: true; enabled: !root.modal-busy;
+                    accepted(value) => { root.modal-submit(value); }
+                }
+                if root.modal-error != "" : SFText { text: root.modal-error; color: Theme.danger; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: end; spacing: 8px;
+                    dialog-cancel := SFButton { text: root.modal-kind == "about" ? "Готово" : "Скасувати"; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-action("close", ""); } }
+                    if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" : SFButton { text: root.modal-busy ? "Зачекай…" : root.modal-kind == "confirm" ? "Підтвердити" : "Зберегти"; primary: true; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-submit(root.modal-value); } }
+                    if root.modal-kind == "add-to-playlist" : SFButton { text: "+ Новий плейлист"; primary: true; modal-control: true; clicked => { root.modal-action("create-playlist", ""); } }
+                }
+            }
+            FocusScope { width: 0px; height: 0px; changed has-focus => { if self.has-focus { dialog-close.focus(); } } }
+        }
+    }
+}

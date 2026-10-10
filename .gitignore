@@ -1,24 +1,12 @@
-﻿# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# PyInstaller / Distribution
-build/
-dist/
-*.exe
-installer/soundflow_payload.zip
-
-# Local data & user cache
-data/
+/target/
+/dist/
+/output/
+/.dev-data/
+**/node_modules/
+/media-provider/dist/
+/resources/runtime/*.exe
+/resources/runtime/runtime.json
 *.log
-log_*.txt
-error_*.txt
-
-# Environments & IDEs
 .env
-.venv
-env/
-venv/
 .vscode/
 .idea/

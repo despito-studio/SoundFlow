@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="SoundFlow">
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="#171717"/>
+  <g fill="#fafaf9" transform="rotate(14 256 256)">
+    <rect x="139" y="187" width="36" height="138" rx="18"/>
+    <rect x="205" y="148" width="36" height="216" rx="18"/>
+    <rect x="271" y="112" width="36" height="288" rx="18"/>
+    <rect x="337" y="169" width="36" height="174" rx="18"/>
+  </g>
+</svg>

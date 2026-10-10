@@ -1,0 +1,37 @@
+import { TrackRow } from "models.slint";
+import { Theme, SFButton, SFCover, SFText, SFMuted } from "controls.slint";
+
+export component TrackItem inherits Rectangle {
+    in property <TrackRow> track;
+    in property <bool> current: false;
+    in property <bool> removable: false;
+    in property <bool> modal-control: false;
+    callback play(string);
+    callback like(string);
+    callback add(string);
+    callback download(string);
+    callback remove(string);
+    min-height: 68px;
+    preferred-height: 68px;
+    background: current ? Theme.raised : transparent;
+    border-radius: 12px;
+    accessible-role: list-item;
+    accessible-label: track.title + ", " + track.artist + ", " + track.source;
+    HorizontalLayout {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        padding-left: 8px; padding-right: 4px; spacing: 8px;
+        SFCover { width: 44px; height: 44px; artwork: root.track.artwork; }
+        VerticalLayout {
+            padding-top: 10px; padding-bottom: 10px; spacing: 3px;
+            horizontal-stretch: 1;
+            SFText { text: root.track.title; font-weight: 600; }
+            SFMuted { text: root.track.artist + "  ·  " + root.track.source; }
+        }
+        SFMuted { width: 48px; text: root.track.duration; horizontal-alignment: right; vertical-alignment: center; }
+        SFButton { text: "▶"; label: "Відтворити «" + root.track.title + "»"; icon: true; flat: true; modal-control: root.modal-control; clicked => { root.play(root.track.id); } }
+        SFButton { text: root.track.liked ? "♥" : "♡"; label: root.track.liked ? "Прибрати «" + root.track.title + "» з улюбленого" : "Вподобати «" + root.track.title + "»"; icon: true; flat: true; checkable: true; active: root.track.liked; modal-control: root.modal-control; clicked => { root.like(root.track.id); } }
+        SFButton { text: "+"; label: "Додати «" + root.track.title + "» до плейлиста"; icon: true; flat: true; modal-control: root.modal-control; clicked => { root.add(root.track.id); } }
+        SFButton { text: "↓"; label: "Завантажити «" + root.track.title + "»"; icon: true; flat: true; modal-control: root.modal-control; clicked => { root.download(root.track.id); } }
+        if root.removable : SFButton { text: "×"; label: "Прибрати «" + root.track.title + "» з плейлиста"; icon: true; flat: true; danger: true; modal-control: root.modal-control; clicked => { root.remove(root.track.id); } }
+    }
+}

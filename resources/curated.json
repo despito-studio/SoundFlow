@@ -1,0 +1,58 @@
+[
+  {
+    "query": "Tame Impala Currents B-Sides Remixes",
+    "artist": "Tame Impala",
+    "title": "Currents B-Sides & Remixes",
+    "art": "resources/covers/0.jpg",
+    "url": "https://music.apple.com/us/album/currents-b-sides-remixes-ep/1440875696?uo=4"
+  },
+  {
+    "query": "Billie Eilish HIT ME HARD AND SOFT",
+    "artist": "Billie Eilish",
+    "title": "HIT ME HARD AND SOFT",
+    "art": "resources/covers/1.jpg",
+    "url": "https://music.apple.com/us/album/hit-me-hard-and-soft/1739659134?uo=4"
+  },
+  {
+    "query": "Frank Ocean Novacane",
+    "artist": "Frank Ocean",
+    "title": "Novacane",
+    "art": "resources/covers/3.jpg",
+    "url": "https://music.apple.com/us/album/novacane-single/1445278500?uo=4"
+  },
+  {
+    "query": "The Weeknd After Hours",
+    "artist": "The Weeknd",
+    "title": "After Hours",
+    "art": "resources/covers/5.jpg",
+    "url": "https://music.apple.com/us/album/after-hours/1499385848?uo=4"
+  },
+  {
+    "query": "Daft Punk Random Access Memories",
+    "artist": "Daft Punk",
+    "title": "Random Access Memories",
+    "art": "resources/covers/6.jpg",
+    "url": "https://music.apple.com/us/album/random-access-memories/617154241?uo=4"
+  },
+  {
+    "query": "Men I Trust Untourable Album",
+    "artist": "Men I Trust",
+    "title": "Untourable Album",
+    "art": "resources/covers/7.jpg",
+    "url": "https://music.apple.com/us/album/untourable-album/1720804300?uo=4"
+  },
+  {
+    "query": "Bonobo Fragments",
+    "artist": "Bonobo",
+    "title": "Fragments",
+    "art": "resources/covers/8.jpg",
+    "url": "https://music.apple.com/us/album/fragments/1584968878?uo=4"
+  },
+  {
+    "query": "Kendrick Lamar DAMN.",
+    "artist": "Kendrick Lamar",
+    "title": "DAMN.",
+    "art": "resources/covers/9.jpg",
+    "url": "https://music.apple.com/us/album/damn/1440881722?uo=4"
+  }
+]

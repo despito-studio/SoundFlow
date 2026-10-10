@@ -1,0 +1,19 @@
+export component SoundFlowTray inherits SystemTrayIcon {
+    icon: @image-url("../resources/icon.png");
+    tooltip: "SoundFlow";
+    title: "SoundFlow";
+    in-out property <bool> playing;
+    callback show-window();
+    callback play-pause();
+    callback next-track();
+    callback quit-app();
+    clicked => { root.show-window(); }
+    Menu {
+        MenuItem { title: "Відкрити SoundFlow"; activated => { root.show-window(); } }
+        MenuSeparator { }
+        MenuItem { title: root.playing ? "Призупинити" : "Відтворити"; activated => { root.play-pause(); } }
+        MenuItem { title: "Наступна пісня"; activated => { root.next-track(); } }
+        MenuSeparator { }
+        MenuItem { title: "Вийти з SoundFlow"; activated => { root.quit-app(); } }
+    }
+}

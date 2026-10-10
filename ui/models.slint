@@ -1,0 +1,31 @@
+export struct TrackRow {
+    id: string,
+    title: string,
+    artist: string,
+    source: string,
+    duration: string,
+    liked: bool,
+    artwork: image,
+}
+
+export struct PlaylistRow {
+    id: string,
+    name: string,
+    count: int,
+    artwork: image,
+}
+
+export struct DownloadRow {
+    id: string,
+    title: string,
+    artist: string,
+    status: string,
+    details: string,
+    progress: float,
+    cancellable: bool,
+    artwork: image,
+}
+
+export struct RankRow { label: string, detail: string }
+export struct StatMetric { label: string, value: string }
+export struct DailyRow { label: string, value: string, level: float }

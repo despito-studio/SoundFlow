@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+
+# Preserve whitespace from the official third-party license.
+resources/runtime/NODE-LICENSE.txt -whitespace

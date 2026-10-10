@@ -1,0 +1,1978 @@
+//! Native UI adapters, asynchronous commands, and playback orchestration.
+use crate::{
+    desktop::Desktop,
+    playback::{AudioEvent, AudioPlayer, ListeningReport},
+    AppWindow, DailyRow, DownloadRow, PlaylistRow, RankRow, StatMetric, TrackRow,
+};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use std::{
+    collections::HashMap,
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        mpsc::{self, Receiver, SyncSender},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
+
+#[derive(Default)]
+struct UiData {
+    library: Value,
+    cloud: Value,
+    settings: Value,
+    registry: HashMap<String, Value>,
+    search: Vec<Value>,
+    home: Vec<Value>,
+    flow: Vec<Value>,
+    flow_index: usize,
+    preview: bool,
+    preview_start: f64,
+    selected_playlist: String,
+    queue: Vec<Value>,
+    queue_index: usize,
+    shuffle: bool,
+    repeat: u8,
+    pending_track: Option<Value>,
+    add_to_new_playlist: bool,
+    user: String,
+    downloads: Vec<Value>,
+    stats: Value,
+    matches: Vec<Value>,
+    matches_owner: String,
+    pending_confirm: Option<(String, Vec<Value>)>,
+    snapshot_version: u64,
+    stats_period: String,
+    stats_source: String,
+}
+struct Shared {
+    data: Mutex<UiData>,
+    cache: PathBuf,
+    generation: AtomicU64,
+    pending: AtomicUsize,
+    artwork_busy: AtomicBool,
+    snapshot_sequence: AtomicU64,
+    close_to_tray: Arc<AtomicBool>,
+    media_hotkeys: Arc<AtomicBool>,
+    playback_gate: Mutex<()>,
+    account_pending: AtomicUsize,
+}
+struct Command {
+    method: String,
+    args: Vec<Value>,
+    scope: String,
+    quiet: bool,
+    generation: u64,
+}
+#[derive(Clone)]
+pub struct Application {
+    pub desktop: Arc<Desktop>,
+    pub audio: AudioPlayer,
+    shared: Arc<Shared>,
+    sender: SyncSender<Command>,
+    receiver: Arc<Mutex<Option<Receiver<Command>>>>,
+    audio_events: Arc<Mutex<Option<Receiver<AudioEvent>>>>,
+}
+pub struct UiBinding {
+    _poll: slint::Timer,
+}
+impl Application {
+    pub fn new(data_dir: PathBuf, resource_dir: PathBuf, offline: bool) -> Result<Self, String> {
+        let desktop = Arc::new(Desktop::open(data_dir.clone(), resource_dir, offline)?);
+        let (audio, events) = AudioPlayer::new_in(data_dir.join("audio-cache"));
+        let cache = data_dir.join("artwork");
+        fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+        let (sender, receiver) = mpsc::sync_channel(64);
+        Ok(Self {
+            desktop,
+            audio,
+            shared: Arc::new(Shared {
+                data: Mutex::new(UiData {
+                    user: "guest".into(),
+                    stats_period: "30d".into(),
+                    stats_source: "all".into(),
+                    ..Default::default()
+                }),
+                cache,
+                generation: AtomicU64::new(0),
+                pending: AtomicUsize::new(0),
+                artwork_busy: AtomicBool::new(false),
+                snapshot_sequence: AtomicU64::new(0),
+                close_to_tray: Arc::new(AtomicBool::new(true)),
+                media_hotkeys: Arc::new(AtomicBool::new(true)),
+                playback_gate: Mutex::new(()),
+                account_pending: AtomicUsize::new(0),
+            }),
+            sender,
+            receiver: Arc::new(Mutex::new(Some(receiver))),
+            audio_events: Arc::new(Mutex::new(Some(events))),
+        })
+    }
+    fn submit(&self, ui: &AppWindow, method: &str, args: Vec<Value>, quiet: bool) {
+        if self.shared.account_pending.load(Ordering::SeqCst) > 0 && profile_write(method) {
+            ui.set_message("Зачекайте на завершення зміни профілю".into());
+            return;
+        }
+        if account_method(method) {
+            self.shared.account_pending.fetch_add(1, Ordering::SeqCst);
+        }
+        if !quiet {
+            self.shared.pending.fetch_add(1, Ordering::Relaxed);
+            ui.set_task_loading(true);
+        }
+        let command = Command {
+            method: method.into(),
+            args,
+            scope: ui.get_view().to_string(),
+            quiet,
+            generation: self.shared.generation.load(Ordering::SeqCst),
+        };
+        if self.sender.try_send(command).is_err() {
+            if account_method(method) {
+                self.shared.account_pending.fetch_sub(1, Ordering::SeqCst);
+            }
+            if !quiet {
+                self.shared.pending.fetch_sub(1, Ordering::Relaxed);
+                ui.set_task_loading(self.shared.pending.load(Ordering::Relaxed) > 0);
+            }
+            ui.set_message("Зачекайте на завершення поточного запиту".into());
+        }
+    }
+    fn play_track(&self, ui: &AppWindow, id: &str, preview: bool) {
+        self.play_track_in(ui, id, preview, false);
+    }
+    fn play_track_in(&self, ui: &AppWindow, id: &str, preview: bool, retain_queue: bool) {
+        if self.shared.account_pending.load(Ordering::SeqCst) > 0 {
+            ui.set_message("Зачекайте на завершення зміни профілю".into());
+            return;
+        }
+        let mut data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(track) = data.registry.get(id).cloned() else {
+            ui.set_message("Трек більше недоступний. Оновіть список.".into());
+            return;
+        };
+        if track["source"] == "spotify"
+            || (track["matched_from"].is_object() && track["match_confirmed"] != true)
+        {
+            let original = if track["source"] == "spotify" {
+                track.clone()
+            } else {
+                track["matched_from"].clone()
+            };
+            data.pending_track = Some(original.clone());
+            drop(data);
+            reset_modal(&ui);
+            ui.set_modal_kind("match".into());
+            ui.set_modal_title("Оберіть джерело відтворення".into());
+            ui.set_modal_description("Spotify надає метадані. Відтворення й завантаження потребують вашого вибору версії з YouTube або SoundCloud.".into());
+            ui.set_modal_open(true);
+            self.submit(
+                ui,
+                "match_spotify_track",
+                vec![original, json!("all"), json!(6)],
+                false,
+            );
+            return;
+        }
+        if !preview && !retain_queue {
+            data.queue = ui
+                .get_tracks()
+                .iter()
+                .filter_map(|row| data.registry.get(row.id.as_str()).cloned())
+                .collect();
+            data.queue_index = data
+                .queue
+                .iter()
+                .position(|item| item["id"] == id)
+                .unwrap_or(0);
+            if data.queue.is_empty() {
+                data.queue.push(track.clone());
+            }
+        }
+        data.preview = preview;
+        let duration = track["duration"].as_f64().unwrap_or(0.0);
+        let start = if preview {
+            track["highlight_start"].as_f64().unwrap_or_else(|| {
+                if duration > 30.0 {
+                    (duration - 30.0) / 2.0
+                } else {
+                    0.0
+                }
+            })
+        } else {
+            0.0
+        };
+        data.preview_start = start;
+        let owner = data.user.clone();
+        drop(data);
+        let gate = self
+            .shared
+            .playback_gate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.shared.generation.fetch_add(1, Ordering::SeqCst);
+        self.audio.stop();
+        drop(gate);
+        ui.set_loading(true);
+        self.submit(
+            ui,
+            "_play",
+            vec![track, json!(start), json!(preview), json!(owner)],
+            false,
+        );
+    }
+    fn next(&self, ui: &AppWindow, direction: isize) {
+        let (id, preview) = {
+            let mut data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+            if data.preview {
+                if data.flow.is_empty() {
+                    return;
+                }
+                data.flow_index = (data.flow_index as isize + direction)
+                    .rem_euclid(data.flow.len() as isize)
+                    as usize;
+                (text(&data.flow[data.flow_index], "id"), true)
+            } else {
+                if data.queue.is_empty() {
+                    return;
+                }
+                data.queue_index = if data.shuffle {
+                    usize::from(uuid::Uuid::new_v4().as_bytes()[0]) % data.queue.len()
+                } else {
+                    (data.queue_index as isize + direction).rem_euclid(data.queue.len() as isize)
+                        as usize
+                };
+                (text(&data.queue[data.queue_index], "id"), false)
+            }
+        };
+        refresh_models(ui, &self.shared);
+        self.play_track_in(ui, &id, preview, true);
+    }
+    pub fn bind(&self, ui: &AppWindow) -> UiBinding {
+        self.start_workers(ui);
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_navigate(move |view| {
+            if let Some(ui) = weak.upgrade() {
+                if ui.get_view() == "flow" && view != "flow" {
+                    this.shared.generation.fetch_add(1, Ordering::SeqCst);
+                    this.audio.stop();
+                    this.shared
+                        .data
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .preview = false;
+                }
+                ui.set_view(view.clone());
+                refresh_models(&ui, &this.shared);
+                match view.as_str() {
+                    "flow" => {
+                        if this
+                            .shared
+                            .data
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .flow
+                            .is_empty()
+                        {
+                            this.submit(
+                                &ui,
+                                "get_discover_tracks",
+                                vec![json!(ui.get_flow_genre().as_str())],
+                                false,
+                            );
+                        }
+                    }
+                    "downloads" => this.submit(&ui, "get_downloads", vec![], false),
+                    "stats" => {
+                        let args = {
+                            let data = this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                            vec![json!(data.stats_period), json!(data.stats_source)]
+                        };
+                        this.submit(&ui, "get_listening_stats", args, false);
+                    }
+                    _ => this.submit(&ui, "_refresh", vec![], true),
+                }
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_search(move |query, source| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_view("search".into());
+                ui.set_search_query(query.clone());
+                ui.set_search_source(source.clone());
+                this.submit(
+                    &ui,
+                    "search",
+                    vec![json!(query.as_str()), json!(source.as_str()), json!(24)],
+                    false,
+                );
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_select_playlist(move |id| {
+            if let Some(ui) = weak.upgrade() {
+                this.shared
+                    .data
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .selected_playlist = id.to_string();
+                ui.set_view("playlist".into());
+                refresh_models(&ui, &this.shared);
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_play_track(move |id| {
+            if let Some(ui) = weak.upgrade() {
+                this.play_track(&ui, id.as_str(), false);
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_like_track(move |id| {
+            if let Some(ui) = weak.upgrade() {
+                if let Some(track) = this.chosen_track(&ui, id.as_str()) {
+                    this.submit(&ui, "toggle_like", vec![track], false);
+                }
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_download_track(move |id| {
+            if let Some(ui) = weak.upgrade() {
+                if let Some(track) = this.track(id.as_str()) {
+                    if track["source"] == "spotify"
+                        || (track["matched_from"].is_object() && track["match_confirmed"] != true)
+                    {
+                        let original = if track["source"] == "spotify" {
+                            track.clone()
+                        } else {
+                            track["matched_from"].clone()
+                        };
+                        this.shared
+                            .data
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .pending_track = Some(original.clone());
+                        reset_modal(&ui);
+                        ui.set_modal_kind("match".into());
+                        ui.set_modal_title("Оберіть версію для завантаження".into());
+                        ui.set_modal_open(true);
+                        this.submit(
+                            &ui,
+                            "match_spotify_track",
+                            vec![original, json!("all"), json!(6)],
+                            false,
+                        );
+                    } else {
+                        this.submit(&ui, "download_track", vec![track], false);
+                    }
+                }
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_add_track(move |id| {
+            if let Some(ui) = weak.upgrade() {
+                let track = this.chosen_track(&ui, id.as_str());
+                if track.is_none() {
+                    return;
+                }
+                this.shared
+                    .data
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .pending_track = track;
+                reset_modal(&ui);
+                ui.set_modal_kind("add-to-playlist".into());
+                ui.set_modal_title("Додати до плейлиста".into());
+                ui.set_modal_open(true);
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_player_action(move |action| {
+            if let Some(ui) = weak.upgrade() {
+                match action.as_str() {
+                    "toggle" => this.audio.toggle(),
+                    "next" => this.next(&ui, 1),
+                    "previous" => this.next(&ui, -1),
+                    "shuffle" => {
+                        let mut data = this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                        data.shuffle = !data.shuffle;
+                        ui.set_shuffle(data.shuffle);
+                        this.submit(
+                            &ui,
+                            "update_settings",
+                            vec![json!({"shuffle":data.shuffle})],
+                            true,
+                        );
+                        ui.set_message(
+                            if data.shuffle {
+                                "Перемішування увімкнено"
+                            } else {
+                                "Перемішування вимкнено"
+                            }
+                            .into(),
+                        );
+                    }
+                    "repeat" => {
+                        let mut data = this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                        data.repeat = (data.repeat + 1) % 3;
+                        ui.set_repeat_mode(["off", "all", "one"][data.repeat as usize].into());
+                        this.submit(
+                            &ui,
+                            "update_settings",
+                            vec![json!({"repeat":(["off","all","one"][data.repeat as usize])})],
+                            true,
+                        );
+                        ui.set_message(
+                            ["Повтор вимкнено", "Повтор черги", "Повтор треку"]
+                                [data.repeat as usize]
+                                .into(),
+                        );
+                    }
+                    "mute" => this
+                        .audio
+                        .set_volume(if ui.get_volume() > 0.0 { 0.0 } else { 0.8 }),
+                    "queue" => {
+                        let queue = this
+                            .shared
+                            .data
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .queue
+                            .clone();
+                        this.shared
+                            .data
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .matches = queue.clone();
+                        ui.set_match_tracks(rows(
+                            queue
+                                .iter()
+                                .map(|track| track_row(track, &this.shared))
+                                .collect(),
+                        ));
+                        reset_modal(&ui);
+                        ui.set_modal_kind("queue".into());
+                        ui.set_modal_title("Черга відтворення".into());
+                        ui.set_modal_open(true);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let audio = self.audio.clone();
+        ui.on_seek(move |position| audio.seek(f64::from(position)));
+        let audio = self.audio.clone();
+        let sender = self.sender.clone();
+        let debounce = std::rc::Rc::new(slint::Timer::default());
+        ui.on_set_volume(move |volume| {
+            audio.set_volume(volume.clamp(0.0, 1.0));
+            let sender = sender.clone();
+            debounce.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_secs(1),
+                move || {
+                    let _ = sender.try_send(Command {
+                        method: "update_settings".into(),
+                        args: vec![json!({"volume":volume})],
+                        scope: "settings".into(),
+                        quiet: true,
+                        generation: 0,
+                    });
+                },
+            );
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_flow_action(move |action| {
+            if let Some(ui) = weak.upgrade() {
+                match action.as_str() {
+                    "skip" => this.next(&ui, 1),
+                    "play" => {
+                        if ui.get_flow_playing() {
+                            this.audio.toggle();
+                        } else {
+                            let id = ui.get_flow_track().id;
+                            this.play_track(&ui, id.as_str(), true);
+                        }
+                    }
+                    "like" => {
+                        let id = ui.get_flow_track().id;
+                        if let Some(track) = this.track(id.as_str()) {
+                            this.submit(&ui, "_flow_like", vec![track], false);
+                        }
+                        this.next(&ui, 1);
+                    }
+                    "save" => {
+                        let id = ui.get_flow_track().id;
+                        let track = this.track(id.as_str());
+                        this.shared
+                            .data
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .pending_track = track;
+                        reset_modal(&ui);
+                        ui.set_modal_kind("add-to-playlist".into());
+                        ui.set_modal_title("Зберегти відкриття".into());
+                        ui.set_modal_open(true);
+                    }
+                    "refresh" => this.submit(
+                        &ui,
+                        "get_discover_tracks",
+                        vec![json!(ui.get_flow_genre().as_str())],
+                        false,
+                    ),
+                    value if value.starts_with("genre:") => {
+                        ui.set_flow_genre(value[6..].into());
+                        this.submit(&ui, "get_discover_tracks", vec![json!(&value[6..])], false);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_action(move |method, payload| {
+            if let Some(ui) = weak.upgrade() {
+                this.action(&ui, method.as_str(), payload.as_str());
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_modal_submit(move |value| {
+            if let Some(ui) = weak.upgrade() {
+                this.modal_submit(&ui, value.as_str());
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_modal_action(move |method, value| {
+            if let Some(ui) = weak.upgrade() {
+                match method.as_str() {
+                    "close" => close_modal(&ui),
+                    "select-match" | "play-match" => {
+                        if this.confirm_match(&ui, value.as_str()).is_none() {
+                            return;
+                        }
+                        close_modal(&ui);
+                        this.play_track(&ui, value.as_str(), false);
+                    }
+                    "play-queue" => {
+                        close_modal(&ui);
+                        let index = {
+                            let data = this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                            data.queue
+                                .iter()
+                                .position(|track| track["id"] == value.as_str())
+                        };
+                        if let Some(index) = index {
+                            this.shared
+                                .data
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .queue_index = index;
+                            this.play_track_in(&ui, value.as_str(), false, true);
+                        }
+                    }
+                    "download-match" => {
+                        if let Some(track) = this.confirm_match(&ui, value.as_str()) {
+                            close_modal(&ui);
+                            this.submit(&ui, "download_track", vec![track], false);
+                        }
+                    }
+                    "add-to-playlist" | "select-playlist" => {
+                        let track = this
+                            .shared
+                            .data
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .pending_track
+                            .clone();
+                        if let Some(track) = track {
+                            this.submit(
+                                &ui,
+                                "add_to_playlist",
+                                vec![json!(value.as_str()), track],
+                                false,
+                            );
+                            close_modal(&ui);
+                        }
+                    }
+                    _ => this.action(&ui, method.as_str(), value.as_str()),
+                }
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_sign_in(move |email, password| {
+            if let Some(ui) = weak.upgrade() {
+                this.stop_for_account();
+                this.submit(
+                    &ui,
+                    "sign_in",
+                    vec![json!({"email":email.as_str(),"password":password.as_str()})],
+                    false,
+                );
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_sign_up(move |name, email, password| if let Some(ui) = weak.upgrade() { this.stop_for_account(); this.submit(&ui, "sign_up", vec![json!({"name":name.as_str(),"email":email.as_str(),"password":password.as_str()})], false); });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_configure_cloud(move |url| {
+            if let Some(ui) = weak.upgrade() {
+                this.stop_for_account();
+                this.submit(
+                    &ui,
+                    "configure_cloud",
+                    vec![json!({"base_url":url.as_str()})],
+                    false,
+                );
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_sync_library(move |mode| {
+            if let Some(ui) = weak.upgrade() {
+                if mode != "push" {
+                    this.stop_for_account();
+                }
+                this.submit(&ui, "sync_library", vec![json!(mode.as_str())], false);
+            }
+        });
+        let this = self.clone();
+        let weak = ui.as_weak();
+        ui.on_sign_out(move || {
+            if let Some(ui) = weak.upgrade() {
+                this.stop_for_account();
+                this.submit(&ui, "sign_out", vec![], false);
+            }
+        });
+        self.submit(ui, "_refresh", vec![], true);
+        self.submit(ui, "restore_session", vec![], true);
+        let poll = slint::Timer::default();
+        let this = self.clone();
+        let weak = ui.as_weak();
+        poll.start(
+            slint::TimerMode::Repeated,
+            Duration::from_secs(2),
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    if ui.get_view() == "downloads" {
+                        this.submit(&ui, "get_downloads", vec![], true);
+                    }
+                }
+            },
+        );
+        UiBinding { _poll: poll }
+    }
+    fn track(&self, id: &str) -> Option<Value> {
+        self.shared
+            .data
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .registry
+            .get(id)
+            .cloned()
+    }
+    fn confirm_match(&self, ui: &AppWindow, id: &str) -> Option<Value> {
+        let result = confirm_selected_match(
+            &mut self
+                .shared
+                .data
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+            id,
+        );
+        match result {
+            Ok(track) => Some(track),
+            Err(error) => {
+                ui.set_modal_error(error.clone().into());
+                ui.set_message(error.into());
+                None
+            }
+        }
+    }
+    fn chosen_track(&self, ui: &AppWindow, id: &str) -> Option<Value> {
+        if ui.get_modal_open() && ui.get_modal_kind() == "match" {
+            self.confirm_match(ui, id)
+        } else {
+            self.track(id)
+        }
+    }
+    fn stop_for_account(&self) {
+        let _gate = self
+            .shared
+            .playback_gate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.shared.generation.fetch_add(1, Ordering::SeqCst);
+        self.audio.pause();
+    }
+    fn action(&self, ui: &AppWindow, method: &str, payload: &str) {
+        match method {
+            "create-playlist" | "create_playlist" => {
+                self.shared
+                    .data
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .add_to_new_playlist =
+                    ui.get_modal_kind() == "add-to-playlist" && ui.get_modal_open();
+                reset_modal(&ui);
+                ui.set_modal_kind("create-playlist".into());
+                ui.set_modal_title("Новий плейлист".into());
+                ui.set_modal_value("".into());
+                ui.set_modal_open(true);
+            }
+            "rename-playlist" => {
+                let data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                let id = if payload.is_empty() {
+                    data.selected_playlist.as_str()
+                } else {
+                    payload
+                };
+                if id.is_empty() {
+                    ui.set_message("Спершу відкрийте плейлист".into());
+                    return;
+                }
+                reset_modal(&ui);
+                ui.set_modal_kind(format!("rename:{id}").into());
+                ui.set_modal_title("Назва плейлиста".into());
+                ui.set_modal_value(
+                    data.library["playlists"][id]["name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .into(),
+                );
+                ui.set_modal_open(true);
+            }
+            "delete-playlist" | "delete_playlist" => {
+                let mut data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                let id = if payload.is_empty() {
+                    data.selected_playlist.clone()
+                } else {
+                    payload.into()
+                };
+                if id.is_empty() {
+                    ui.set_message("Спершу відкрийте плейлист".into());
+                    return;
+                }
+                data.pending_confirm = Some(("delete_playlist".into(), vec![json!(id)]));
+                reset_modal(&ui);
+                ui.set_modal_kind("confirm".into());
+                ui.set_modal_title("Видалити плейлист?".into());
+                ui.set_modal_description(
+                    "Цю дію неможливо скасувати. Самі аудіофайли залишаться на диску.".into(),
+                );
+                ui.set_modal_open(true);
+            }
+            "remove-track" => {
+                let id = self
+                    .shared
+                    .data
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .selected_playlist
+                    .clone();
+                if !id.is_empty() {
+                    self.submit(
+                        ui,
+                        "remove_from_playlist",
+                        vec![json!(id), json!(payload)],
+                        false,
+                    );
+                }
+            }
+            "play-playlist" => {
+                let first = {
+                    let data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                    data.library["playlists"][&data.selected_playlist]["tracks"][0]["id"]
+                        .as_str()
+                        .map(str::to_owned)
+                };
+                if let Some(id) = first {
+                    self.play_track(ui, &id, false);
+                }
+            }
+            "download-url" => self.submit(ui, "resolve_direct_url", vec![json!(payload)], false),
+            "open-downloads" => {
+                self.submit(ui, "open_downloads_directory", vec![], false);
+            }
+            "cancel-download" | "cancel_download" | "reveal-download" | "reveal_download" => self
+                .submit(
+                    ui,
+                    if method.starts_with("cancel") {
+                        "cancel_download"
+                    } else {
+                        "reveal_download"
+                    },
+                    vec![json!(payload)],
+                    false,
+                ),
+            "clear_history" | "clear-history" => {
+                self.stop_for_account();
+                self.submit(ui, "clear_history", vec![], false);
+            }
+            "theme" | "set-theme" => {
+                self.submit(ui, "update_settings", vec![json!({"theme":payload})], false)
+            }
+            "reduced-motion" | "set-reduced-motion" => self.submit(
+                ui,
+                "update_settings",
+                vec![json!({"reduced_motion":payload == "true"})],
+                false,
+            ),
+            "set-close-to-tray" => self.submit(
+                ui,
+                "update_settings",
+                vec![json!({"tray_enabled":payload=="true"})],
+                false,
+            ),
+            "set-media-hotkeys" => self.submit(
+                ui,
+                "update_settings",
+                vec![json!({"hotkeys_enabled":payload=="true"})],
+                false,
+            ),
+            "update-profile" => {
+                self.submit(ui, "update_profile", vec![json!({"name":payload})], false)
+            }
+            "export" | "export-library" | "export_library_file" => {
+                self.submit(ui, "export_library_file", vec![], false)
+            }
+            "import" | "import-library" | "import_library_file" => {
+                self.stop_for_account();
+                self.submit(ui, "import_library_file", vec![json!(true)], false)
+            }
+            "scan" | "scan-local" | "scan_local_music" => {
+                self.submit(ui, "scan_local_music", vec![], false)
+            }
+            "legacy-import" | "import_legacy_library" => {
+                self.stop_for_account();
+                self.submit(ui, "import_legacy_library", vec![], false)
+            }
+            "import-provider" => {
+                reset_modal(&ui);
+                ui.set_modal_kind(format!("import:{payload}").into());
+                ui.set_modal_title("Імпорт музики".into());
+                ui.set_modal_description(
+                    "Вставте публічне посилання на профіль або плейлист".into(),
+                );
+                ui.set_modal_value("".into());
+                ui.set_modal_open(true);
+            }
+            "import-history" | "import-listening" => {
+                let provider = if payload.is_empty() {
+                    self.shared
+                        .data
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .stats_source
+                        .clone()
+                } else {
+                    payload.into()
+                };
+                if provider == "all" || provider == "local" {
+                    ui.set_message(
+                        "Оберіть Spotify, SoundCloud або YouTube для імпорту історії".into(),
+                    );
+                } else {
+                    self.submit(
+                        ui,
+                        "import_listening_history_file",
+                        vec![json!(provider)],
+                        false,
+                    );
+                }
+            }
+            "checkout" | "create_subscription_checkout" => {
+                self.submit(ui, "create_subscription_checkout", vec![], false)
+            }
+            "refresh-subscription" => self.submit(ui, "get_subscription_status", vec![], false),
+            "open-url" | "open_external_url" => {
+                self.submit(ui, "open_external_url", vec![json!(payload)], false)
+            }
+            "stats-period" | "stats-source" => {
+                let args = {
+                    let mut data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                    if method == "stats-period" {
+                        data.stats_period = payload.into();
+                    } else {
+                        data.stats_source = payload.into();
+                    }
+                    vec![json!(data.stats_period), json!(data.stats_source)]
+                };
+                self.submit(ui, "get_listening_stats", args, false);
+            }
+            "dismiss-message" => ui.set_message("".into()),
+            "refresh" => self.submit(ui, "_refresh", vec![], false),
+            "about" => {
+                reset_modal(&ui);
+                ui.set_modal_kind("about".into());
+                ui.set_modal_title("SoundFlow".into());
+                ui.set_modal_description("Нативний музичний застосунок. Rust · Slint · локальне аудіо. Статистика Plus потребує налаштованого сервера й активної підписки.".into());
+                ui.set_modal_open(true);
+            }
+            value if value.starts_with("import:") => {
+                reset_modal(&ui);
+                ui.set_modal_kind(value.into());
+                ui.set_modal_title("Імпорт музики".into());
+                ui.set_modal_value("".into());
+                ui.set_modal_open(true);
+            }
+            _ => ui.set_message("Ця дія недоступна".into()),
+        }
+    }
+    fn modal_submit(&self, ui: &AppWindow, value: &str) {
+        let kind = ui.get_modal_kind();
+        ui.set_modal_busy(true);
+        ui.set_modal_error("".into());
+        if kind == "create-playlist" {
+            self.submit(ui, "create_playlist", vec![json!(value)], false);
+        } else if let Some(id) = kind.strip_prefix("rename:") {
+            self.submit(ui, "rename_playlist", vec![json!(id), json!(value)], false);
+        } else if let Some(provider) = kind.strip_prefix("import:") {
+            self.submit(
+                ui,
+                "import_external_profile",
+                vec![json!(provider), json!(value)],
+                false,
+            );
+        } else if kind == "confirm" {
+            let pending = self
+                .shared
+                .data
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .pending_confirm
+                .take();
+            if let Some((method, args)) = pending {
+                self.submit(ui, &method, args, false);
+                close_modal(&ui);
+            } else {
+                ui.set_modal_busy(false);
+            }
+        } else {
+            ui.set_modal_busy(false);
+        }
+    }
+    fn start_workers(&self, ui: &AppWindow) {
+        let Some(receiver) = self.receiver.lock().unwrap().take() else {
+            return;
+        };
+        let receiver = Arc::new(Mutex::new(receiver));
+        for _ in 0..4 {
+            let receiver = receiver.clone();
+            let this = self.clone();
+            let weak = ui.as_weak();
+            std::thread::spawn(move || loop {
+                let command = { receiver.lock().unwrap().recv() };
+                let Ok(command) = command else {
+                    break;
+                };
+                if matches!(
+                    command.method.as_str(),
+                    "configure_cloud"
+                        | "restore_session"
+                        | "sign_in"
+                        | "sign_up"
+                        | "sign_out"
+                        | "clear_history"
+                        | "import_library"
+                        | "import_library_file"
+                        | "import_legacy_library"
+                ) {
+                    {
+                        let _gate = this
+                            .shared
+                            .playback_gate
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        this.shared.generation.fetch_add(1, Ordering::SeqCst);
+                        this.audio.pause();
+                    }
+                    if let Some(report) = this.audio.drain() {
+                        let _ = this.desktop.record_audio(&report);
+                    }
+                    this.audio.stop();
+                }
+                let result = match command.method.as_str() {
+                    "_refresh" => Ok(Value::Null),
+                    "_flow_like" => this
+                        .desktop
+                        .call("is_liked", &[command.args[0]["id"].clone()])
+                        .and_then(|liked| {
+                            if liked == true {
+                                Ok(json!({"is_liked":true}))
+                            } else {
+                                this.desktop.call("toggle_like", &command.args)
+                            }
+                        }),
+                    "_play"
+                        if command.generation != this.shared.generation.load(Ordering::SeqCst) =>
+                    {
+                        Ok(Value::Null)
+                    }
+                    "_play" => this
+                        .desktop
+                        .call("get_stream", &[command.args[0].clone()])
+                        .and_then(|source| {
+                            let _gate = this
+                                .shared
+                                .playback_gate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner());
+                            if command.generation == this.shared.generation.load(Ordering::SeqCst) {
+                                let user = command.args[3].as_str().unwrap_or("guest").to_owned();
+                                this.audio.set_identity(user);
+                                this.audio.load(
+                                    command.args[0].clone(),
+                                    source.as_str().ok_or("Недійсне джерело аудіо")?.into(),
+                                    command.args[1].as_f64().unwrap_or(0.0),
+                                    if command.args[2] == true {
+                                        Some(30.0)
+                                    } else {
+                                        None
+                                    },
+                                );
+                            }
+                            Ok(Value::Null)
+                        }),
+                    _ => this.desktop.call(&command.method, &command.args),
+                };
+                let snapshot = {
+                    let core = this.desktop.core.lock().unwrap_or_else(|e| e.into_inner());
+                    json!({"library":core.library.snapshot(),"settings":core.library.data.settings,"cloud":core.cloud.status(),"user":core.user(),"version":this.shared.snapshot_sequence.fetch_add(1,Ordering::SeqCst)+1})
+                };
+                if !command.quiet {
+                    this.shared.pending.fetch_sub(1, Ordering::Relaxed);
+                }
+                let app = this.clone();
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    if account_method(&command.method) {
+                        app.shared.account_pending.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    if command.method == "_play"
+                        && command.generation != app.shared.generation.load(Ordering::SeqCst)
+                    {
+                        ui.set_task_loading(app.shared.pending.load(Ordering::Relaxed) > 0);
+                        return;
+                    }
+                    apply_response(
+                        &ui,
+                        &app,
+                        &command.method,
+                        &command.args,
+                        result,
+                        snapshot,
+                        &command.scope,
+                        command.quiet,
+                    );
+                });
+            });
+        }
+        if let Some(events) = self.audio_events.lock().unwrap().take() {
+            let this = self.clone();
+            let weak = ui.as_weak();
+            let (reports, report_receiver) = mpsc::sync_channel(64);
+            let desktop = this.desktop.clone();
+            std::thread::spawn(move || {
+                while let Ok(report) = report_receiver.recv() {
+                    let _ = desktop.record_audio(&report);
+                }
+            });
+            std::thread::spawn(move || {
+                while let Ok(event) = events.recv() {
+                    match event {
+                        AudioEvent::Listening {
+                            track,
+                            user_id,
+                            session_id,
+                            started_at,
+                            heard_seconds,
+                            history_due,
+                        } => {
+                            let _ = reports.try_send(ListeningReport {
+                                track,
+                                user_id,
+                                session_id,
+                                started_at,
+                                heard_seconds,
+                                history_due,
+                            });
+                        }
+                        AudioEvent::Finished => {
+                            let this = this.clone();
+                            let _ = weak.upgrade_in_event_loop(move |ui| {
+                                let (repeat, preview, has_next) = {
+                                    let data =
+                                        this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                                    (
+                                        data.repeat,
+                                        data.preview,
+                                        data.shuffle || data.queue_index + 1 < data.queue.len(),
+                                    )
+                                };
+                                if preview || repeat == 1 || (repeat == 0 && has_next) {
+                                    this.next(&ui, 1);
+                                } else if repeat == 2 {
+                                    let id = ui.get_current_track().id;
+                                    this.play_track_in(&ui, id.as_str(), false, true);
+                                }
+                            });
+                        }
+                        AudioEvent::Error(message) => {
+                            let _ = weak.upgrade_in_event_loop(move |ui| {
+                                ui.set_loading(false);
+                                ui.set_message(message.into());
+                            });
+                        }
+                        AudioEvent::State(state) => {
+                            let shared = this.shared.clone();
+                            let _ = weak.upgrade_in_event_loop(move |ui| {
+                                ui.set_current_track(track_row(
+                                    &state.track.unwrap_or(Value::Null),
+                                    &shared,
+                                ));
+                                ui.set_playing(state.playing);
+                                ui.set_loading(state.loading);
+                                ui.set_position(state.position as f32);
+                                ui.set_duration(state.duration as f32);
+                                ui.set_volume(state.volume);
+                                let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                                ui.set_flow_playing(data.preview && state.playing);
+                                ui.set_flow_progress(if data.preview {
+                                    ((state.position - data.preview_start) / 30.0).clamp(0.0, 1.0)
+                                        as f32
+                                } else {
+                                    0.0
+                                });
+                            });
+                        }
+                    }
+                }
+            });
+        }
+    }
+    pub fn shutdown(&self) {
+        if let Some(report) = self.audio.drain() {
+            let desktop = self.desktop.clone();
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = desktop.record_audio(&report);
+                let _ = tx.send(());
+            });
+            let _ = rx.recv_timeout(Duration::from_millis(500));
+        }
+        self.audio.shutdown();
+        self.desktop.shutdown();
+    }
+}
+
+fn confirm_selected_match(data: &mut UiData, id: &str) -> Result<Value, String> {
+    let original = data
+        .pending_track
+        .as_ref()
+        .ok_or("Спершу оберіть пісню Spotify")?;
+    let original_id = original["id"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .ok_or("Недійсна пісня Spotify")?;
+    if original["source"] != "spotify" || data.matches_owner != original_id {
+        return Err("Добірка версій змінилася. Оберіть пісню повторно.".into());
+    }
+    let mut candidate = data
+        .matches
+        .iter()
+        .find(|track| track["id"] == id)
+        .cloned()
+        .ok_or("Оберіть одну з показаних версій")?;
+    if candidate["matched_from"]["id"] != original_id
+        || candidate["matched_from"]["source"] != "spotify"
+        || !matches!(candidate["source"].as_str(), Some("youtube" | "soundcloud"))
+    {
+        return Err("Ця версія не відповідає обраній пісні Spotify".into());
+    }
+    candidate["match_confirmed"] = json!(true);
+    data.registry.insert(id.into(), candidate.clone());
+    if let Some(track) = data.matches.iter_mut().find(|track| track["id"] == id) {
+        *track = candidate.clone();
+    }
+    Ok(candidate)
+}
+fn text(value: &Value, key: &str) -> String {
+    value[key].as_str().unwrap_or("").to_string()
+}
+fn reset_modal(ui: &AppWindow) {
+    ui.set_modal_description("".into());
+    ui.set_modal_error("".into());
+    ui.set_modal_value("".into());
+    ui.set_modal_busy(false);
+}
+fn close_modal(ui: &AppWindow) {
+    ui.set_modal_open(false);
+    reset_modal(ui);
+}
+fn account_method(method: &str) -> bool {
+    matches!(
+        method,
+        "configure_cloud" | "restore_session" | "sign_in" | "sign_up" | "sign_out"
+    )
+}
+fn profile_write(method: &str) -> bool {
+    matches!(
+        method,
+        "toggle_like"
+            | "_flow_like"
+            | "create_playlist"
+            | "rename_playlist"
+            | "delete_playlist"
+            | "add_to_playlist"
+            | "remove_from_playlist"
+            | "update_settings"
+            | "update_profile"
+            | "clear_history"
+            | "import_library"
+            | "import_library_file"
+            | "import_legacy_library"
+            | "import_listening_history_file"
+            | "import_external_profile"
+            | "scan_local_music"
+            | "sync_library"
+    )
+}
+fn rows<T: Clone + 'static>(values: Vec<T>) -> ModelRc<T> {
+    std::rc::Rc::new(VecModel::from(values)).into()
+}
+fn values(value: &Value) -> Vec<Value> {
+    value.as_array().cloned().unwrap_or_default()
+}
+fn artwork(value: &Value, cache: &Path) -> slint::Image {
+    let url = text(value, "thumbnail");
+    if url.is_empty() {
+        return slint::Image::default();
+    }
+    let id = format!("{:x}", Sha256::digest(url.as_bytes()));
+    for extension in ["jpg", "png", "webp"] {
+        let file = cache.join(format!("{id}.{extension}"));
+        if file.is_file() {
+            if let Ok(image) = slint::Image::load_from_path(&file) {
+                return image;
+            }
+        }
+    }
+    slint::Image::default()
+}
+fn track_row(value: &Value, shared: &Shared) -> TrackRow {
+    let liked = shared
+        .data
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .library["liked_tracks"]
+        .as_array()
+        .is_some_and(|tracks| tracks.iter().any(|t| t["id"] == value["id"]));
+    let duration = value["duration"].as_f64().unwrap_or(0.0) as u64;
+    TrackRow {
+        id: text(value, "id").into(),
+        title: text(value, "title").into(),
+        artist: text(value, "artist").into(),
+        source: text(value, "source").into(),
+        duration: if duration > 0 {
+            format!("{}:{:02}", duration / 60, duration % 60).into()
+        } else {
+            SharedString::default()
+        },
+        liked,
+        artwork: artwork(value, &shared.cache),
+    }
+}
+fn refresh_models(ui: &AppWindow, shared: &Shared) {
+    let (tracks, playlists, downloads, flow, index, count, cloud, settings, profile, matches) = {
+        let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
+        let tracks = match ui.get_view().as_str() {
+            "search" => data.search.clone(),
+            "likes" | "liked" => values(&data.library["liked_tracks"]),
+            "home" => {
+                if data.home.is_empty() {
+                    values(&data.library["history"])
+                } else {
+                    data.home.clone()
+                }
+            }
+            "history" => values(&data.library["history"]),
+            "playlist" | "library" => {
+                if !data.selected_playlist.is_empty() {
+                    values(&data.library["playlists"][&data.selected_playlist]["tracks"])
+                } else {
+                    let mut tracks = values(&data.library["liked_tracks"]);
+                    if let Some(playlists) = data.library["playlists"].as_object() {
+                        for playlist in playlists.values() {
+                            tracks.extend(values(&playlist["tracks"]));
+                        }
+                    }
+                    let mut seen = std::collections::HashSet::new();
+                    tracks.retain(|track| {
+                        seen.insert(format!("{}:{}", text(track, "source"), text(track, "id")))
+                    });
+                    tracks
+                }
+            }
+            _ => values(&data.library["liked_tracks"]),
+        };
+        (
+            tracks,
+            data.library["playlists"]
+                .as_object()
+                .map(|p| p.values().cloned().collect::<Vec<_>>())
+                .unwrap_or_default(),
+            data.downloads.clone(),
+            data.flow
+                .get(data.flow_index)
+                .cloned()
+                .unwrap_or(Value::Null),
+            data.flow_index,
+            data.flow.len(),
+            data.cloud.clone(),
+            data.settings.clone(),
+            data.library["profile"].clone(),
+            if ui.get_modal_kind() == "match"
+                && data
+                    .pending_track
+                    .as_ref()
+                    .is_none_or(|track| text(track, "id") != data.matches_owner)
+            {
+                Vec::new()
+            } else {
+                data.matches.clone()
+            },
+        )
+    };
+    ui.set_tracks(rows(tracks.iter().map(|t| track_row(t, shared)).collect()));
+    ui.set_playlists(rows(
+        playlists
+            .iter()
+            .map(|p| PlaylistRow {
+                id: text(p, "id").into(),
+                name: text(p, "name").into(),
+                count: p["tracks"].as_array().map(|a| a.len()).unwrap_or(0) as i32,
+                artwork: artwork(&p["tracks"][0], &shared.cache),
+            })
+            .collect(),
+    ));
+    ui.set_downloads(rows(
+        downloads
+            .iter()
+            .map(|p| DownloadRow {
+                id: p
+                    .get("job_id")
+                    .or_else(|| p.get("id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
+                title: p
+                    .get("title")
+                    .or_else(|| p.get("track").and_then(|t| t.get("title")))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Завантаження")
+                    .into(),
+                artist: p
+                    .get("artist")
+                    .or_else(|| p.get("track").and_then(|t| t.get("artist")))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
+                status: text(p, "status").into(),
+                details: p
+                    .get("error")
+                    .or_else(|| p.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
+                progress: p["progress"].as_f64().unwrap_or(0.0) as f32,
+                cancellable: matches!(
+                    p["status"].as_str(),
+                    Some("queued" | "downloading" | "resolving")
+                ),
+                artwork: artwork(&p["track"], &shared.cache),
+            })
+            .collect(),
+    ));
+    ui.set_flow_track(track_row(&flow, shared));
+    ui.set_flow_index(index as i32);
+    ui.set_flow_count(count as i32);
+    ui.set_match_tracks(rows(matches.iter().map(|t| track_row(t, shared)).collect()));
+    ui.set_profile_name(
+        profile["name"]
+            .as_str()
+            .or_else(|| profile["username"].as_str())
+            .unwrap_or("Слухач")
+            .into(),
+    );
+    ui.set_cloud_configured(cloud["configured"] == true);
+    ui.set_cloud_signed_in(cloud["signed_in"] == true);
+    ui.set_cloud_url(cloud["base_url"].as_str().unwrap_or("").into());
+    ui.set_cloud_name(cloud["user"]["name"].as_str().unwrap_or("").into());
+    ui.set_cloud_email(cloud["user"]["email"].as_str().unwrap_or("").into());
+    ui.set_dark(settings["theme"] == "dark");
+    ui.set_reduced_motion(settings["reduced_motion"] == true);
+    let close = settings["tray_enabled"].as_bool().unwrap_or(true);
+    let hotkeys = settings["hotkeys_enabled"].as_bool().unwrap_or(true);
+    shared.close_to_tray.store(close, Ordering::Relaxed);
+    shared.media_hotkeys.store(hotkeys, Ordering::Relaxed);
+    ui.set_close_to_tray(close);
+    ui.set_media_hotkeys(hotkeys);
+    {
+        let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
+        ui.set_shuffle(data.shuffle);
+        ui.set_repeat_mode(["off", "all", "one"][data.repeat as usize].into());
+    }
+    let current = ui.get_current_track().id;
+    if !current.is_empty() {
+        let value = {
+            shared
+                .data
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .registry
+                .get(current.as_str())
+                .cloned()
+        };
+        if let Some(value) = value {
+            ui.set_current_track(track_row(&value, shared));
+        }
+    }
+}
+fn apply_response(
+    ui: &AppWindow,
+    app: &Application,
+    method: &str,
+    args: &[Value],
+    result: Result<Value, String>,
+    snapshot: Value,
+    scope: &str,
+    quiet: bool,
+) {
+    let shared = &app.shared;
+    let audio = &app.audio;
+    {
+        let mut data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
+        let user = snapshot["user"].as_str().unwrap_or("guest");
+        let version = snapshot["version"].as_u64().unwrap_or(0);
+        if version < data.snapshot_version && user != data.user {
+            ui.set_task_loading(shared.pending.load(Ordering::Relaxed) > 0);
+            return;
+        }
+        if version >= data.snapshot_version {
+            if user != data.user {
+                data.registry.clear();
+                data.queue.clear();
+                data.search.clear();
+                data.flow.clear();
+                data.home.clear();
+                data.matches.clear();
+                data.selected_playlist.clear();
+                data.stats = Value::Null;
+                ui.set_subscription_active(false);
+                ui.set_metrics(rows(Vec::new()));
+                ui.set_artists(rows(Vec::new()));
+                ui.set_top_tracks(rows(Vec::new()));
+                ui.set_providers(rows(Vec::new()));
+                ui.set_daily(rows(Vec::new()));
+            }
+            data.library = snapshot["library"].clone();
+            data.settings = snapshot["settings"].clone();
+            data.cloud = snapshot["cloud"].clone();
+            data.user = user.into();
+            data.snapshot_version = version;
+        }
+        let mut tracks = values(&data.library["liked_tracks"]);
+        tracks.extend(values(&data.library["history"]));
+        if let Some(playlists) = data.library["playlists"].as_object() {
+            for playlist in playlists.values() {
+                tracks.extend(values(&playlist["tracks"]));
+            }
+        }
+        for track in tracks {
+            data.registry.insert(text(&track, "id"), track);
+        }
+    }
+    ui.set_task_loading(shared.pending.load(Ordering::Relaxed) > 0);
+    if matches!(
+        method,
+        "create_playlist" | "rename_playlist" | "import_external_profile" | "delete_playlist"
+    ) {
+        ui.set_modal_busy(false);
+    }
+    match result {
+        Err(error) => {
+            if !quiet {
+                ui.set_message(error.clone().into());
+                if matches!(
+                    method,
+                    "create_playlist"
+                        | "rename_playlist"
+                        | "import_external_profile"
+                        | "delete_playlist"
+                        | "match_spotify_track"
+                ) {
+                    ui.set_modal_error(error.into());
+                }
+            }
+            if method == "_play" {
+                ui.set_loading(false);
+            }
+        }
+        Ok(value) => {
+            let mut data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
+            match method {
+                "search" => {
+                    if ui.get_search_query().as_str() == args[0].as_str().unwrap_or("")
+                        && ui.get_search_source().as_str() == args[1].as_str().unwrap_or("all")
+                    {
+                        data.search = values(&value);
+                        for track in data.search.clone() {
+                            data.registry.insert(text(&track, "id"), track);
+                        }
+                    }
+                }
+                "get_discover_tracks" => {
+                    data.flow = values(&value);
+                    data.home = data.flow.clone();
+                    data.flow_index = 0;
+                    for track in data.flow.clone() {
+                        data.registry.insert(text(&track, "id"), track);
+                    }
+                }
+                "match_spotify_track" => {
+                    if data
+                        .pending_track
+                        .as_ref()
+                        .is_none_or(|track| track["id"] != args[0]["id"])
+                    {
+                        return;
+                    }
+                    data.matches = values(&value);
+                    data.matches_owner = text(&args[0], "id");
+                    for track in data.matches.clone() {
+                        data.registry.insert(text(&track, "id"), track);
+                    }
+                    if data.matches.is_empty() {
+                        ui.set_modal_error(
+                            "Не знайдено доступних версій. Спробуйте пошук вручну.".into(),
+                        );
+                    }
+                }
+                "get_downloads" => {
+                    data.downloads = if value.is_array() {
+                        values(&value)
+                    } else {
+                        values(&value["jobs"])
+                    }
+                }
+                "resolve_direct_url" => {
+                    if let Some(id) = value["id"].as_str() {
+                        data.registry.insert(id.into(), value.clone());
+                        if value["source"] == "spotify" {
+                            data.pending_track = Some(value.clone());
+                            reset_modal(&ui);
+                            ui.set_modal_kind("match".into());
+                            ui.set_modal_title("Оберіть версію для завантаження".into());
+                            ui.set_modal_open(true);
+                            app.submit(
+                                ui,
+                                "match_spotify_track",
+                                vec![value, json!("all"), json!(6)],
+                                false,
+                            );
+                        } else {
+                            app.submit(ui, "download_track", vec![value], false);
+                        }
+                    } else {
+                        ui.set_message("Не вдалося розпізнати музичне посилання".into());
+                    }
+                }
+                "get_listening_stats" => {
+                    data.stats = value.clone();
+                    ui.set_subscription_active(value["locked"] == false);
+                    ui.set_subscription_message(value["error"].as_str().unwrap_or("").into());
+                }
+                "get_subscription_status" => {
+                    ui.set_subscription_active(value["active"] == true);
+                    ui.set_subscription_message(
+                        value["error"]
+                            .as_str()
+                            .or_else(|| value["message"].as_str())
+                            .unwrap_or("")
+                            .into(),
+                    );
+                }
+                "create_playlist" => {
+                    if data.add_to_new_playlist {
+                        data.add_to_new_playlist = false;
+                        if let Some(track) = data.pending_track.clone() {
+                            app.submit(
+                                ui,
+                                "add_to_playlist",
+                                vec![value["id"].clone(), track],
+                                false,
+                            );
+                        }
+                    }
+                    close_modal(&ui);
+                    ui.set_message("Плейлист створено".into());
+                }
+                "rename_playlist" | "import_external_profile" => {
+                    close_modal(&ui);
+                    ui.set_message("Бібліотеку оновлено".into());
+                }
+                "configure_cloud" | "sign_in" | "sign_up" | "sign_out" | "restore_session"
+                | "update_settings" => {
+                    if let Some(volume) = data.settings["volume"].as_f64() {
+                        audio.set_volume(volume as f32);
+                        ui.set_volume(volume as f32);
+                    }
+                    data.shuffle = data.settings["shuffle"].as_bool().unwrap_or(false);
+                    data.repeat = match data.settings["repeat"].as_str() {
+                        Some("all") => 1,
+                        Some("one") => 2,
+                        _ => 0,
+                    };
+                }
+                "delete_playlist" => {
+                    data.selected_playlist.clear();
+                    close_modal(&ui);
+                    ui.set_view("playlists".into());
+                }
+                "create_subscription_checkout" => {
+                    let url = value["url"].as_str().unwrap_or("");
+                    if !url.is_empty() {
+                        let _ = open::that_detached(url);
+                    }
+                }
+                _ => {
+                    if !quiet && !["_play", "toggle_like", "_flow_like"].contains(&method) {
+                        if value["cancelled"] != true {
+                            ui.set_message(
+                                value["error"]
+                                    .as_str()
+                                    .unwrap_or(
+                                        if value["ok"] == false || value["success"] == false {
+                                            "Не вдалося завершити дію"
+                                        } else {
+                                            "Готово"
+                                        },
+                                    )
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ui.get_view().as_str() == scope || !matches!(method, "search" | "get_discover_tracks") {
+        refresh_models(ui, shared);
+    }
+    let stats = shared
+        .data
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .stats
+        .clone();
+    if stats["locked"] == false {
+        ui.set_metrics(rows(vec![
+            StatMetric {
+                label: "Прослухано".into(),
+                value: format!(
+                    "{} хв",
+                    stats["total_minutes"].as_f64().unwrap_or(0.0).round()
+                )
+                .into(),
+            },
+            StatMetric {
+                label: "Відтворень".into(),
+                value: stats["plays"].to_string().into(),
+            },
+            StatMetric {
+                label: "Виконавців".into(),
+                value: stats["unique_artists"].to_string().into(),
+            },
+            StatMetric {
+                label: "Треків".into(),
+                value: stats["unique_tracks"].to_string().into(),
+            },
+        ]));
+        let rank = |items: &Value, key: &str| {
+            rows(
+                values(items)
+                    .iter()
+                    .map(|item| RankRow {
+                        label: text(item, key).into(),
+                        detail: format!("{} відтворень · {} хв", item["plays"], item["minutes"])
+                            .into(),
+                    })
+                    .collect(),
+            )
+        };
+        ui.set_artists(rank(&stats["top_artists"], "name"));
+        ui.set_top_tracks(rank(&stats["top_tracks"], "title"));
+        ui.set_providers(rank(&stats["providers"], "provider"));
+        let daily = values(&stats["daily"]);
+        let maximum = daily
+            .iter()
+            .filter_map(|v| v["seconds"].as_f64())
+            .fold(0.0, f64::max)
+            .max(1.0);
+        ui.set_daily(rows(
+            daily
+                .iter()
+                .rev()
+                .take(30)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .map(|item| DailyRow {
+                    label: text(item, "date")
+                        .chars()
+                        .skip(5)
+                        .collect::<String>()
+                        .into(),
+                    value: format!("{} хв", item["minutes"].as_f64().unwrap_or(0.0).round()).into(),
+                    level: (item["seconds"].as_f64().unwrap_or(0.0) / maximum) as f32,
+                })
+                .collect(),
+        ));
+        if stats["unknown_duration_plays"].as_u64().unwrap_or(0) > 0 {
+            ui.set_subscription_message(
+                format!(
+                    "{} відтворень без даних про тривалість",
+                    stats["unknown_duration_plays"]
+                )
+                .into(),
+            );
+        }
+    }
+    if shared
+        .artwork_busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+        .is_ok()
+    {
+        let candidates = {
+            let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
+            let mut tracks = data.search.clone();
+            tracks.extend(data.flow.clone());
+            tracks.extend(data.registry.values().cloned());
+            tracks.truncate(12);
+            tracks
+        };
+        let shared = shared.clone();
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            let changed = fetch_artworks(&candidates, &shared.cache);
+            shared.artwork_busy.store(false, Ordering::Release);
+            if changed {
+                let _ = weak.upgrade_in_event_loop(move |ui| refresh_models(&ui, &shared));
+            }
+        });
+    }
+}
+fn fetch_artworks(tracks: &[Value], cache: &Path) -> bool {
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    else {
+        return false;
+    };
+    let mut changed = false;
+    for track in tracks {
+        let url = text(track, "thumbnail");
+        let Ok(parsed) = url::Url::parse(&url) else {
+            continue;
+        };
+        let host = parsed.host_str().unwrap_or("");
+        if parsed.scheme() != "https"
+            || ![
+                "ytimg.com",
+                "ggpht.com",
+                "googleusercontent.com",
+                "sndcdn.com",
+                "scdn.co",
+                "spotifycdn.com",
+                "mzstatic.com",
+            ]
+            .iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+        {
+            continue;
+        }
+        let id = format!("{:x}", Sha256::digest(url.as_bytes()));
+        if ["jpg", "png", "webp"]
+            .iter()
+            .any(|e| cache.join(format!("{id}.{e}")).is_file())
+        {
+            continue;
+        }
+        let Ok(response) = client.get(&url).send() else {
+            continue;
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        let extension = match response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+        {
+            "image/jpeg" => "jpg",
+            "image/png" => "png",
+            "image/webp" => "webp",
+            _ => continue,
+        };
+        let mut bytes = Vec::new();
+        if response
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .is_err()
+            || bytes.len() > 4 * 1024 * 1024
+        {
+            continue;
+        }
+        if fs::write(cache.join(format!("{id}.{extension}")), bytes).is_ok() {
+            changed = true;
+        }
+    }
+    changed
+}
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    if crate::verification::run_from_args()? {
+        return Ok(());
+    }
+    let guard = crate::platform::initialize_process()?;
+    if !guard.is_primary() {
+        return Ok(());
+    }
+    let data = crate::platform::data_dir();
+    let resources = std::env::current_exe()?
+        .parent()
+        .ok_or("Недійсна папка застосунку")?
+        .to_path_buf();
+    let offline = std::env::args().any(|arg| arg == "--offline");
+    let app = Application::new(data, resources, offline)?;
+    let ui = AppWindow::new()?;
+    let _binding = app.bind(&ui);
+    // Tray and system shortcuts belong to normal interactive runs only.
+    let tray = crate::SoundFlowTray::new()?;
+    let weak = ui.as_weak();
+    tray.on_show_window(move || {
+        if let Some(ui) = weak.upgrade() {
+            let _ = ui.show();
+        }
+    });
+    let audio = app.audio.clone();
+    tray.on_play_pause(move || audio.toggle());
+    let weak = ui.as_weak();
+    tray.on_next_track(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.invoke_player_action("next".into());
+        }
+    });
+    tray.on_quit_app(move || {
+        let _ = slint::quit_event_loop();
+    });
+    let weak = ui.as_weak();
+    let cached = app.shared.close_to_tray.clone();
+    ui.window().on_close_requested(move || {
+        if cached.load(Ordering::Relaxed) {
+            if let Some(ui) = weak.upgrade() {
+                let _ = ui.hide();
+            }
+            slint::CloseRequestResponse::KeepWindowShown
+        } else {
+            let _ = slint::quit_event_loop();
+            slint::CloseRequestResponse::HideWindow
+        }
+    });
+    let weak = ui.as_weak();
+    let _keys = crate::media_keys::start(app.shared.media_hotkeys.clone(), move |action| {
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if action == "registration-error" {
+                ui.set_message("Деякі медіаклавіші зайняті іншим застосунком".into());
+            } else {
+                ui.invoke_player_action(action.into());
+            }
+        });
+    });
+    let tray_state = slint::Timer::default();
+    let weak = ui.as_weak();
+    let tray_weak = tray.as_weak();
+    tray_state.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(300),
+        move || {
+            if let (Some(ui), Some(tray)) = (weak.upgrade(), tray_weak.upgrade()) {
+                tray.set_playing(ui.get_playing());
+            }
+        },
+    );
+    tray.show()?;
+    ui.run()?;
+    tray_state.stop();
+    tray.hide()?;
+    app.shutdown();
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn spotify_matches() -> UiData {
+        let original = json!({"id":"spotify-original","title":"Original","artist":"Artist","source":"spotify","url":"https://open.spotify.com/track/original"});
+        let candidate = json!({"id":"youtube-version","title":"Selected version","artist":"Artist","source":"youtube","url":"https://www.youtube.com/watch?v=version","matched_from":original,"match_confirmed":false});
+        let mut data = UiData {
+            pending_track: Some(original),
+            matches_owner: "spotify-original".into(),
+            matches: vec![candidate.clone()],
+            ..Default::default()
+        };
+        data.registry.insert("youtube-version".into(), candidate);
+        data
+    }
+    #[test]
+    fn choosing_spotify_match_confirms_only_selected_playback_download_candidate() {
+        let mut data = spotify_matches();
+        assert_eq!(data.registry["youtube-version"]["match_confirmed"], false);
+        let chosen = confirm_selected_match(&mut data, "youtube-version").unwrap();
+        assert_eq!(chosen["match_confirmed"], true);
+        assert_eq!(chosen["matched_from"]["id"], "spotify-original");
+        assert_eq!(data.registry["youtube-version"], chosen);
+        assert_eq!(data.matches[0], chosen);
+    }
+    #[test]
+    fn stale_or_unlisted_spotify_versions_cannot_be_confirmed() {
+        let mut data = spotify_matches();
+        assert!(confirm_selected_match(&mut data, "arbitrary-id").is_err());
+        data.matches[0]["matched_from"]["id"] = json!("other-song");
+        assert!(confirm_selected_match(&mut data, "youtube-version").is_err());
+        assert_eq!(data.registry["youtube-version"]["match_confirmed"], false);
+        let mut data = spotify_matches();
+        data.pending_track.as_mut().unwrap()["id"] = json!("next-song");
+        assert!(confirm_selected_match(&mut data, "youtube-version").is_err());
+        assert_eq!(data.registry["youtube-version"]["match_confirmed"], false);
+    }
+}

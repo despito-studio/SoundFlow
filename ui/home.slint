@@ -1,0 +1,140 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme, SFButton, SFPanel, SFCover, SFTitle, SFText, SFMuted } from "controls.slint";
+
+component AlbumCard inherits Rectangle {
+    in property <string> title;
+    in property <string> artist;
+    in property <image> artwork;
+    in property <length> cover-size: 124px;
+    callback clicked();
+    preferred-width: cover-size;
+    horizontal-stretch: 1;
+    preferred-height: cover-size + 42px;
+    min-width: 60px;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: title + ", " + artist + ". Знайти музику";
+    accessible-enabled: !Theme.modal-open;
+    accessible-action-default => { if !Theme.modal-open { root.clicked(); } }
+    VerticalLayout {
+        spacing: 4px;
+        HorizontalLayout {
+            alignment: start;
+            height: root.cover-size;
+            Rectangle {
+                width: root.cover-size; height: root.cover-size;
+                border-radius: 13px;
+                border-color: Theme.ink;
+                border-width: focus.has-focus ? 2px : 0px;
+                SFCover { x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px; artwork: root.artwork; }
+            }
+        }
+        SFText { height: 17px; text: root.title; font-size: 13px; font-weight: 600; accessible-role: none; }
+        SFMuted { height: 17px; text: root.artist; font-size: 12px; accessible-role: none; }
+    }
+    focus := FocusScope {
+        enabled: !Theme.modal-open;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    TouchArea { enabled: !Theme.modal-open; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+
+component MoodCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <image> artwork;
+    in property <bool> round: false;
+    callback clicked();
+    min-width: 110px;
+    min-height: 116px;
+    preferred-height: 116px;
+    border-radius: 15px;
+    background: touch.has-hover ? Theme.hover : Theme.raised;
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: Theme.ink;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: title + ", " + subtitle;
+    accessible-enabled: !Theme.modal-open;
+    accessible-action-default => { if !Theme.modal-open { root.clicked(); } }
+    SFCover { x: parent.width - 80px; y: 12px; width: 66px; height: 66px; artwork: root.artwork; round: root.round; }
+    SFText { x: 13px; y: 76px; width: parent.width - 26px; height: 18px; text: root.title; font-size: 13px; font-weight: 600; accessible-role: none; }
+    SFMuted { x: 13px; y: 95px; width: parent.width - 26px; height: 17px; text: root.subtitle; font-size: 12px; accessible-role: none; }
+    focus := FocusScope {
+        enabled: !Theme.modal-open;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    touch := TouchArea { enabled: !Theme.modal-open; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+
+export component HomeView inherits ScrollView {
+    in property <string> name;
+    in property <bool> compact: false;
+    callback discover(string);
+    callback flow(string);
+    callback navigate(string);
+    content-width: self.width;
+    horizontal-scrollbar-policy: always-off;
+    VerticalLayout {
+        padding-right: 12px;
+        spacing: 14px;
+        HorizontalLayout {
+            height: 45px;
+            VerticalLayout {
+                spacing: 3px;
+                SFTitle { text: "Слухати"; font-size: 28px; }
+            }
+            SFButton { text: "Знайти пісню"; flat: true; horizontal-stretch: 0; clicked => { root.navigate("search"); } }
+        }
+        SFPanel {
+            preferred-height: shelf-layout.min-height;
+            shelf-layout := VerticalLayout {
+                padding: 12px; spacing: 10px;
+                HorizontalLayout {
+                    height: 22px;
+                    SFText { text: "На твоїй хвилі"; font-weight: 600; font-size: 17px; }
+                    SFMuted { text: "Обери альбом, щоб знайти треки"; horizontal-alignment: right; font-size: 12px; }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    AlbumCard { title: "Currents"; artist: "Tame Impala"; artwork: @image-url("../resources/covers/0.jpg"); cover-size: min(root.compact ? 124px : 148px, (root.width - 106px) / 6); clicked => { root.discover("Tame Impala Currents"); } }
+                    AlbumCard { title: "HIT ME HARD AND SOFT"; artist: "Billie Eilish"; artwork: @image-url("../resources/covers/1.jpg"); cover-size: min(root.compact ? 124px : 148px, (root.width - 106px) / 6); clicked => { root.discover("Billie Eilish HIT ME HARD AND SOFT"); } }
+                    AlbumCard { title: "Novacane"; artist: "Frank Ocean"; artwork: @image-url("../resources/covers/3.jpg"); cover-size: min(root.compact ? 124px : 148px, (root.width - 106px) / 6); clicked => { root.discover("Frank Ocean Novacane"); } }
+                    AlbumCard { title: "After Hours"; artist: "The Weeknd"; artwork: @image-url("../resources/covers/5.jpg"); cover-size: min(root.compact ? 124px : 148px, (root.width - 106px) / 6); clicked => { root.discover("The Weeknd After Hours"); } }
+                    AlbumCard { title: "Random Access Memories"; artist: "Daft Punk"; artwork: @image-url("../resources/covers/6.jpg"); cover-size: min(root.compact ? 124px : 148px, (root.width - 106px) / 6); clicked => { root.discover("Daft Punk Random Access Memories"); } }
+                    AlbumCard { title: "Untourable Album"; artist: "Men I Trust"; artwork: @image-url("../resources/covers/7.jpg"); cover-size: min(root.compact ? 124px : 148px, (root.width - 106px) / 6); clicked => { root.discover("Men I Trust Untourable Album"); } }
+                }
+            }
+        }
+        VerticalLayout {
+            spacing: 8px;
+            SFText { height: 22px; text: "Музика під настрій"; font-size: 17px; font-weight: 600; }
+            HorizontalLayout {
+                spacing: 12px;
+                MoodCard { title: "Без поспіху"; subtitle: "Lo-fi · тихий ранок"; artwork: @image-url("../resources/covers/7.jpg"); round: true; clicked => { root.flow("lofi"); } }
+                MoodCard { title: "Після заходу сонця"; subtitle: "Deep house · рух"; artwork: @image-url("../resources/covers/8.jpg"); clicked => { root.flow("deep"); } }
+                MoodCard { title: "Зосередитись"; subtitle: "Ambient · без зайвого"; artwork: @image-url("../resources/covers/1.jpg"); round: true; clicked => { root.flow("ambient"); } }
+                MoodCard { title: "Нічна поїздка"; subtitle: "Synthwave · місто"; artwork: @image-url("../resources/covers/6.jpg"); clicked => { root.flow("synthwave"); } }
+            }
+        }
+        SFPanel {
+            preferred-height: 68px;
+            HorizontalLayout {
+                padding: 12px; spacing: 13px;
+                SFText { width: 61px; text: "Flow"; font-size: 22px; font-weight: 700; vertical-alignment: center; }
+                VerticalLayout {
+                    spacing: 2px; alignment: center;
+                    SFText { text: "Відкривай і зберігай пісні"; font-weight: 600; }
+                    SFMuted { text: "Слухай уривок, гортай і зберігай."; }
+                }
+                SFButton { text: "Спробувати Flow"; primary: true; width: 158px; horizontal-stretch: 0; clicked => { root.navigate("flow"); } }
+            }
+        }
+    }
+}
