@@ -69,12 +69,14 @@ const METHODS: &[&str] = &[
     "get_stream",
     "get_playback_file",
     "get_similar_tracks",
+    "get_infinite_recommendations",
     "match_spotify_track",
     "download_track",
     "get_downloads",
     "get_download_job",
     "cancel_download",
     "import_external_profile",
+    "detect_connected_accounts",
 ];
 
 struct WorkerProcess {

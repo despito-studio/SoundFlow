@@ -63,6 +63,7 @@ impl Desktop {
             "search"
             | "resolve_direct_url"
             | "get_similar_tracks"
+            | "get_infinite_recommendations"
             | "match_spotify_track"
             | "download_track"
             | "get_downloads"
@@ -117,6 +118,50 @@ impl Desktop {
                 }
                 core.import_provider_tracks(string_arg(args, 0)?, string_arg(args, 1)?, &tracks)
             }
+            "detect_connected_accounts" => {
+                let email = string_arg(args, 0).unwrap_or("");
+                let name = string_arg(args, 1).unwrap_or("");
+                let detected = self.provider.lock().map_err(lock_error)?.call(
+                    "detect_connected_accounts",
+                    &[json!(email), json!(name)],
+                )?;
+                let mut core = self.core.lock().map_err(lock_error)?;
+                let saved = core.local_rpc("get_connected_accounts", &[])?;
+                let mut merged = detected.clone();
+                if let Some(saved_obj) = saved.as_object() {
+                    for (provider, val) in saved_obj {
+                        if let Some(id_str) = val.as_str() {
+                            if !id_str.is_empty() {
+                                if let Some(m_obj) = merged.get_mut(provider) {
+                                    m_obj["found"] = json!(true);
+                                    m_obj["identifier"] = json!(id_str);
+                                    if m_obj["name"].as_str().is_none_or(str::is_empty) {
+                                        m_obj["name"] = json!(id_str);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(merged_obj) = merged.as_object() {
+                    for (provider, info) in merged_obj {
+                        if info["found"].as_bool() == Some(true) {
+                            if let Some(id) = info["identifier"].as_str() {
+                                if !id.is_empty() {
+                                    let _ = core.local_rpc("set_connected_account", &[json!(provider), json!(id)]);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(merged)
+            }
+            "set_connected_account" => {
+                let provider = string_arg(args, 0)?;
+                let identifier = string_arg(args, 1)?;
+                let mut core = self.core.lock().map_err(lock_error)?;
+                core.local_rpc("set_connected_account", &[json!(provider), json!(identifier)])
+            }
             "sync_connected_accounts" => {
                 let (accounts, user) = {
                     let mut core = self.core.lock().map_err(lock_error)?;
@@ -127,8 +172,14 @@ impl Desktop {
                 };
                 let mut details = serde_json::Map::new();
                 let mut total = 0;
+                let target_provider = arg(args, 0).as_str().filter(|s| !s.is_empty());
                 if let Some(accounts) = accounts.as_object() {
                     for (provider, identifier) in accounts {
+                        if let Some(target) = target_provider {
+                            if provider != target {
+                                continue;
+                            }
+                        }
                         if identifier.as_str().is_none_or(str::is_empty) {
                             continue;
                         }

@@ -29,3 +29,12 @@ export struct DownloadRow {
 export struct RankRow { label: string, detail: string }
 export struct StatMetric { label: string, value: string }
 export struct DailyRow { label: string, value: string, level: float }
+export struct AccountRow {
+    id: string,
+    name: string,
+    email: string,
+    is_active: bool,
+    is_plus: bool,
+    expires_formatted: string,
+}
+

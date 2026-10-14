@@ -328,6 +328,46 @@ fn emit_listening(session: &mut Option<Session>, events: &Sender<AudioEvent>) {
     }
 }
 
+pub fn track_duration(track: &Value) -> f64 {
+    if let Some(v) = track.get("duration") {
+        if let Some(n) = v.as_f64() {
+            if n > 0.0 {
+                return if n > 10_000.0 { n / 1000.0 } else { n };
+            }
+        }
+        if let Some(s) = v.as_str() {
+            if let Ok(n) = s.parse::<f64>() {
+                if n > 0.0 {
+                    return if n > 10_000.0 { n / 1000.0 } else { n };
+                }
+            }
+            let parts: Vec<&str> = s.split(':').collect();
+            if parts.len() == 2 {
+                if let (Ok(m), Ok(sec)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
+                    return m * 60.0 + sec;
+                }
+            } else if parts.len() == 3 {
+                if let (Ok(h), Ok(m), Ok(sec)) = (
+                    parts[0].parse::<f64>(),
+                    parts[1].parse::<f64>(),
+                    parts[2].parse::<f64>(),
+                ) {
+                    return h * 3600.0 + m * 60.0 + sec;
+                }
+            }
+        }
+    }
+    if let Some(s) = track.get("duration_formatted").and_then(|v| v.as_str()) {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() == 2 {
+            if let (Ok(m), Ok(sec)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
+                return m * 60.0 + sec;
+            }
+        }
+    }
+    0.0
+}
+
 fn audio_loop(
     input: Receiver<Command>,
     events: Sender<AudioEvent>,
@@ -388,9 +428,10 @@ fn audio_loop(
                 limit = preview
                     .filter(|v| v.is_finite() && *v > 0.0)
                     .map(|v| v.min(30.0));
+                let parsed_duration = track_duration(&track);
                 state.track = Some(track.clone());
                 state.position = start;
-                state.duration = track["duration"].as_f64().unwrap_or(0.0);
+                state.duration = if parsed_duration > 0.0 { parsed_duration } else { 0.0 };
                 state.playing = false;
                 state.loading = true;
                 wanted_playing = true;
@@ -418,10 +459,14 @@ fn audio_loop(
                 let loaded = file.and_then(|file| Decoder::try_from(file).map_err(|_| "Формат аудіо не підтримується. Обери M4A, MP3, FLAC, WAV або Ogg Vorbis.".to_string()));
                 match loaded {
                     Ok(decoder) => {
-                        let duration = decoder
+                        let mut duration = decoder
                             .total_duration()
                             .map(|d| d.as_secs_f64())
+                            .filter(|&d| d > 0.5)
                             .unwrap_or(state.duration);
+                        if duration <= 0.5 {
+                            duration = state.track.as_ref().map(track_duration).unwrap_or(0.0);
+                        }
                         if stream.is_none() {
                             match OutputStreamBuilder::open_default_stream() {
                                 Ok(mut device) => {
@@ -513,11 +558,12 @@ fn audio_loop(
                         .map(|seconds| start + seconds)
                         .unwrap_or(state.duration)
                         .max(0.0);
-                    let position = position.min(end);
-                    if sink.try_seek(Duration::from_secs_f64(position)).is_ok() {
-                        state.position = position;
-                        last_position = position;
+                    let target_pos = if end > 0.0 { position.clamp(0.0, end) } else { position.max(0.0) };
+                    if sink.try_seek(Duration::from_secs_f64(target_pos)).is_ok() {
+                        state.position = target_pos;
+                        last_position = target_pos;
                         clock = Instant::now();
+                        let _ = events.send(AudioEvent::State(state.clone()));
                     }
                 }
             }

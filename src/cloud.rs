@@ -96,6 +96,9 @@ impl CloudClient {
             revision: None,
         })
     }
+    pub fn base_url(&self) -> &str {
+        &self.base
+    }
     pub fn status(&self) -> Value {
         json!({"configured":!self.base.is_empty(),"base_url":self.base,"signed_in":self.user.is_some(),"user":self.user,"sync_revision":self.revision})
     }

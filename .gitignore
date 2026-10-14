@@ -10,3 +10,10 @@
 .env
 .vscode/
 .idea/
+__pycache__/
+*.exe
+*.zip
+/backend/
+/installer/
+/build/
+/scripts/portable-msvc.py

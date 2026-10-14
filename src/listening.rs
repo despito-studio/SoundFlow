@@ -78,6 +78,17 @@ impl ListeningStore {
             .map_err(|e| e.to_string())?;
         Ok(json!({"ok":true,"deleted":deleted}))
     }
+    pub fn db_query_count(&self, user: &str) -> CoreResult<i64> {
+        let count: i64 = self
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE user_id=?",
+                [user],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(count)
+    }
     pub fn record(
         &self,
         user: &str,

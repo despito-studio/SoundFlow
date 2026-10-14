@@ -65,6 +65,8 @@ async function getText(url,init) { return (await boundedBody(await providerFetch
 export function canonicalURL(value,profile=false) {
   value=text(value,2000);
   if(value.startsWith('spotify:track:')) value=`https://open.spotify.com/track/${value.slice(14)}`;
+  if(value.startsWith('spotify:playlist:')) value=`https://open.spotify.com/playlist/${value.slice(17)}`;
+  if(value.startsWith('spotify:album:')) value=`https://open.spotify.com/album/${value.slice(14)}`;
   let url;try { url=new URL(value); } catch { invalid('Вставте посилання YouTube, SoundCloud або Spotify.'); }
   if(!['https:','http:'].includes(url.protocol) || url.username || url.password || (url.port && !['80','443'].includes(url.port)) || /%|\\/.test(url.pathname)) invalid('Некоректне посилання медіасервісу.');
   const host=url.hostname.toLowerCase();const parts=url.pathname.split('/').filter(Boolean);
@@ -76,9 +78,10 @@ export function canonicalURL(value,profile=false) {
     invalid('Потрібне посилання на відео, публічний канал або плейлист YouTube.');
   }
   if(['soundcloud.com','www.soundcloud.com','m.soundcloud.com'].includes(host)) {
-    const collections=['sets','likes','tracks','albums','reposts','popular-tracks','following','followers'];
+    const collections=['likes','tracks','albums','reposts','popular-tracks','following','followers'];
     if(!parts.length || parts.some(p=>!/[A-Za-z0-9_-]/.test(p)||!/^[A-Za-z0-9_-]+$/.test(p)) || parts.length>3) invalid('Некоректне посилання SoundCloud.');
     if(parts.length===1 && profile) return {source:'soundcloud',url:`https://soundcloud.com/${parts[0]}`,kind:'profile'};
+    if(parts.length===3 && parts[1]==='sets') return {source:'soundcloud',url:`https://soundcloud.com/${parts[0]}/sets/${parts[2]}`,kind:'playlist'};
     if(parts.length<2 || collections.includes(parts[1]) || (parts.length===3 && !/^s-[\w-]+$/.test(parts[2]))) invalid('Потрібне посилання на пісню або публічний профіль SoundCloud.');
     const canonical=new URL(`https://soundcloud.com/${parts.join('/')}`);
     const secret=url.searchParams.get('secret_token');if(secret && /^s-[\w-]+$/.test(secret))canonical.searchParams.set('secret_token',secret);
@@ -86,7 +89,8 @@ export function canonicalURL(value,profile=false) {
   }
   if(host==='open.spotify.com') {
     if(parts[0]?.startsWith('intl-'))parts.shift();if(parts[0]==='embed')parts.shift();
-    if(parts[0]!=='track' || !/^[A-Za-z0-9]{22}$/.test(parts[1]||''))invalid('Для Spotify потрібне посилання на пісню.');
+    if(['playlist','album'].includes(parts[0]) && /^[A-Za-z0-9]{22}$/.test(parts[1]||'')) return {source:'spotify',id:parts[1],url:`https://open.spotify.com/${parts[0]}/${parts[1]}`,kind:parts[0]};
+    if(parts[0]!=='track' || !/^[A-Za-z0-9]{22}$/.test(parts[1]||''))invalid('Для Spotify потрібне посилання на пісню, плейлист або альбом.');
     return {source:'spotify',id:parts[1],url:`https://open.spotify.com/track/${parts[1]}`,kind:'track'};
   }
   invalid('Підтримуються тільки YouTube, SoundCloud та Spotify.');
@@ -103,10 +107,172 @@ function ytTrack(video,artistFallback='YouTube') {
   const badgeDuration=badge?.split(':').reduce((value,part)=>value*60+Number(part),0);
   return trackBase('youtube',id,video.title?.toString?.()||video.metadata?.title?.toString?.()||video.title,video.author?.name||video.channel?.name||video.author||(typeof artistFallback==='string'?artistFallback:'YouTube'),video.duration?.seconds||video.duration||badgeDuration,video.thumbnails?.at(-1)?.url||video.content_image?.image?.at(0)?.url||`https://i.ytimg.com/vi/${id}/hqdefault.jpg`,`https://www.youtube.com/watch?v=${id}`);
 }
+function patchMp4Duration(buf, durationSec) {
+  if (!Buffer.isBuffer(buf) || !durationSec || durationSec <= 0) return;
+  let offset = 0;
+  while (offset + 8 <= buf.length) {
+    const size = buf.readUInt32BE(offset);
+    const type = buf.slice(offset + 4, offset + 8).toString('ascii');
+    const actualSize = size === 1 ? Number(buf.readBigUInt64BE(offset + 8)) : size;
+    if (actualSize <= 0 || offset + actualSize > buf.length) break;
+    if (type === 'moov') {
+      patchMoov(buf, offset + (size === 1 ? 16 : 8), offset + actualSize, durationSec);
+      break;
+    }
+    offset += actualSize;
+  }
+}
+function patchMoov(buf, offset, end, durationSec) {
+  let movieTimescale = 1000;
+  while (offset + 8 <= end) {
+    const size = buf.readUInt32BE(offset);
+    const type = buf.slice(offset + 4, offset + 8).toString('ascii');
+    const actualSize = size === 1 ? Number(buf.readBigUInt64BE(offset + 8)) : size;
+    if (actualSize <= 0) break;
+    const bodyOffset = offset + (size === 1 ? 16 : 8);
+    if (type === 'mvhd' && bodyOffset + 20 <= end) {
+      const version = buf.readUInt8(bodyOffset);
+      if (version === 0) {
+        movieTimescale = buf.readUInt32BE(bodyOffset + 12) || 1000;
+        const dur = Math.min(0xffffffff, Math.round(durationSec * movieTimescale));
+        buf.writeUInt32BE(dur, bodyOffset + 16);
+      } else if (version === 1 && bodyOffset + 32 <= end) {
+        movieTimescale = buf.readUInt32BE(bodyOffset + 20) || 1000;
+        const dur = BigInt(Math.round(durationSec * movieTimescale));
+        buf.writeBigUInt64BE(dur, bodyOffset + 24);
+      }
+    } else if (type === 'trak') {
+      patchTrak(buf, bodyOffset, offset + actualSize, durationSec, movieTimescale);
+    }
+    offset += actualSize;
+  }
+}
+function patchTrak(buf, offset, end, durationSec, movieTimescale) {
+  while (offset + 8 <= end) {
+    const size = buf.readUInt32BE(offset);
+    const type = buf.slice(offset + 4, offset + 8).toString('ascii');
+    const actualSize = size === 1 ? Number(buf.readBigUInt64BE(offset + 8)) : size;
+    if (actualSize <= 0) break;
+    const bodyOffset = offset + (size === 1 ? 16 : 8);
+    if (type === 'tkhd' && bodyOffset + 24 <= end) {
+      const version = buf.readUInt8(bodyOffset);
+      if (version === 0) {
+        const dur = Math.min(0xffffffff, Math.round(durationSec * movieTimescale));
+        buf.writeUInt32BE(dur, bodyOffset + 20);
+      } else if (version === 1 && bodyOffset + 32 <= end) {
+        const dur = BigInt(Math.round(durationSec * movieTimescale));
+        buf.writeBigUInt64BE(dur, bodyOffset + 24);
+      }
+    } else if (type === 'mdia') {
+      patchMdia(buf, bodyOffset, offset + actualSize, durationSec);
+    }
+    offset += actualSize;
+  }
+}
+function patchMdia(buf, offset, end, durationSec) {
+  while (offset + 8 <= end) {
+    const size = buf.readUInt32BE(offset);
+    const type = buf.slice(offset + 4, offset + 8).toString('ascii');
+    const actualSize = size === 1 ? Number(buf.readBigUInt64BE(offset + 8)) : size;
+    if (actualSize <= 0) break;
+    const bodyOffset = offset + (size === 1 ? 16 : 8);
+    if (type === 'mdhd' && bodyOffset + 20 <= end) {
+      const version = buf.readUInt8(bodyOffset);
+      if (version === 0) {
+        const timescale = buf.readUInt32BE(bodyOffset + 12) || 44100;
+        const dur = Math.min(0xffffffff, Math.round(durationSec * timescale));
+        buf.writeUInt32BE(dur, bodyOffset + 16);
+      } else if (version === 1 && bodyOffset + 28 <= end) {
+        const timescale = buf.readUInt32BE(bodyOffset + 20) || 44100;
+        const dur = BigInt(Math.round(durationSec * timescale));
+        buf.writeBigUInt64BE(dur, bodyOffset + 24);
+      }
+    }
+    offset += actualSize;
+  }
+}
+
 function scTrack(track) {
   if(!track?.id || !track.permalink_url)return null;
-  const result=trackBase('soundcloud',track.id,track.title,track.user?.username,number(track.duration)/1000,(track.artwork_url||track.user?.avatar_url||'').replace('-large.','-t500x500.'),canonicalURL(track.permalink_url).url);
+  let dur = number(track.duration);
+  if(dur > 10000) dur = dur / 1000;
+  if(!dur || dur <= 0) {
+    for (const t of track.media?.transcodings || []) {
+      const td = number(t.duration);
+      if (td > 0) { dur = td > 10000 ? td / 1000 : td; break; }
+    }
+  }
+  const result=trackBase('soundcloud',track.id,track.title,track.user?.username,dur,(track.artwork_url||track.user?.avatar_url||'').replace('-large.','-t500x500.'),canonicalURL(track.permalink_url).url);
   result.downloadable=track.policy==='ALLOW' && track.media?.transcodings?.length>0;result.genre=text(track.genre,100);return result;
+}
+
+function detectLanguage(texts) {
+  const allText = texts.join(' ').toLowerCase();
+  const ukLetters = (allText.match(/[іїєґ]/g) || []).length;
+  const ruLetters = (allText.match(/[ыэъё]/g) || []).length;
+  const cyrillic = (allText.match(/[\u0400-\u04ff]/g) || []).length;
+  const latin = (allText.match(/[a-z]/g) || []).length;
+
+  const ukWords = (allText.match(/\b(не|ти|я|ми|що|як|все|мене|тобі|біль|ніч|очі|серце|дощ|сумно|життя|пісня|любов|кохання|депресія|музика)\b/g) || []).length;
+  const ruWords = (allText.match(/\b(не|ты|я|мы|что|как|всё|меня|тебе|боль|ночь|глаза|сердце|дождь|грустно|жизнь|песня|любовь|тоска|грусть|депрессия|музыка)\b/g) || []).length;
+
+  const ukScore = ukLetters * 4 + ukWords * 3;
+  const ruScore = ruLetters * 4 + ruWords * 3;
+
+  if (ukScore > ruScore && ukScore > 0) return 'uk';
+  if (ruScore > ukScore && ruScore > 0) return 'ru';
+  if (cyrillic > latin) {
+    return ruWords >= ukWords ? 'ru' : 'uk';
+  }
+  return 'en';
+}
+
+function detectTheme(texts) {
+  const allText = texts.join(' ').toLowerCase();
+  const scores = {
+    depressive: (allText.match(/депресс|депрес|грустн|сумн|тоск|боль|біль|печал|слез|слёз|плач|sad|cry|alone|dark|heartbreak|melanchol|пост-панк|post-punk|думер|doomer|дождь|дощ|одиноч|безысходн/g) || []).length * 2,
+    phonk: (allText.match(/phonk|фонк|drift|дрифт|bass|kordhell|playaphonk|aggressive|memphis|speed up/g) || []).length * 2,
+    rock: (allText.match(/rock|рок|metal|метал|alternative|альтернатив|punk|панк|grunge|грандж|guitar|гитар/g) || []).length * 2,
+    rap: (allText.match(/рэп|реп|rap|trap|треп|трэп|hip hop|хип хоп|drill|дрілл|beat|бит/g) || []).length * 2,
+    chill: (allText.match(/lofi|lo-fi|chill|чилл|relax|релакс|ambient|спокой|тиха|sleep|night/g) || []).length * 2,
+    pop: (allText.match(/pop|поп|dance|танц|club|клуб|edm|house|хаус|electro|party/g) || []).length * 2,
+  };
+  let best = 'general';
+  let max = 0;
+  for (const [k, v] of Object.entries(scores)) {
+    if (v > max) { max = v; best = k; }
+  }
+  return best;
+}
+
+function cleanSongTitle(title = '') {
+  return String(title)
+    .replace(/\(.*?\)|\[.*?\]/g, ' ')
+    .replace(/\b(official\s+video|official\s+audio|audio|music\s+video|lyrics?|клип|премьера|трек|remix|ремикс|slowed|reverb|speed\s+up|cover|кавер)\b/gi, ' ')
+    .replace(/[-_–—|/\\+:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function matchesLanguage(track, lang) {
+  if (!track || !track.title) return false;
+  const text = `${track.title} ${track.artist || ''}`.toLowerCase();
+  const cyrillic = (text.match(/[\u0400-\u04ff]/g) || []).length;
+  const ukSpecific = /[іїєґ]/i.test(text);
+  const ruSpecific = /[ыэъё]/i.test(text);
+
+  if (lang === 'uk') {
+    if (ruSpecific) return false;
+    return ukSpecific || cyrillic >= 2;
+  }
+  if (lang === 'ru') {
+    if (ukSpecific) return false;
+    return ruSpecific || cyrillic >= 2;
+  }
+  if (lang === 'en') {
+    return cyrillic === 0;
+  }
+  return true;
 }
 
 export class MediaProvider {
@@ -198,28 +364,271 @@ export class MediaProvider {
   }
   async importProfile(source,identifier) {
     source=text(source,30).toLowerCase();identifier=text(identifier,2000);
-    if(source==='spotify'){const track=await this.resolve(identifier);if(track.source!=='spotify')invalid('Потрібне посилання Spotify.');return [track];}
+    if(source==='spotify') {
+      if(identifier.startsWith('spotify:playlist:'))identifier=`https://open.spotify.com/playlist/${identifier.slice(17)}`;
+      if(identifier.startsWith('spotify:album:'))identifier=`https://open.spotify.com/album/${identifier.slice(14)}`;
+      if(identifier.startsWith('spotify:track:'))identifier=`https://open.spotify.com/track/${identifier.slice(14)}`;
+      const playlistMatch = identifier.match(/(playlist|album)\/([A-Za-z0-9]{22})/);
+      if(playlistMatch) {
+        const type = playlistMatch[1];
+        const id = playlistMatch[2];
+        try {
+          const html = await getText(`https://open.spotify.com/embed/${type}/${id}`, { headers: { 'user-agent': UA } });
+          const m = html.match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s) || html.match(/<script id="initial-state"[^>]*>(.*?)<\/script>/s);
+          if(m) {
+            const data = JSON.parse(m[1]);
+            const entity = data.props?.pageProps?.state?.data?.entity;
+            if(entity && Array.isArray(entity.trackList) && entity.trackList.length > 0) {
+              const cover = entity.coverArt?.sources?.[0]?.url || '';
+              const albumTitle = entity.title || entity.name || 'Spotify';
+              return entity.trackList.slice(0, 100).map(t => {
+                const trackId = (t.uri || '').replace('spotify:track:', '') || t.uid || randomUUID();
+                const duration = Math.max(0, number(t.duration) / 1000);
+                const trackUrl = `https://open.spotify.com/track/${trackId}`;
+                return {
+                  ...trackBase('spotify', trackId, t.title, t.subtitle || albumTitle, duration, cover, trackUrl),
+                  requires_match: true,
+                  downloadable: false,
+                  playback_mode: 'spotify_embed',
+                  embed_url: `https://open.spotify.com/embed/track/${trackId}`,
+                  metadata_provider: 'spotify_embed',
+                  notice: 'Оберіть відповідну пісню на YouTube або SoundCloud для відтворення й завантаження.'
+                };
+              });
+            }
+          }
+        } catch(e) {
+          throw new ProviderError('Не вдалося розібрати плейлист або альбом Spotify: ' + cleanError(e));
+        }
+      }
+      if(/^https?:\/\/open\.spotify\.com\/track\//.test(identifier)) {
+        const track = await this.resolve(identifier);
+        if(track.source !== 'spotify') invalid('Потрібне посилання Spotify.');
+        return [track];
+      }
+      return (await this.search(identifier, 'all', 20));
+    }
     if(source==='soundcloud') {
       if(!identifier.startsWith('http'))identifier=`https://soundcloud.com/${identifier.replace(/^@/,'')}`;
       const ref=canonicalURL(identifier,true);if(ref.source!=='soundcloud')invalid('Потрібне посилання SoundCloud.');
-      const profile=await this.scAPI('resolve',{url:ref.url});if(profile.kind==='track')return [this.rememberSC(profile)];
-      if(profile.kind!=='user'||!profile.id)throw new ProviderError('Публічний профіль SoundCloud не знайдено.');
-      const result=await this.scAPI(`users/${profile.id}/tracks`,{limit:40});return (result.collection||[]).map(v=>this.rememberSC(v)).filter(Boolean).slice(0,40);
+      const profile=await this.scAPI('resolve',{url:ref.url});
+      if(profile.kind==='track')return [this.rememberSC(profile)];
+      if(profile.kind==='playlist') {
+        const tracks = (profile.tracks || []).map(t => this.rememberSC(t)).filter(Boolean);
+        if(tracks.length > 0) return tracks.slice(0, 100);
+      }
+      if(profile.kind==='user'&&profile.id) {
+        const tracks = [];
+        const seen = new Set();
+        const addTracks = (list) => {
+          for(const item of (list || [])) {
+            const raw = item.track || item;
+            if(raw && raw.id && !seen.has(raw.id)) {
+              seen.add(raw.id);
+              const t = this.rememberSC(raw);
+              if(t) tracks.push(t);
+            }
+          }
+        };
+        try {
+          const likes = await this.scAPI(`users/${profile.id}/likes`, { limit: 50 });
+          addTracks(likes.collection);
+        } catch {}
+        try {
+          const playlists = await this.scAPI(`users/${profile.id}/playlists`, { limit: 5 });
+          for(const p of (playlists.collection || [])) addTracks(p.tracks);
+        } catch {}
+        try {
+          const userTracks = await this.scAPI(`users/${profile.id}/tracks`, { limit: 50 });
+          addTracks(userTracks.collection);
+        } catch {}
+        if(tracks.length > 0) return tracks.slice(0, 100);
+        throw new ProviderError('У профілі SoundCloud не знайдено пісень чи вподобань.');
+      }
+      throw new ProviderError('Публічний профіль або плейлист SoundCloud не знайдено.');
     }
     if(['youtube','yt'].includes(source)) {
       if(identifier.startsWith('@'))identifier=`https://www.youtube.com/${identifier}`;
+      if(!identifier.startsWith('http')) {
+        const yt = await this.youtube();
+        const found = await yt.search(identifier, { type: 'video' });
+        return [...found.videos].map(ytTrack).filter(Boolean).slice(0, 40);
+      }
       const ref=canonicalURL(identifier,true);if(ref.source!=='youtube')invalid('Потрібне посилання YouTube.');
       if(ref.kind==='track')return [await this.resolve(ref.url)];
       const yt=await this.youtube();
-      if(ref.kind==='playlist'){const playlist=await yt.getPlaylist(ref.id);return [...playlist.videos].map(ytTrack).filter(Boolean).slice(0,40);}
+      if(ref.kind==='playlist'){const playlist=await yt.getPlaylist(ref.id);return [...playlist.videos].map(ytTrack).filter(Boolean).slice(0,60);}
       const endpoint=await yt.resolveURL(ref.url);const id=endpoint.payload?.browseId;
       if(!id)throw new ProviderError('Публічний канал YouTube не знайдено.');
-      const channel=await yt.getChannel(id);const videos=await channel.getVideos();return [...videos.videos].map(video=>ytTrack(video,channel.metadata.title)).filter(Boolean).slice(0,40);
+      const channel=await yt.getChannel(id);const videos=await channel.getVideos();return [...videos.videos].map(video=>ytTrack(video,channel.metadata?.title)).filter(Boolean).slice(0,60);
     }
     invalid('Непідтримувана платформа.');
   }
+  async detectConnectedAccounts(email='', name='') {
+    email=text(email,254);name=text(name,100);
+    const username = (email.split('@')[0] || name || 'user').toLowerCase();
+    const result = {
+      youtube: { found: !!email, name: name || username, identifier: email ? `@${username.replace(/[^A-Za-z0-9_-]/g,'')}` : '' },
+      soundcloud: { found: false, name: '', identifier: '' },
+      spotify: { found: false, name: '', identifier: '' }
+    };
+    try {
+      const sc = await this.scAPI('resolve', { url: `https://soundcloud.com/${username}` });
+      if(sc && sc.kind === 'user' && sc.username) {
+        result.soundcloud = { found: true, name: sc.username, identifier: sc.permalink_url || `https://soundcloud.com/${username}` };
+      }
+    } catch {}
+    return result;
+  }
+  async getInfiniteRecommendations(context = {}, count = 16) {
+    if (!context || typeof context !== 'object') invalid('Некоректний контекст рекомендацій.');
+    count = limit(count, 10, 30);
+    const tracks = Array.isArray(context.tracks) ? context.tracks : [];
+    const history = Array.isArray(context.history) ? context.history : [];
+    const excludeIds = new Set([
+      ...(Array.isArray(context.exclude_ids) ? context.exclude_ids : []),
+      ...tracks.map(t => t.id)
+    ].filter(Boolean));
+    const seed = Number(context.seed) || 0;
+
+    // 1. Gather text corpus and determine language & theme
+    const sampleTexts = [
+      text(context.playlist_name, 100),
+      ...tracks.slice(0, 30).map(t => `${text(t.title, 100)} ${text(t.artist, 80)} ${text(t.genre, 60)}`)
+    ].filter(Boolean);
+
+    const lang = context.preferred_language || detectLanguage(sampleTexts);
+    const theme = context.preferred_theme || detectTheme(sampleTexts);
+
+    // 2. Identify artists from playlist
+    const artists = [...new Set(tracks.map(t => text(t.artist, 100)).filter(a => a && a !== 'YouTube' && a !== 'SoundCloud' && a !== 'Spotify'))];
+
+    // 3. Known songs for covers / alternate authors ("можуть повторюватись пісні які ти вже слухав але від разних авторів")
+    const listenedSongs = [...history, ...tracks]
+      .filter(t => t && t.title)
+      .map(t => ({
+        original_title: cleanSongTitle(t.title),
+        original_artist: text(t.artist, 100).toLowerCase()
+      }))
+      .filter(s => s.original_title.length >= 3);
+
+    // 4. SoundCloud Station logic (SoundCloud Related API)
+    const rawCandidates = [];
+
+    // Identify seed track (current track or last played track)
+    const seedTrack = context.current_track || tracks[tracks.length - 1 - (seed % Math.max(1, tracks.length))] || tracks[0];
+    let scId = null;
+    if (seedTrack) {
+      if (typeof seedTrack.id === 'string' && seedTrack.id.startsWith('sc_')) {
+        scId = seedTrack.id.replace(/^sc_/, '');
+      } else if (seedTrack.url && seedTrack.url.includes('soundcloud.com')) {
+        try {
+          const ref = canonicalURL(seedTrack.url);
+          if (ref.source === 'soundcloud') scId = ref.id;
+        } catch {}
+      }
+      if (!scId && seedTrack.title) {
+        try {
+          const found = await this.scAPI('search/tracks', { q: `${seedTrack.title} ${seedTrack.artist || ''}`, limit: 1 });
+          scId = found?.collection?.[0]?.id;
+        } catch {}
+      }
+    }
+
+    if (scId) {
+      try {
+        const relatedRes = await this.scAPI(`tracks/${scId}/related`, { limit: 20 });
+        const relatedTracks = (relatedRes?.collection || []).map(t => this.rememberSC(t)).filter(Boolean);
+        rawCandidates.push(...relatedTracks);
+      } catch {}
+    }
+
+    // 5. Covers and alternate authors on SoundCloud ("можуть повторюватись пісні які ти вже слухав але від разних авторів")
+    if (listenedSongs.length > 0) {
+      const listened = listenedSongs[seed % listenedSongs.length];
+      if (listened?.original_title) {
+        try {
+          const coverSearch = await this.scAPI('search/tracks', { q: `${listened.original_title} cover`, limit: 6 });
+          const coverTracks = (coverSearch?.collection || []).map(t => this.rememberSC(t)).filter(Boolean);
+          rawCandidates.push(...coverTracks);
+        } catch {}
+        try {
+          const titleSearch = await this.scAPI('search/tracks', { q: listened.original_title, limit: 6 });
+          const titleTracks = (titleSearch?.collection || []).map(t => this.rememberSC(t)).filter(Boolean);
+          rawCandidates.push(...titleTracks);
+        } catch {}
+      }
+    }
+
+    // 6. Artist & Genre tracks on SoundCloud
+    if (rawCandidates.length < count * 2) {
+      if (artists.length > 0) {
+        const artist = artists[seed % artists.length];
+        try {
+          const artistRes = await this.scAPI('search/tracks', { q: artist, limit: 8 });
+          const artistTracks = (artistRes?.collection || []).map(t => this.rememberSC(t)).filter(Boolean);
+          rawCandidates.push(...artistTracks);
+        } catch {}
+      }
+    }
+
+    // 7. YouTube fallback if SoundCloud provided few candidates
+    if (rawCandidates.length < count) {
+      try {
+        let ytQuery = '';
+        if (seedTrack) ytQuery = `${seedTrack.title} ${seedTrack.artist} audio`;
+        else if (artists.length > 0) ytQuery = `${artists[0]} music`;
+        else ytQuery = `${theme} music`;
+        const ytTracks = await this.search(ytQuery, 'youtube', 10);
+        rawCandidates.push(...ytTracks);
+      } catch {}
+    }
+
+    // 8. Filter and Deduplicate candidates
+    const candidates = [];
+    const seenCandidateIds = new Set(excludeIds);
+    const seenTitles = new Set();
+
+    for (const track of rawCandidates) {
+      if (!track || !track.id || seenCandidateIds.has(track.id)) continue;
+
+      // Language filter
+      if (!matchesLanguage(track, lang)) continue;
+
+      // Duration sanity check: reject < 45s (jingles/previews) or > 660s (11 min mixes)
+      if (track.duration > 0 && (track.duration < 45 || track.duration > 660)) continue;
+
+      const cleanedTitle = cleanSongTitle(track.title);
+      let isDifferentAuthorCover = false;
+      for (const s of listenedSongs) {
+        if (cleanedTitle.includes(s.original_title) || s.original_title.includes(cleanedTitle)) {
+          const candArtist = text(track.artist, 100).toLowerCase();
+          if (s.original_artist && !candArtist.includes(s.original_artist) && !s.original_artist.includes(candArtist)) {
+            isDifferentAuthorCover = true;
+            break;
+          }
+        }
+      }
+
+      if (!isDifferentAuthorCover && seenTitles.has(cleanedTitle)) continue;
+
+      seenTitles.add(cleanedTitle);
+      seenCandidateIds.add(track.id);
+      candidates.push({
+        ...track,
+        is_radio_recommendation: true,
+        detected_language: lang,
+        detected_theme: theme,
+        is_different_author_cover: isDifferentAuthorCover
+      });
+
+      if (candidates.length >= count) break;
+    }
+
+    return candidates.slice(0, count);
+  }
   async dispatch(method,args=[]) {
-    const arity={ping:0,search:3,get_discover_tracks:1,resolve_direct_url:1,get_stream:2,get_playback_file:1,get_similar_tracks:3,match_spotify_track:3,import_external_profile:2,download_track:1,get_downloads:0,get_download_job:1,cancel_download:1};
+    const arity={ping:0,search:3,get_discover_tracks:1,resolve_direct_url:1,get_stream:2,get_playback_file:1,get_similar_tracks:3,get_infinite_recommendations:2,match_spotify_track:3,import_external_profile:2,download_track:1,get_downloads:0,get_download_job:1,cancel_download:1,detect_connected_accounts:2};
     if(!Object.hasOwn(arity,method))throw new ProviderError(`Unsupported provider method: ${text(method,100)}`,'unsupported_method');
     if(args.length>arity[method])invalid('Забагато аргументів методу.');
     switch(method) {
@@ -229,9 +638,11 @@ export class MediaProvider {
       case 'resolve_direct_url':return this.resolve(args[0]);
       case 'get_stream':{ const media=await this.stream(args[0],!!args[1]);if(media.hls)throw new ProviderError('Ця пісня SoundCloud має лише сегментований потік. Завантажте її для відтворення.','hls_download_required');return media.url; }
       case 'get_playback_file':return this.audioCache.get(args[0]);
-      case 'get_similar_tracks': {const track=args[0];if(!track||typeof track!=='object')invalid('Некоректна пісня.');const exclude=new Set([track.id,...(Array.isArray(args[2])?args[2]:[])]);return (await this.search(`${text(track.artist,150)} ${text(track.genre,80)||'music'}`,'all',limit(args[1],10,30)+1)).filter(t=>!exclude.has(t.id)).slice(0,limit(args[1],10,30));}
+      case 'get_similar_tracks': {const track=args[0];if(!track||typeof track!=='object')invalid('Некоректна пісня.');const exclude=new Set([track.id,...(Array.isArray(args[2])?args[2]:[])]);return this.getInfiniteRecommendations({tracks:[track],exclude_ids:[...exclude],seed:0},limit(args[1],10,30));}
+      case 'get_infinite_recommendations':return this.getInfiniteRecommendations(args[0],args[1]??16);
       case 'match_spotify_track': {const original=args[0];if(!original||canonicalURL(original.url||original.source_url).source!=='spotify')invalid('Потрібна пісня Spotify.');const found=await this.search(`${original.artist==='Spotify'?'':text(original.artist,150)} ${text(original.title,200)}`,args[1]||'all',limit(args[2],6,12));return found.map(t=>({...t,matched_from:{id:original.id,title:original.title,artist:original.artist,url:original.url,source:'spotify'},match_confirmed:false}));}
       case 'import_external_profile':return this.importProfile(...args);
+      case 'detect_connected_accounts':return this.detectConnectedAccounts(args[0],args[1]);
       case 'download_track':return this.downloads.enqueue(args[0]);
       case 'get_downloads':return this.downloads.list();
       case 'get_download_job':return this.downloads.get(args[0]);
@@ -320,7 +731,21 @@ export class DownloadQueue {
         signal.throwIfAborted();if(job.downloaded_bytes<128)throw new ProviderError('Медіасервіс повернув порожній аудіофайл.');
         job.status='processing';update();await file.sync();
       } finally { await file.close(); }
-      signal.throwIfAborted();await fs.rename(temporary,finalPath);temporary=null;
+      signal.throwIfAborted();
+      if((job.format==='m4a'||job.format==='mp4') && job.track?.duration > 0) {
+        try {
+          const headerBuf = Buffer.alloc(32768);
+          const handle = await fs.open(temporary, 'r+');
+          try {
+            const { bytesRead } = await handle.read(headerBuf, 0, 32768, 0);
+            if (bytesRead > 32) {
+              patchMp4Duration(headerBuf.subarray(0, bytesRead), job.track.duration);
+              await handle.write(headerBuf, 0, bytesRead, 0);
+            }
+          } finally { await handle.close(); }
+        } catch {}
+      }
+      await fs.rename(temporary,finalPath);temporary=null;
       job.status='completed';job.progress=100;job.path=job.file_path=finalPath;job.filename=path.basename(finalPath);job.total_bytes=job.downloaded_bytes;job.eta=0;update();
     } catch(error) {
       job.status=signal.aborted?'cancelled':'failed';job.error=signal.aborted?null:cleanError(error);update();

@@ -27,7 +27,7 @@ fn default_settings() -> Map<String, Value> {
     json!({"volume":0.8,"repeat":"off","shuffle":false,"preferred_source":"all",
         "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,
         "volume_norm_enabled":true,"direct_paste_enabled":true,"smart_cache_enabled":true,
-        "offline_download_enabled":true,"theme":"light"})
+        "offline_download_enabled":true,"infinite_autoplay":true,"theme":"light"})
     .as_object()
     .unwrap()
     .clone()
@@ -310,6 +310,7 @@ impl LibraryStore {
                 | "direct_paste_enabled"
                 | "smart_cache_enabled"
                 | "offline_download_enabled"
+                | "infinite_autoplay"
                     if value.is_boolean() => {}
                 _ => return Err(format!("Непідтримуване налаштування: {key}")),
             }
@@ -320,9 +321,9 @@ impl LibraryStore {
     }
     pub fn update_profile(&mut self, value: &Value) -> CoreResult<Value> {
         let payload = value.as_object().ok_or("Недійсний профіль")?;
-        for field in ["name", "avatar_url", "banner_url", "banner_preset"] {
+        for field in ["name", "email", "avatar_url", "banner_url", "banner_preset"] {
             if let Some(value) = payload.get(field) {
-                let clean = text(Some(value), if field.ends_with("url") { 2000 } else { 160 });
+                let clean = text(Some(value), if field.ends_with("url") { 2000 } else { 254 });
                 if field.ends_with("url")
                     && !clean.is_empty()
                     && url::Url::parse(&clean)
