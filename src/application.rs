@@ -63,6 +63,7 @@ struct Shared {
     snapshot_sequence: AtomicU64,
     close_to_tray: Arc<AtomicBool>,
     media_hotkeys: Arc<AtomicBool>,
+    discord_rpc: Arc<AtomicBool>,
     playback_gate: Mutex<()>,
     account_pending: AtomicUsize,
 }
@@ -77,6 +78,7 @@ struct Command {
 pub struct Application {
     pub desktop: Arc<Desktop>,
     pub audio: AudioPlayer,
+    pub discord: crate::discord::DiscordRpc,
     shared: Arc<Shared>,
     sender: SyncSender<Command>,
     receiver: Arc<Mutex<Option<Receiver<Command>>>>,
@@ -89,12 +91,14 @@ impl Application {
     pub fn new(data_dir: PathBuf, resource_dir: PathBuf, offline: bool) -> Result<Self, String> {
         let desktop = Arc::new(Desktop::open(data_dir.clone(), resource_dir, offline)?);
         let (audio, events) = AudioPlayer::new_in(data_dir.join("audio-cache"));
+        let discord = crate::discord::DiscordRpc::new(true);
         let cache = data_dir.join("artwork");
         fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
         let (sender, receiver) = mpsc::sync_channel(64);
         Ok(Self {
             desktop,
             audio,
+            discord,
             shared: Arc::new(Shared {
                 data: Mutex::new(UiData {
                     user: "guest".into(),
@@ -109,6 +113,7 @@ impl Application {
                 snapshot_sequence: AtomicU64::new(0),
                 close_to_tray: Arc::new(AtomicBool::new(true)),
                 media_hotkeys: Arc::new(AtomicBool::new(true)),
+                discord_rpc: Arc::new(AtomicBool::new(true)),
                 playback_gate: Mutex::new(()),
                 account_pending: AtomicUsize::new(0),
             }),
@@ -1046,6 +1051,17 @@ impl Application {
                 vec![json!({"infinite_autoplay":payload=="true"})],
                 false,
             ),
+            "set-discord-rpc" => {
+                let enabled = payload == "true";
+                self.discord.set_enabled(enabled);
+                self.shared.discord_rpc.store(enabled, Ordering::Relaxed);
+                self.submit(
+                    ui,
+                    "update_settings",
+                    vec![json!({"discord_rpc_enabled": enabled})],
+                    false,
+                );
+            }
             "update-profile" => {
                 self.submit(ui, "update_profile", vec![json!({"name":payload})], false)
             }
@@ -1409,6 +1425,7 @@ impl Application {
                             });
                         }
                         AudioEvent::Finished => {
+                            this.discord.clear();
                             let this = this.clone();
                             let _ = weak.upgrade_in_event_loop(move |ui| {
                                 let (repeat, preview, has_next, infinite_autoplay) = {
@@ -1432,6 +1449,7 @@ impl Application {
                             });
                         }
                         AudioEvent::Error(message) => {
+                            this.discord.clear();
                             let _ = weak.upgrade_in_event_loop(move |ui| {
                                 ui.set_loading(false);
                                 ui.set_message(message.into());
@@ -1439,13 +1457,23 @@ impl Application {
                         }
                         AudioEvent::State(state) => {
                             let shared = this.shared.clone();
-                            let _ = weak.upgrade_in_event_loop(move |ui| {
-                                let mut duration = state.duration;
-                                if duration <= 0.5 {
-                                    if let Some(t) = state.track.as_ref() {
-                                        duration = crate::playback::track_duration(t);
-                                    }
+                            let mut duration = state.duration;
+                            if duration <= 0.5 {
+                                if let Some(t) = state.track.as_ref() {
+                                    duration = crate::playback::track_duration(t);
                                 }
+                            }
+                            if this.shared.discord_rpc.load(Ordering::Relaxed) {
+                                this.discord.update(
+                                    state.track.as_ref(),
+                                    state.playing,
+                                    state.position,
+                                    duration,
+                                );
+                            } else {
+                                this.discord.clear();
+                            }
+                            let _ = weak.upgrade_in_event_loop(move |ui| {
                                 ui.set_current_track(track_row(
                                     &state.track.unwrap_or(Value::Null),
                                     &shared,
@@ -1471,6 +1499,7 @@ impl Application {
         }
     }
     pub fn shutdown(&self) {
+        self.discord.shutdown();
         if let Some(report) = self.audio.drain() {
             let desktop = self.desktop.clone();
             let (tx, rx) = mpsc::channel();
@@ -1772,6 +1801,9 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
     ui.set_close_to_tray(close);
     ui.set_media_hotkeys(hotkeys);
     ui.set_infinite_autoplay(settings["infinite_autoplay"].as_bool().unwrap_or(true));
+    let discord = settings["discord_rpc_enabled"].as_bool().unwrap_or(true);
+    shared.discord_rpc.store(discord, Ordering::Relaxed);
+    ui.set_discord_rpc(discord);
     {
         let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
         ui.set_shuffle(data.shuffle);

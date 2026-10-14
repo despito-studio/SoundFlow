@@ -27,7 +27,7 @@ fn default_settings() -> Map<String, Value> {
     json!({"volume":0.8,"repeat":"off","shuffle":false,"preferred_source":"all",
         "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,
         "volume_norm_enabled":true,"direct_paste_enabled":true,"smart_cache_enabled":true,
-        "offline_download_enabled":true,"infinite_autoplay":true,"theme":"light"})
+        "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"light"})
     .as_object()
     .unwrap()
     .clone()
@@ -311,6 +311,7 @@ impl LibraryStore {
                 | "smart_cache_enabled"
                 | "offline_download_enabled"
                 | "infinite_autoplay"
+                | "discord_rpc_enabled"
                     if value.is_boolean() => {}
                 _ => return Err(format!("Непідтримуване налаштування: {key}")),
             }

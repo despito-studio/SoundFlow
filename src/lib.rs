@@ -3,6 +3,7 @@ pub mod application;
 mod cloud;
 pub mod core;
 pub mod desktop;
+pub mod discord;
 pub mod library;
 pub mod listening;
 mod media;

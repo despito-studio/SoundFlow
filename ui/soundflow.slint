@@ -71,6 +71,7 @@ export component AppWindow inherits Window {
     in-out property <string> sp-account: "";
     in-out property <string> accounts-import-status: "";
     in-out property <bool> infinite-autoplay: true;
+    in-out property <bool> discord-rpc: true;
 
     callback navigate(string);
     callback search(string, string);
@@ -508,6 +509,10 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 VerticalLayout { SFText { text: "Нескінченне відтворення"; } SFMuted { text: "Добір схожих пісень тієї ж мови й тематики після кінця плейліста."; } }
                                 SFButton { text: root.infinite-autoplay ? "Увімкнено" : "Вимкнено"; label: "Нескінченне відтворення: " + (root.infinite-autoplay ? "увімкнено" : "вимкнено"); checkable: true; active: root.infinite-autoplay; clicked => { root.action("set-infinite-autoplay", root.infinite-autoplay ? "false" : "true"); } }
+                            }
+                            HorizontalLayout {
+                                VerticalLayout { SFText { text: "Discord Rich Presence"; } SFMuted { text: "Відображати поточний трек, виконавця та прогрес у твоєму статусі Discord."; } }
+                                SFButton { text: root.discord-rpc ? "Увімкнено" : "Вимкнено"; label: "Discord Rich Presence: " + (root.discord-rpc ? "увімкнено" : "вимкнено"); checkable: true; active: root.discord-rpc; clicked => { root.action("set-discord-rpc", root.discord-rpc ? "false" : "true"); } }
                             }
                             HorizontalLayout {
                                 SFField { text <=> root.edited-name; label: "Твоє ім’я"; placeholder: root.profile-name; accepted(name) => { root.action("update-profile", name); } }
