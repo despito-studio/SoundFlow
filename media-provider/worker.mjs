@@ -632,7 +632,7 @@ export class MediaProvider {
     if(!Object.hasOwn(arity,method))throw new ProviderError(`Unsupported provider method: ${text(method,100)}`,'unsupported_method');
     if(args.length>arity[method])invalid('Забагато аргументів методу.');
     switch(method) {
-      case 'ping':return {protocol:1,engine:'youtubei.js',engine_version:'18.1.0',runtime:'node',runtime_version:process.version,runtime_available:true,runtime_bundled:path.basename(process.execPath).toLowerCase()==='soundflow-node.exe',worker:'soundflow-media-provider'};
+      case 'ping':return {protocol:1,engine:'youtubei.js',engine_version:'18.1.0',runtime:'node',runtime_version:process.version,runtime_available:true,runtime_bundled:['soundflow-node.exe','soundflow-node'].includes(path.basename(process.execPath).toLowerCase()),worker:'soundflow-media-provider'};
       case 'search':return this.search(args[0],args[1]||'all',args[2]??16);
       case 'get_discover_tracks':return this.search(GENRES[text(args[0],100)||'lofi']||text(args[0],100),'all',20);
       case 'resolve_direct_url':return this.resolve(args[0]);

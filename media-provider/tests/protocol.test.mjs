@@ -57,7 +57,8 @@ test('Spotify confirmation is required even when counterpart audio is cached or 
 });
 test('bundled worker uses no system Python/Node, stdout is JSONL, framing recovers and EOF exits',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'soundflow-worker-'));
-  const child=spawn(path.join(project,'resources/runtime/soundflow-node.exe'),[path.join(project,'media-provider/dist/worker.cjs'),'--data-dir',dir,'--download-dir',path.join(dir,'downloads')],{windowsHide:true,env:{...process.env,PATH:''},stdio:['pipe','pipe','pipe']});
+  const runtimeBin = process.platform === 'win32' ? 'resources/runtime/soundflow-node.exe' : 'resources/runtime/soundflow-node';
+  const child=spawn(path.join(project,runtimeBin),[path.join(project,'media-provider/dist/worker.cjs'),'--data-dir',dir,'--download-dir',path.join(dir,'downloads')],{windowsHide:true,env:{...process.env,PATH:''},stdio:['pipe','pipe','pipe']});
   const stdout=[];const stderr=[];child.stdout.on('data',v=>stdout.push(v));child.stderr.on('data',v=>stderr.push(v));
   const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
   child.stdin.write('{"id":1,"method":"ping","args":[]}\n');child.stdin.write('{"id":2,"method":"get_downloads","args":[]}\n');

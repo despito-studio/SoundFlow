@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rcedit } from 'rcedit';
 export async function brandRuntime(executable,icon) {
-  await rcedit(executable,{icon,'product-version':'3.2.0','version-string':{ProductName:'SoundFlow',FileDescription:'SoundFlow Media',InternalName:'SoundFlow Media',OriginalFilename:'soundflow-node.exe',ProductVersion:'3.2.0'}});
+  if (process.platform === 'win32') {
+    await rcedit(executable,{icon,'product-version':'3.2.0','version-string':{ProductName:'SoundFlow',FileDescription:'SoundFlow Media',InternalName:'SoundFlow Media',OriginalFilename:'soundflow-node.exe',ProductVersion:'3.2.0'}});
+  }
 }
 export async function bundleProvider() {
   const root=path.dirname(fileURLToPath(import.meta.url));const output=path.join(root,'dist');await fs.mkdir(output,{recursive:true});

@@ -1,58 +1,44 @@
 [
   {
-    "query": "Tame Impala Currents B-Sides Remixes",
-    "artist": "Tame Impala",
-    "title": "Currents B-Sides & Remixes",
-    "art": "resources/covers/0.jpg",
-    "url": "https://music.apple.com/us/album/currents-b-sides-remixes-ep/1440875696?uo=4"
+    "query": "Папин Олимпос Искренность",
+    "artist": "Папин Олимпос",
+    "title": "Искренность",
+    "art": "resources/covers/wave_0.jpg",
+    "url": "https://soundcloud.com/gilyetina/papin-olimpos-iskrennost"
   },
   {
-    "query": "Billie Eilish HIT ME HARD AND SOFT",
-    "artist": "Billie Eilish",
-    "title": "HIT ME HARD AND SOFT",
-    "art": "resources/covers/1.jpg",
-    "url": "https://music.apple.com/us/album/hit-me-hard-and-soft/1739659134?uo=4"
+    "query": "ssshhhiiittt! Танцы",
+    "artist": "ssshhhiiittt!",
+    "title": "Танцы",
+    "art": "resources/covers/wave_1.jpg",
+    "url": "https://soundcloud.com/shiiiiiiiiiiiiiit/tanczy"
   },
   {
-    "query": "Frank Ocean Novacane",
-    "artist": "Frank Ocean",
-    "title": "Novacane",
-    "art": "resources/covers/3.jpg",
-    "url": "https://music.apple.com/us/album/novacane-single/1445278500?uo=4"
+    "query": "ПОШЛАЯ МОЛЛИ Спать с тобой",
+    "artist": "ПОШЛАЯ МОЛЛИ",
+    "title": "Спать с тобой",
+    "art": "resources/covers/wave_2.jpg",
+    "url": "https://soundcloud.com/poshlayamolly/spat-stoboy"
   },
   {
-    "query": "The Weeknd After Hours",
-    "artist": "The Weeknd",
-    "title": "After Hours",
-    "art": "resources/covers/5.jpg",
-    "url": "https://music.apple.com/us/album/after-hours/1499385848?uo=4"
+    "query": "CUPSIZE ты любишь танцевать",
+    "artist": "CUPSIZE",
+    "title": "ты любишь танцевать",
+    "art": "resources/covers/wave_3.jpg",
+    "url": "https://soundcloud.com/everlov3d/cupsize-ty-lyubish-tanczevat-3"
   },
   {
-    "query": "Daft Punk Random Access Memories",
-    "artist": "Daft Punk",
-    "title": "Random Access Memories",
-    "art": "resources/covers/6.jpg",
-    "url": "https://music.apple.com/us/album/random-access-memories/617154241?uo=4"
+    "query": "Бумбокс Вахтёрам",
+    "artist": "Бумбокс",
+    "title": "Вахтёрам",
+    "art": "resources/covers/wave_4.jpg",
+    "url": "https://soundcloud.com/sergey-402483555/ihggzi6om8dh"
   },
   {
-    "query": "Men I Trust Untourable Album",
-    "artist": "Men I Trust",
-    "title": "Untourable Album",
-    "art": "resources/covers/7.jpg",
-    "url": "https://music.apple.com/us/album/untourable-album/1720804300?uo=4"
-  },
-  {
-    "query": "Bonobo Fragments",
-    "artist": "Bonobo",
-    "title": "Fragments",
-    "art": "resources/covers/8.jpg",
-    "url": "https://music.apple.com/us/album/fragments/1584968878?uo=4"
-  },
-  {
-    "query": "Kendrick Lamar DAMN.",
-    "artist": "Kendrick Lamar",
-    "title": "DAMN.",
-    "art": "resources/covers/9.jpg",
-    "url": "https://music.apple.com/us/album/damn/1440881722?uo=4"
+    "query": "Валентин Стрыкало Наше лето",
+    "artist": "Валентин Стрыкало",
+    "title": "Наше лето",
+    "art": "resources/covers/wave_5.jpg",
+    "url": "https://music.apple.com/us/album/наше-лето/1720804300"
   }
 ]

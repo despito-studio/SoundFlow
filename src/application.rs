@@ -2369,6 +2369,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app = Application::new(data, resources, offline)?;
     let ui = AppWindow::new()?;
     let _binding = app.bind(&ui);
+    let weak = ui.as_weak();
+    guard.listen_activation(move || {
+        if let Some(ui) = weak.upgrade() {
+            let _ = ui.show();
+        }
+    });
     // Tray and system shortcuts belong to normal interactive runs only.
     let tray = crate::SoundFlowTray::new()?;
     let weak = ui.as_weak();

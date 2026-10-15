@@ -21,11 +21,41 @@ pub struct InstanceGuard {
     pid_file: PathBuf,
     #[cfg(windows)]
     handle: usize,
+    #[cfg(unix)]
+    sock_path: PathBuf,
+    #[cfg(unix)]
+    listener: std::sync::Mutex<Option<std::os::unix::net::UnixListener>>,
 }
 
 impl InstanceGuard {
     pub fn is_primary(&self) -> bool {
         self.primary
+    }
+
+    pub fn listen_activation(&self, on_activate: impl Fn() + Send + 'static) {
+        #[cfg(unix)]
+        {
+            if let Ok(mut lock) = self.listener.lock() {
+                if let Some(listener) = lock.take() {
+                    std::thread::Builder::new()
+                        .name("soundflow-instance-activation".into())
+                        .spawn(move || {
+                            use std::io::Read;
+                            while let Ok((mut stream, _)) = listener.accept() {
+                                let mut buffer = [0u8; 32];
+                                if let Ok(n) = stream.read(&mut buffer) {
+                                    if buffer[..n].starts_with(b"activate") {
+                                        on_activate();
+                                    }
+                                }
+                            }
+                        })
+                        .ok();
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = on_activate;
     }
 }
 
@@ -79,13 +109,46 @@ pub fn initialize_process() -> Result<InstanceGuard, String> {
             });
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        // Windows is the packaged platform; other platforms get their own
-        // native process activation adapter when they are introduced.
+        use std::os::unix::net::{UnixListener, UnixStream};
+        let sock_path = if std::env::args().any(|arg| arg == "--data-dir") {
+            use sha2::{Digest, Sha256};
+            let canonical = folder.canonicalize().unwrap_or_else(|_| folder.clone());
+            folder.join(format!(
+                "native-instance-{:x}.sock",
+                Sha256::digest(canonical.to_string_lossy().as_bytes())
+            ))
+        } else {
+            folder.join("native-instance.sock")
+        };
+
+        let (primary, listener) = match UnixListener::bind(&sock_path) {
+            Ok(listener) => (true, Some(listener)),
+            Err(_) => {
+                if let Ok(mut stream) = UnixStream::connect(&sock_path) {
+                    use std::io::Write;
+                    let _ = stream.write_all(b"activate\n");
+                    (false, None)
+                } else {
+                    let _ = fs::remove_file(&sock_path);
+                    match UnixListener::bind(&sock_path) {
+                        Ok(listener) => (true, Some(listener)),
+                        Err(e) => return Err(format!("Не вдалося відкрити SoundFlow: {e}")),
+                    }
+                }
+            }
+        };
+
+        if primary {
+            let _ = fs::write(&pid_file, std::process::id().to_string());
+        }
+
         Ok(InstanceGuard {
-            primary: true,
+            primary,
             pid_file,
+            sock_path,
+            listener: std::sync::Mutex::new(listener),
         })
     }
 }
@@ -132,12 +195,17 @@ unsafe fn raise_window(pid: u32) {
 
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
-        if self.primary
-            && fs::read_to_string(&self.pid_file)
+        if self.primary {
+            if fs::read_to_string(&self.pid_file)
                 .ok()
                 .is_some_and(|pid| pid.trim() == std::process::id().to_string())
-        {
-            let _ = fs::remove_file(&self.pid_file);
+            {
+                let _ = fs::remove_file(&self.pid_file);
+            }
+            #[cfg(unix)]
+            {
+                let _ = fs::remove_file(&self.sock_path);
+            }
         }
         #[cfg(windows)]
         unsafe {

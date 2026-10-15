@@ -5,6 +5,7 @@
 **/node_modules/
 /media-provider/dist/
 /resources/runtime/*.exe
+/resources/runtime/soundflow-node
 /resources/runtime/runtime.json
 *.log
 .env
@@ -13,6 +14,10 @@
 __pycache__/
 *.exe
 *.zip
+*.tar.gz
+*.tar.xz
+*.rpm
+*.run
 /backend/
 /installer/
 /build/
