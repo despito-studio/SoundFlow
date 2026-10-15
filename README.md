@@ -1,16 +1,24 @@
 # SoundFlow
 
-Нативний музичний застосунок для Windows: **Rust + Slint**, аудіо через Rodio/Symphonia. Інтерфейс не використовує HTML, браузер, Tauri або WebView2. Python вилучений із застосунку та збірки.
+Нативний музичний застосунок для **Linux** та **Windows**: **Rust + Slint**, аудіо через Rodio/Symphonia (PipeWire, PulseAudio або ALSA на Linux). Інтерфейс не використовує HTML, браузер, Electron, Tauri або WebView2. Python вилучений із застосунку та збірки.
 
-Компактна світла й темна теми без синього акценту, плаваюча навігація та плеєр, адаптивні обкладинки, клавіатурне керування й нативна доступність Windows.
+Компактна світла й темна теми без синього акценту, плаваюча навігація та плеєр, адаптивні обкладинки, клавіатурне керування й нативна доступність.
+
+## Завантажити для Linux x64
+
+[Графічний інсталятор (.run)](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/SoundFlow-3.2.0-Linux-Installer.run) · [RPM-пакет (.rpm)](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/soundflow-3.2.0-1.x86_64.rpm) · [Portable TAR.GZ](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/SoundFlow-3.2.0-linux-x64.tar.gz) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.3.0)
+
+- **Графічний інсталятор (`.run`)**: універсальний саморозпаковуваний інсталятор із майстром GUI (Zenity / CLI), вибором каталогу встановлення, інтеграцією в системне меню, створенням ярлика на Робочому столі та деінсталятором `uninstall.sh`.
+- **RPM-пакет (`.rpm`)**: нативний пакет для Fedora, RHEL та openSUSE (`sudo dnf install soundflow-3.2.0-1.x86_64.rpm`).
+- **Portable TAR.GZ**: розпакуй у будь-яке місце й запусти `./soundflow.sh` або `./soundflow`.
 
 ## Завантажити для Windows x64
 
-[Інсталятор SoundFlow 3.2.0](https://github.com/feodaI/SoundFlow/releases/download/v3.2.0/SoundFlow-3.2.0-Setup.exe) · [Portable ZIP](https://github.com/feodaI/SoundFlow/releases/download/v3.2.0/SoundFlow-3.2.0-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.2.0)
+[Інсталятор SoundFlow 3.2.0](https://github.com/feodaI/SoundFlow/releases/download/v3.2.0/SoundFlow-3.2.0-Setup.exe) · [Portable ZIP (v3.3.0)](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/SoundFlow-3.2.2-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.3.0)
 
 Інсталятор встановлює застосунок для поточного користувача та створює ярлики. Для portable-версії розпакуй увесь архів і запусти `SoundFlow.exe`. Бібліотека залишається окремо від файлів програми.
 
-![Попередній вигляд нативного інтерфейсу Windows](docs/images/windows-light.png)
+![Попередній вигляд нативного інтерфейсу](docs/images/windows-light.png)
 
 ## Можливості
 
@@ -22,6 +30,32 @@
 - Один екземпляр вікна. Для онлайн-музики запускається максимум один дочірній JavaScript-процес; він завершується разом із застосунком.
 
 ## Запуск і збірка
+
+### Linux
+
+- **Готові установщики**: графічний майстер `dist/SoundFlow-3.2.0-Linux-Installer.run` або RPM-пакет `dist/soundflow-3.2.0-1.x86_64.rpm`.
+- **Portable-версія**: розпакуй `dist/SoundFlow-3.2.0-linux-x64.tar.gz` і запусти `./soundflow.sh` або `./soundflow`.
+
+Для розробки під Linux:
+
+```bash
+# Встановлення залежностей та збірка медіа-провайдера
+(cd media-provider && npm ci)
+node scripts/build-provider.mjs
+
+# Збірка та тестування
+./scripts/build-linux.sh Build
+./scripts/build-linux.sh Test
+(cd media-provider && npm test)
+
+# Пакування дистрибутива та інсталяторів (.run, .rpm, .tar.gz)
+./scripts/package-linux.sh
+./scripts/verify-linux.sh
+```
+
+Докладніше: [Linux](docs/LINUX.md).
+
+### Windows
 
 Готова portable-версія: `dist/windows-x64/SoundFlow.exe`. Інсталятор: `dist/SoundFlow-3.2.0-Setup.exe`. Python, Node.js і WebView2 встановлювати не потрібно.
 
@@ -51,15 +85,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-windows
 ## Структура
 
 ```text
-src/                 Rust: застосунок, бібліотека, статистика, аудіо, Windows
+src/                 Rust: застосунок, бібліотека, статистика, аудіо, Linux та Windows
 ui/                  Slint: екрани, компоненти й тема
 media-provider/      JavaScript-адаптери музичних сервісів і тести
-resources/           іконки, обкладинки, ліцензії, runtime та інсталятор
-scripts/             відтворювана збірка, пакування й перевірка
-docs/                архітектура та контракти
+resources/           іконки, обкладинки, ліцензії, runtime та інсталятори
+scripts/             відтворювана збірка, пакування й перевірка (Linux та Windows)
+docs/                документація Linux/Windows, архітектура та контракти
 ```
 
-Дані користувача зберігаються в `%APPDATA%\app.soundflow.desktop`; встановлення та видалення програми не видаляють бібліотеку чи музику. Стару JSON-бібліотеку можна імпортувати в налаштуваннях.
+Дані користувача зберігаються в `~/.local/share/app.soundflow.desktop` на Linux та `%APPDATA%\app.soundflow.desktop` на Windows; встановлення та видалення програми не видаляють бібліотеку чи музику. Стару JSON-бібліотеку можна імпортувати в налаштуваннях.
 
 ## Хмарні акаунти й Plus
 
