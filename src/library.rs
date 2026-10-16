@@ -28,7 +28,7 @@ fn default_settings() -> Map<String, Value> {
         "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,
         "volume_norm_enabled":true,"direct_paste_enabled":true,"smart_cache_enabled":true,
         "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"light",
-        "language":"uk"})
+        "language":"uk","onboarding_completed":false})
     .as_object()
     .unwrap()
     .clone()
@@ -315,6 +315,7 @@ impl LibraryStore {
                 | "offline_download_enabled"
                 | "infinite_autoplay"
                 | "discord_rpc_enabled"
+                | "onboarding_completed"
                     if value.is_boolean() => {}
                 _ => return Err(format!("Непідтримуване налаштування: {key}")),
             }

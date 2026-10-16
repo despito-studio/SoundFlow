@@ -392,6 +392,9 @@ impl AccountsStore {
         if let Some(acc) = self.active_account_mut() {
             acc.subscription = sub.clone();
         }
+        for acc in &mut self.config.accounts {
+            acc.subscription = sub.clone();
+        }
         self.config.guest_subscription = sub.clone();
         self.save()?;
         Ok(json!({
@@ -399,6 +402,66 @@ impl AccountsStore {
             "message": "Підписку SoundFlow Plus скасовано.",
             "subscription": sub.to_value()
         }))
+    }
+
+    pub fn github_sign_in(&mut self, handle: &str, name: &str) -> CoreResult<Value> {
+        let handle = handle.trim();
+        if handle.is_empty() {
+            return Err("Вкажіть GitHub username або email".into());
+        }
+        let clean_handle = handle.trim_start_matches('@');
+        let email = if clean_handle.contains('@') {
+            clean_handle.to_lowercase()
+        } else {
+            format!("{}@users.noreply.github.com", clean_handle.to_lowercase())
+        };
+        let display_name = if !name.trim().is_empty() {
+            name.trim().to_string()
+        } else {
+            clean_handle.to_string()
+        };
+
+        let existing_index = self
+            .config
+            .accounts
+            .iter()
+            .position(|a| a.email.to_lowercase() == email || a.name.to_lowercase() == clean_handle.to_lowercase());
+        if let Some(idx) = existing_index {
+            self.config.active_id = self.config.accounts[idx].id.clone();
+            if !name.trim().is_empty() {
+                self.config.accounts[idx].name = display_name;
+            }
+        } else {
+            let id = format!("usr_gh_{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
+            let mut sub = self.config.guest_subscription.clone();
+            if !sub.is_valid() {
+                sub = SubscriptionState {
+                    active: true,
+                    plan: "soundflow_plus".into(),
+                    plan_name: "SoundFlow Plus ⭐".into(),
+                    tier: "lifetime".into(),
+                    expires_at: 0.0,
+                    expires_formatted: "Безстрокова (GitHub) ⭐".into(),
+                    promo_code: "GITHUB_SIGNIN".into(),
+                    granted_by: "oauth".into(),
+                };
+            }
+            let avatar = format!("https://github.com/{}.png", clean_handle.split('@').next().unwrap_or(clean_handle));
+            let entry = AccountEntry {
+                id: id.clone(),
+                name: display_name,
+                email,
+                avatar_url: avatar,
+                provider: "github".into(),
+                created_at: now(),
+                subscription: sub,
+            };
+            self.config.accounts.push(entry);
+            self.config.active_id = id;
+        }
+
+        self.save()?;
+        Ok(self.status())
     }
 
     pub fn google_sign_in(&mut self, email: &str, name: &str) -> CoreResult<Value> {

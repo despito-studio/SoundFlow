@@ -236,6 +236,7 @@ impl Core {
                 | "cancel_subscription"
                 | "switch_account"
                 | "google_sign_in"
+                | "github_sign_in"
         );
         let before = if may_change_library {
             Some(self.library.clone())
@@ -368,6 +369,14 @@ impl Core {
                 let email = string_arg(args, 0)?;
                 let name = arg(args, 1).as_str().unwrap_or("");
                 let status = self.accounts.google_sign_in(email, name)?;
+                let active = self.accounts.active_id().to_string();
+                self.switch_to_user(&active)?;
+                Ok(status)
+            }
+            "github_sign_in" => {
+                let handle = string_arg(args, 0)?;
+                let name = arg(args, 1).as_str().unwrap_or("");
+                let status = self.accounts.github_sign_in(handle, name)?;
                 let active = self.accounts.active_id().to_string();
                 self.switch_to_user(&active)?;
                 Ok(status)
@@ -807,5 +816,36 @@ mod tests {
         );
         forged["id"] = json!("unknown-local-track");
         assert!(core.local_path(&forged).is_err());
+    }
+    #[test]
+    fn github_sign_in_and_onboarding_flow() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = Core::open(dir.path().into(), true).unwrap();
+        assert_eq!(
+            core.local_rpc("get_settings", &[]).unwrap()["onboarding_completed"],
+            false
+        );
+        core.local_rpc("update_settings", &[json!({"onboarding_completed": true})])
+            .unwrap();
+        assert_eq!(
+            core.local_rpc("get_settings", &[]).unwrap()["onboarding_completed"],
+            true
+        );
+        let signed_in = core
+            .local_rpc("github_sign_in", &[json!("feodaI"), json!("Feodal")])
+            .unwrap();
+        assert_eq!(signed_in["signed_in"], true);
+        assert_eq!(signed_in["user"]["name"], "Feodal");
+        assert_eq!(signed_in["user"]["provider"], "github");
+        assert_eq!(
+            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
+            true
+        );
+        let cancelled = core.local_rpc("cancel_subscription", &[]).unwrap();
+        assert_eq!(cancelled["ok"], true);
+        assert_eq!(
+            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
+            false
+        );
     }
 }

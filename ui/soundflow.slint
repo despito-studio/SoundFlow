@@ -75,6 +75,7 @@ export component AppWindow inherits Window {
     in-out property <string> accounts-import-status: "";
     in-out property <bool> infinite-autoplay: true;
     in-out property <bool> discord-rpc: true;
+    in-out property <bool> show-onboarding: false;
 
     callback navigate(string);
     callback search(string, string);
@@ -96,6 +97,7 @@ export component AppWindow inherits Window {
     callback sync-library(string);
     callback sign-out();
     callback google-sign-in();
+    callback github-sign-in();
     callback connect-account(string, string);
     callback import-account(string);
     callback import-all-accounts();
@@ -198,7 +200,7 @@ export component AppWindow inherits Window {
         navbar := Rectangle {
             x: root.side-width + (root.workspace-width - self.width) / 2;
             y: 13px;
-            width: min(590px, root.workspace-width - 2 * root.content-inset);
+            width: min(650px, root.workspace-width - 2 * root.content-inset);
             height: 53px;
             border-radius: 18px;
             background: Theme.surface;
@@ -213,6 +215,20 @@ export component AppWindow inherits Window {
                 SFButton { text: I18n.nav-search; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "search"; clicked => { root.navigate("search"); } }
                 SFButton { text: "Flow"; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "flow"; clicked => { root.navigate("flow"); } }
                 SFButton { text: I18n.nav-stats; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "stats"; clicked => { root.navigate("stats"); } }
+                SFButton {
+                    width: 58px;
+                    text: root.language == "en" ? "🇬🇧 EN" : "🇺🇦 UA";
+                    flat: true;
+                    clicked => {
+                        if root.language == "en" {
+                            root.language = "uk";
+                            root.action("set-language", "uk");
+                        } else {
+                            root.language = "en";
+                            root.action("set-language", "en");
+                        }
+                    }
+                }
                 SFButton { width: 40px; text: "···"; icon: true; flat: true; label: I18n.nav-menu; clicked => { root.app-menu = !root.app-menu; } }
             }
         }
@@ -410,7 +426,7 @@ export component AppWindow inherits Window {
                                 SFMuted { text: root.subscription-message != "" ? root.subscription-message : I18n.stats-active; vertical-alignment: center; }
                                 Rectangle { horizontal-stretch: 1; }
                                 SFButton { text: I18n.stats-btn-manage; flat: true; clicked => { root.action("open-subscription-modal", ""); } }
-                                SFButton { text: I18n.stats-btn-cancel; flat: true; danger: true; clicked => { root.action("confirm-cancel-subscription", ""); } }
+                                SFButton { text: I18n.stats-btn-cancel; flat: true; danger: true; clicked => { root.action("cancel-subscription", ""); } }
                                 SFButton { text: I18n.stats-btn-promo-short; flat: true; clicked => { root.action("open-promo-modal", ""); } }
                             }
                         }
@@ -562,7 +578,7 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 8px;
                                     SFButton { text: I18n.set-manage-plus; primary: !root.subscription-active; clicked => { root.action("open-subscription-modal", ""); } }
-                                    if root.subscription-active : SFButton { text: I18n.set-cancel-plus; flat: true; danger: true; clicked => { root.action("confirm-cancel-subscription", ""); } }
+                                    if root.subscription-active : SFButton { text: I18n.set-cancel-plus; flat: true; danger: true; clicked => { root.action("cancel-subscription", ""); } }
                                     SFButton { text: I18n.set-promo; clicked => { root.action("open-promo-modal", ""); } }
                                     SFButton { text: I18n.set-connected-btn; clicked => { root.action("open-connected-accounts", ""); } }
                                     SFButton { text: I18n.set-switch-account-btn; clicked => { root.action("open-accounts-modal", ""); } }
@@ -585,9 +601,10 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 8px;
                                     SFButton { text: I18n.set-google-login; primary: true; enabled: !root.task-loading; clicked => { root.google-sign-in(); } }
+                                    SFButton { text: "GitHub"; enabled: !root.task-loading; clicked => { root.github-sign-in(); } }
                                     SFButton { text: I18n.set-connected-btn; enabled: !root.task-loading; clicked => { root.action("open-connected-accounts", ""); } }
                                     SFButton { text: I18n.stats-btn-subscribe; clicked => { root.action("open-subscription-modal", ""); } }
-                                    if root.subscription-active : SFButton { text: I18n.set-cancel-plus; flat: true; danger: true; clicked => { root.action("confirm-cancel-subscription", ""); } }
+                                    if root.subscription-active : SFButton { text: I18n.set-cancel-plus; flat: true; danger: true; clicked => { root.action("cancel-subscription", ""); } }
                                     SFButton { text: I18n.stats-btn-promo-short; flat: true; clicked => { root.action("open-promo-modal", ""); } }
                                     SFButton { text: I18n.set-accounts-btn; flat: true; clicked => { root.action("open-accounts-modal", ""); } }
                                 }
@@ -715,10 +732,24 @@ export component AppWindow inherits Window {
         }
 
         if root.app-menu : SFPanel {
-            x: navbar.x + navbar.width - self.width; y: 74px; width: 210px; height: 109px;
+            x: navbar.x + navbar.width - self.width; y: 74px; width: 220px; height: 145px;
             drop-shadow-blur: 20px; drop-shadow-color: #00000018;
             VerticalLayout {
                 padding: 8px; spacing: 5px;
+                SFButton {
+                    text: root.language == "en" ? "🇺🇦 Українська мова" : "🇬🇧 English";
+                    flat: true;
+                    clicked => {
+                        if root.language == "en" {
+                            root.language = "uk";
+                            root.action("set-language", "uk");
+                        } else {
+                            root.language = "en";
+                            root.action("set-language", "en");
+                        }
+                        root.app-menu = false;
+                    }
+                }
                 SFButton { text: I18n.nav-settings; flat: true; clicked => { root.navigate("settings"); root.app-menu = false; } }
                 SFButton { text: I18n.set-about-btn; flat: true; clicked => { root.action("about", ""); root.app-menu = false; } }
             }
@@ -745,7 +776,7 @@ export component AppWindow inherits Window {
         SFPanel {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(root.modal-kind == "connected-accounts" || root.modal-kind == "subscription-plans" || root.modal-kind == "accounts-list" ? 820px : 650px, parent.width - 40px);
-            height: min(root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? (root.subscription-active ? 555px : 490px) : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
+            height: min(root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? 555px : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
             drop-shadow-blur: 30px; drop-shadow-color: #00000025;
             accessible-role: region; accessible-label: root.modal-title;
             TouchArea { }
@@ -907,19 +938,19 @@ export component AppWindow inherits Window {
                 }
                 if root.modal-kind == "subscription-plans" : VerticalLayout {
                     spacing: 16px;
-                    if root.subscription-active : SFPanel {
+                    SFPanel {
                         preferred-height: 48px;
                         HorizontalLayout {
                             padding-left: 16px; padding-right: 16px; alignment: center; spacing: 12px;
-                            SFText { text: I18n.sub-active-banner; font-size: 13px; font-weight: 700; color: #f59e0b; }
-                            SFMuted { text: root.subscription-message != "" ? root.subscription-message : "SoundFlow Plus"; font-size: 13px; vertical-alignment: center; }
+                            SFText { text: root.subscription-active ? I18n.sub-active-banner : (I18n.set-free-plan + ":"); font-size: 13px; font-weight: 700; color: root.subscription-active ? #f59e0b : Theme.muted; }
+                            SFMuted { text: root.subscription-active ? (root.subscription-message != "" ? root.subscription-message : "SoundFlow Plus") : "SoundFlow Free"; font-size: 13px; vertical-alignment: center; }
                             Rectangle { horizontal-stretch: 1; }
                             SFButton {
                                 text: I18n.sub-opt-out;
                                 flat: true;
                                 danger: true;
                                 modal-control: true;
-                                clicked => { root.action("confirm-cancel-subscription", ""); }
+                                clicked => { root.action("cancel-subscription", ""); }
                             }
                         }
                     }
@@ -980,12 +1011,12 @@ export component AppWindow inherits Window {
                         alignment: center; spacing: 12px;
                         SFButton { text: I18n.sub-btn-promo; flat: true; modal-control: true; clicked => { root.action("open-promo-modal", ""); } }
                         SFButton { text: I18n.sub-btn-vip; flat: true; modal-control: true; clicked => { root.action("grant-subscription", "VIP"); } }
-                        if root.subscription-active : SFButton {
+                        SFButton {
                             text: I18n.sub-btn-cancel;
                             flat: true;
                             danger: true;
                             modal-control: true;
-                            clicked => { root.action("confirm-cancel-subscription", ""); }
+                            clicked => { root.action("cancel-subscription", ""); }
                         }
                     }
                 }
@@ -1044,6 +1075,143 @@ export component AppWindow inherits Window {
                 }
             }
             FocusScope { width: 0px; height: 0px; changed has-focus => { if self.has-focus { dialog-close.focus(); } } }
+        }
+    }
+
+    if root.show-onboarding : FocusScope {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.action("complete-onboarding", "");
+                root.show-onboarding = false;
+                return accept;
+            }
+            return reject;
+        }
+        Rectangle {
+            x: 0px; y: 0px; width: parent.width; height: parent.height; background: #00000077;
+            TouchArea { clicked => { root.action("complete-onboarding", ""); root.show-onboarding = false; } }
+        }
+        SFPanel {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: min(580px, parent.width - 32px);
+            height: min(520px, parent.height - 32px);
+            drop-shadow-blur: 36px; drop-shadow-color: #00000035;
+            accessible-role: region; accessible-label: I18n.welcome-title;
+            TouchArea { }
+            VerticalLayout {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                padding: 28px; spacing: 14px; alignment: space-between;
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    HorizontalLayout {
+                        spacing: 12px; alignment: center;
+                        Rectangle {
+                            width: 44px; height: 44px; border-radius: 14px;
+                            background: Theme.ink;
+                            SFText {
+                                text: "🎵";
+                                font-size: 22px;
+                                horizontal-alignment: center; vertical-alignment: center;
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 2px; alignment: center;
+                            SFTitle { text: I18n.welcome-title; font-size: 20px; font-weight: 800; }
+                            SFMuted { text: "SoundFlow Music Player"; font-size: 12px; }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px; alignment: center;
+                        SFButton {
+                            text: "🇺🇦 UA";
+                            checkable: true;
+                            active: root.language != "en";
+                            modal-control: true;
+                            clicked => { root.language = "uk"; root.action("set-language", "uk"); }
+                        }
+                        SFButton {
+                            text: "🇬🇧 EN";
+                            checkable: true;
+                            active: root.language == "en";
+                            modal-control: true;
+                            clicked => { root.language = "en"; root.action("set-language", "en"); }
+                        }
+                        SFButton {
+                            text: "×";
+                            flat: true;
+                            icon: true;
+                            modal-control: true;
+                            label: "Close";
+                            clicked => {
+                                root.action("complete-onboarding", "");
+                                root.show-onboarding = false;
+                            }
+                        }
+                    }
+                }
+
+                SFMuted {
+                    text: I18n.welcome-subtitle;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+
+                SFPanel {
+                    preferred-height: 110px;
+                    VerticalLayout {
+                        padding: 12px; spacing: 8px; alignment: center;
+                        SFText { text: I18n.welcome-feat-streams; font-size: 12px; }
+                        SFText { text: I18n.welcome-feat-offline; font-size: 12px; }
+                        SFText { text: I18n.welcome-feat-stats; font-size: 12px; }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 10px;
+                    SFButton {
+                        text: "G   " + I18n.welcome-google-btn;
+                        primary: true;
+                        modal-control: true;
+                        clicked => {
+                            root.google-sign-in();
+                            root.action("complete-onboarding", "");
+                            root.show-onboarding = false;
+                        }
+                    }
+                    SFButton {
+                        text: "⚡   " + I18n.welcome-github-btn;
+                        modal-control: true;
+                        clicked => {
+                            root.github-sign-in();
+                            root.action("complete-onboarding", "");
+                            root.show-onboarding = false;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: center; spacing: 8px;
+                    Rectangle { height: 1px; horizontal-stretch: 1; background: Theme.line; y: 10px; }
+                    SFMuted { text: I18n.welcome-or; font-size: 12px; }
+                    Rectangle { height: 1px; horizontal-stretch: 1; background: Theme.line; y: 10px; }
+                }
+
+                HorizontalLayout {
+                    alignment: center;
+                    SFButton {
+                        text: I18n.welcome-guest-btn + "  →";
+                        flat: true;
+                        modal-control: true;
+                        clicked => {
+                            root.action("complete-onboarding", "");
+                            root.show-onboarding = false;
+                        }
+                    }
+                }
+            }
         }
     }
 }

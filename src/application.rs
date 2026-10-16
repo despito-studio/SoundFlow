@@ -818,6 +818,25 @@ impl Application {
             }
         });
         let weak = ui.as_weak();
+        ui.on_github_sign_in(move || {
+            if let Some(ui) = weak.upgrade() {
+                reset_modal(&ui);
+                ui.set_modal_kind("github-account:".into());
+                ui.set_modal_title(if ui.get_language() == "en" {
+                    "Sign in with GitHub".into()
+                } else {
+                    "Вхід через GitHub".into()
+                });
+                ui.set_modal_description(if ui.get_language() == "en" {
+                    "Enter your GitHub username or email to link your profile:".into()
+                } else {
+                    "Введи свій GitHub username або email для входу в SoundFlow:".into()
+                });
+                ui.set_modal_value("".into());
+                ui.set_modal_open(true);
+            }
+        });
+        let weak = ui.as_weak();
         ui.on_connect_account(move |provider, current| {
             if let Some(ui) = weak.upgrade() {
                 reset_modal(&ui);
@@ -1166,18 +1185,11 @@ impl Application {
             "grant-subscription" | "apply-promo" => {
                 self.submit(ui, "grant_subscription", vec![json!(payload)], false);
             }
-            "confirm-cancel-subscription" => {
-                let mut data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
-                data.pending_confirm = Some(("cancel_subscription".into(), vec![]));
-                reset_modal(ui);
-                ui.set_modal_kind("confirm".into());
-                ui.set_modal_title("Скасувати підписку SoundFlow Plus?".into());
-                ui.set_modal_description(
-                    "Ви впевнені, що хочете відмовитись від підписки SoundFlow Plus? Доступ до розширеної аналітики та персональної статистики буде вимкнено.".into(),
-                );
-                ui.set_modal_open(true);
+            "complete-onboarding" => {
+                ui.set_show_onboarding(false);
+                self.submit(ui, "update_settings", vec![json!({"onboarding_completed": true})], false);
             }
-            "cancel-subscription" | "cancel_subscription" => {
+            "confirm-cancel-subscription" | "cancel-subscription" | "cancel_subscription" => {
                 self.submit(ui, "cancel_subscription", vec![], false);
             }
             "switch-account-id" => {
@@ -1288,6 +1300,29 @@ impl Application {
                 vec![json!(email), json!(name)],
                 false,
             );
+            self.submit(
+                ui,
+                "update_settings",
+                vec![json!({"onboarding_completed": true})],
+                false,
+            );
+            ui.set_show_onboarding(false);
+        } else if let Some(_) = kind.strip_prefix("github-account:") {
+            let handle = value.trim();
+            let name = handle.split('@').next().unwrap_or("github_user");
+            self.submit(
+                ui,
+                "github_sign_in",
+                vec![json!(handle), json!(name)],
+                false,
+            );
+            self.submit(
+                ui,
+                "update_settings",
+                vec![json!({"onboarding_completed": true})],
+                false,
+            );
+            ui.set_show_onboarding(false);
         } else if kind == "confirm" {
             let pending = self
                 .shared
@@ -1595,6 +1630,7 @@ fn account_method(method: &str) -> bool {
             | "sign_out"
             | "switch_account"
             | "google_sign_in"
+            | "github_sign_in"
     )
 }
 fn profile_write(method: &str) -> bool {
@@ -1622,6 +1658,7 @@ fn profile_write(method: &str) -> bool {
             | "buy_subscription"
             | "grant_subscription"
             | "cancel_subscription"
+            | "github_sign_in"
     )
 }
 fn rows<T: Clone + 'static>(values: Vec<T>) -> ModelRc<T> {
@@ -1833,6 +1870,9 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
     ui.set_discord_rpc(discord);
     let lang = settings["language"].as_str().unwrap_or("uk");
     ui.set_language(lang.into());
+    let onboarding_done = settings["onboarding_completed"].as_bool().unwrap_or(false);
+    let signed_in = cloud["signed_in"] == true;
+    ui.set_show_onboarding(!onboarding_done && !signed_in);
     {
         let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
         ui.set_shuffle(data.shuffle);
@@ -2043,10 +2083,19 @@ fn apply_response(
                 }
                 "cancel_subscription" => {
                     close_modal(&ui);
-                    let msg = value["message"].as_str().unwrap_or("Підписку скасовано.");
+                    let is_en = ui.get_language() == "en";
+                    let msg = if is_en {
+                        "SoundFlow Plus subscription has been cancelled."
+                    } else {
+                        "Підписку SoundFlow Plus успішно скасовано."
+                    };
                     ui.set_message(msg.into());
                     ui.set_subscription_active(false);
-                    ui.set_subscription_message("Підписка не активна".into());
+                    ui.set_subscription_message(if is_en {
+                        "Subscription inactive".into()
+                    } else {
+                        "Підписка не активна".into()
+                    });
                     let is_stats = ui.get_view() == "stats";
                     let args = vec![json!(data.stats_period), json!(data.stats_source)];
                     drop(data);
@@ -2055,9 +2104,11 @@ fn apply_response(
                         app.submit(ui, "get_listening_stats", args, false);
                     }
                 }
-                "switch_account" | "google_sign_in" => {
+                "switch_account" | "google_sign_in" | "github_sign_in" => {
                     close_modal(&ui);
-                    ui.set_message("Акаунт оновлено".into());
+                    ui.set_show_onboarding(false);
+                    let is_en = ui.get_language() == "en";
+                    ui.set_message(if is_en { "Account updated successfully".into() } else { "Акаунт успішно оновлено".into() });
                     let is_stats = ui.get_view() == "stats";
                     let args = vec![json!(data.stats_period), json!(data.stats_source)];
                     drop(data);
