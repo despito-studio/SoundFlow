@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.4.0 — 2026-10-16
+
+SoundFlow 3.4.0 delivers a modern segmented language switcher, 1-click subscription cancellation, first-launch onboarding, and Linux font rendering fixes.
+
+- **Segmented Language Switcher (`[ UA | EN ]`)**:
+  - Replaced emoji buttons with a sleek, native two-segment pill control in the navbar.
+  - Crisp rendering on all Linux desktop environments without broken flag emoji glyphs.
+  - Complete Ukrainian translation across all screens, modals, and settings.
+- **1-Click Subscription Cancellation**:
+  - Direct cancellation button in subscription plans and account settings without confusing confirmation loops.
+- **First-Launch Onboarding**:
+  - Modern sign-in and welcome modal supporting GitHub, Google, and Guest mode with immediate language selection.
+- **Linux & Cross-Platform Packaging**:
+  - Full support for Wayland and X11 on KDE, GNOME, etc.
+  - Multi-format Linux installer (`.run`) and portable archives (`.tar.gz`, `.zip`).
+  - 25 Rust unit tests passing.
+
 ## 3.3.0 — 2026-10-16
 
 SoundFlow 3.3.0 brings full bilingual localization, subscription management, cross-platform stabilization, and release readiness for both Linux and Windows.

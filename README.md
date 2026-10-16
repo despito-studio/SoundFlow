@@ -6,15 +6,14 @@
 
 ## Завантажити для Linux x64
 
-[Графічний інсталятор (.run)](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/SoundFlow-3.2.0-Linux-Installer.run) · [RPM-пакет (.rpm)](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/soundflow-3.2.0-1.x86_64.rpm) · [Portable TAR.GZ](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/SoundFlow-3.2.0-linux-x64.tar.gz) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.3.0)
+[Графічний інсталятор (.run)](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-Linux-Installer.run) · [Portable TAR.GZ](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-linux-x64.tar.gz) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.4.0)
 
 - **Графічний інсталятор (`.run`)**: універсальний саморозпаковуваний інсталятор із майстром GUI (Zenity / CLI), вибором каталогу встановлення, інтеграцією в системне меню, створенням ярлика на Робочому столі та деінсталятором `uninstall.sh`.
-- **RPM-пакет (`.rpm`)**: нативний пакет для Fedora, RHEL та openSUSE (`sudo dnf install soundflow-3.2.0-1.x86_64.rpm`).
 - **Portable TAR.GZ**: розпакуй у будь-яке місце й запусти `./soundflow.sh` або `./soundflow`.
 
 ## Завантажити для Windows x64
 
-[Інсталятор SoundFlow 3.2.0](https://github.com/feodaI/SoundFlow/releases/download/v3.2.0/SoundFlow-3.2.0-Setup.exe) · [Portable ZIP (v3.3.0)](https://github.com/feodaI/SoundFlow/releases/download/v3.3.0/SoundFlow-3.2.2-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.3.0)
+[Інсталятор SoundFlow 3.4.0](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-Setup.exe) · [Portable ZIP (v3.4.0)](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.2.2-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.4.0)
 
 Інсталятор встановлює застосунок для поточного користувача та створює ярлики. Для portable-версії розпакуй увесь архів і запусти `SoundFlow.exe`. Бібліотека залишається окремо від файлів програми.
 
@@ -35,8 +34,8 @@
 
 ### Linux
 
-- **Готові установщики**: графічний майстер `dist/SoundFlow-3.2.0-Linux-Installer.run` або RPM-пакет `dist/soundflow-3.2.0-1.x86_64.rpm`.
-- **Portable-версія**: розпакуй `dist/SoundFlow-3.2.0-linux-x64.tar.gz` і запусти `./soundflow.sh` або `./soundflow`.
+- **Готові установщики**: графічний майстер `dist/SoundFlow-3.4.0-Linux-Installer.run`.
+- **Portable-версія**: розпакуй `dist/SoundFlow-3.4.0-linux-x64.tar.gz` і запусти `./soundflow.sh` або `./soundflow`.
 
 Для розробки під Linux:
 
@@ -59,7 +58,7 @@ node scripts/build-provider.mjs
 
 ### Windows
 
-Готова portable-версія: `dist/windows-x64/SoundFlow.exe`. Інсталятор: `dist/SoundFlow-3.2.0-Setup.exe`. Python, Node.js і WebView2 встановлювати не потрібно.
+Готова portable-версія: `dist/windows-x64/SoundFlow.exe`. Інсталятор: `dist/SoundFlow-3.4.0-Setup.exe`. Python, Node.js і WebView2 встановлювати не потрібно.
 
 Для розробки потрібні Rust 1.92+, MSVC Build Tools, Windows SDK і Node.js. SDK можна підготувати без адміністратора:
 
@@ -82,7 +81,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-windows
 
 Докладніше: [Windows](docs/WINDOWS.md), [архітектура](docs/ARCHITECTURE.md), [хмарний API](docs/CLOUD-API.md).
 
-Перевірки релізу 3.2.0: 23 Rust-тести, 6 тестів медіарушія, запуск у Windows, UI Automation без безіменних кнопок, один екземпляр вікна, власні іконки, завершення дочірнього процесу, повне декодування AAC/MP3 та встановлення зі збереженням бібліотеки. [Історія змін](CHANGELOG.md).
+Перевірки релізу 3.4.0: 25 Rust-тестів, 6 тестів медіарушія, запуск у Linux і Windows, UI Automation без безіменних кнопок, один екземпляр вікна, власні іконки, завершення дочірнього процесу, повне декодування AAC/MP3 та встановлення зі збереженням бібліотеки. [Історія змін](CHANGELOG.md).
 
 ## Структура
 
