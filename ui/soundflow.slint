@@ -1,7 +1,7 @@
 import { ScrollView, ListView, AboutSlint, Palette } from "std-widgets.slint";
 import { TrackRow, PlaylistRow, DownloadRow, RankRow, StatMetric, DailyRow, AccountRow } from "models.slint";
 export { TrackRow, PlaylistRow, DownloadRow, RankRow, StatMetric, DailyRow, AccountRow } from "models.slint";
-import { Theme, SFButton, SFField, SFSlider, SFPanel, SFCover, SFTitle, SFText, SFMuted } from "controls.slint";
+import { Theme, SFButton, SFField, SFSlider, SFPanel, SFCover, SFTitle, SFText, SFMuted, SFLangSwitch } from "controls.slint";
 import { TrackItem } from "track-item.slint";
 import { HomeView } from "home.slint";
 import { I18n } from "i18n.slint";
@@ -215,18 +215,11 @@ export component AppWindow inherits Window {
                 SFButton { text: I18n.nav-search; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "search"; clicked => { root.navigate("search"); } }
                 SFButton { text: "Flow"; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "flow"; clicked => { root.navigate("flow"); } }
                 SFButton { text: I18n.nav-stats; horizontal-stretch: 1; flat: true; checkable: true; active: root.view == "stats"; clicked => { root.navigate("stats"); } }
-                SFButton {
-                    width: 58px;
-                    text: root.language == "en" ? "🇬🇧 EN" : "🇺🇦 UA";
-                    flat: true;
-                    clicked => {
-                        if root.language == "en" {
-                            root.language = "uk";
-                            root.action("set-language", "uk");
-                        } else {
-                            root.language = "en";
-                            root.action("set-language", "en");
-                        }
+                SFLangSwitch {
+                    language: root.language;
+                    language-changed(lang) => {
+                        root.language = lang;
+                        root.action("set-language", lang);
                     }
                 }
                 SFButton { width: 40px; text: "···"; icon: true; flat: true; label: I18n.nav-menu; clicked => { root.app-menu = !root.app-menu; } }
@@ -737,7 +730,7 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 8px; spacing: 5px;
                 SFButton {
-                    text: root.language == "en" ? "🇺🇦 Українська мова" : "🇬🇧 English";
+                    text: root.language == "en" ? "Українська мова (UA)" : "English language (EN)";
                     flat: true;
                     clicked => {
                         if root.language == "en" {
@@ -1111,10 +1104,10 @@ export component AppWindow inherits Window {
                         Rectangle {
                             width: 44px; height: 44px; border-radius: 14px;
                             background: Theme.ink;
-                            SFText {
-                                text: "🎵";
-                                font-size: 22px;
-                                horizontal-alignment: center; vertical-alignment: center;
+                            Image {
+                                width: 28px; height: 28px;
+                                source: @image-url("../resources/icon.png");
+                                image-fit: contain;
                             }
                         }
                         VerticalLayout {
@@ -1124,20 +1117,14 @@ export component AppWindow inherits Window {
                         }
                     }
                     HorizontalLayout {
-                        spacing: 6px; alignment: center;
-                        SFButton {
-                            text: "🇺🇦 UA";
-                            checkable: true;
-                            active: root.language != "en";
+                        spacing: 8px; alignment: center;
+                        SFLangSwitch {
                             modal-control: true;
-                            clicked => { root.language = "uk"; root.action("set-language", "uk"); }
-                        }
-                        SFButton {
-                            text: "🇬🇧 EN";
-                            checkable: true;
-                            active: root.language == "en";
-                            modal-control: true;
-                            clicked => { root.language = "en"; root.action("set-language", "en"); }
+                            language: root.language;
+                            language-changed(lang) => {
+                                root.language = lang;
+                                root.action("set-language", lang);
+                            }
                         }
                         SFButton {
                             text: "×";

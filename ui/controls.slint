@@ -279,3 +279,139 @@ export component SFMuted inherits Text {
     color: Theme.muted;
     overflow: elide;
 }
+
+export component SFLangSwitch inherits Rectangle {
+    in-out property <string> language: "uk";
+    in property <bool> enabled: true;
+    in property <bool> modal-control: false;
+    callback language-changed(string);
+
+    private property <bool> interactive: enabled && (!Theme.modal-open || modal-control);
+    private property <bool> is-uk: language != "en";
+
+    min-height: 34px;
+    preferred-height: 34px;
+    max-height: 36px;
+    min-width: 86px;
+    preferred-width: 86px;
+    max-width: 96px;
+    border-radius: 10px;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: false;
+
+    accessible-role: button;
+    accessible-label: root.is-uk ? "Мова: Українська" : "Language: English";
+    accessible-action-default => {
+        if root.interactive {
+            if root.is-uk {
+                root.language = "en";
+                root.language-changed("en");
+            } else {
+                root.language = "uk";
+                root.language-changed("uk");
+            }
+        }
+    }
+
+    focus-scope := FocusScope {
+        enabled: root.interactive;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return {
+                if root.is-uk {
+                    root.language = "en";
+                    root.language-changed("en");
+                } else {
+                    root.language = "uk";
+                    root.language-changed("uk");
+                }
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    Rectangle {
+        x: -2px; y: -2px; width: parent.width + 4px; height: parent.height + 4px;
+        border-radius: parent.border-radius + 2px;
+        border-width: 2px; border-color: Theme.ink; background: transparent;
+        visible: focus-scope.has-focus;
+    }
+
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 7px;
+            background: root.is-uk ? Theme.surface : (ua-touch.has-hover ? Theme.hover : transparent);
+            border-width: root.is-uk ? 1px : 0px;
+            border-color: root.is-uk ? Theme.control-line : transparent;
+            drop-shadow-blur: root.is-uk ? 4px : 0px;
+            drop-shadow-offset-y: root.is-uk ? 1px : 0px;
+            drop-shadow-color: #00000014;
+            animate background { duration: Theme.reduced-motion ? 0ms : 100ms; }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "UA";
+                color: root.is-uk ? Theme.ink : Theme.muted;
+                font-size: 12px;
+                font-weight: root.is-uk ? 700 : 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            ua-touch := TouchArea {
+                enabled: root.interactive;
+                mouse-cursor: pointer;
+                clicked => {
+                    focus-scope.focus();
+                    if !root.is-uk {
+                        root.language = "uk";
+                        root.language-changed("uk");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 7px;
+            background: !root.is-uk ? Theme.surface : (en-touch.has-hover ? Theme.hover : transparent);
+            border-width: !root.is-uk ? 1px : 0px;
+            border-color: !root.is-uk ? Theme.control-line : transparent;
+            drop-shadow-blur: !root.is-uk ? 4px : 0px;
+            drop-shadow-offset-y: !root.is-uk ? 1px : 0px;
+            drop-shadow-color: #00000014;
+            animate background { duration: Theme.reduced-motion ? 0ms : 100ms; }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "EN";
+                color: !root.is-uk ? Theme.ink : Theme.muted;
+                font-size: 12px;
+                font-weight: !root.is-uk ? 700 : 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            en-touch := TouchArea {
+                enabled: root.interactive;
+                mouse-cursor: pointer;
+                clicked => {
+                    focus-scope.focus();
+                    if root.is-uk {
+                        root.language = "en";
+                        root.language-changed("en");
+                    }
+                }
+            }
+        }
+    }
+}
+
