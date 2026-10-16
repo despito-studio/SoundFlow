@@ -385,17 +385,14 @@ impl AccountsStore {
 
     pub fn cancel_subscription(&mut self) -> CoreResult<Value> {
         let sub = SubscriptionState::default();
-        if self.is_signed_in() {
-            if let Some(acc) = self.active_account_mut() {
-                acc.subscription = sub.clone();
-            }
-        } else {
-            self.config.guest_subscription = sub.clone();
+        if let Some(acc) = self.active_account_mut() {
+            acc.subscription = sub.clone();
         }
+        self.config.guest_subscription = sub.clone();
         self.save()?;
         Ok(json!({
             "ok": true,
-            "message": "Підписку скасовано.",
+            "message": "Підписку SoundFlow Plus скасовано.",
             "subscription": sub.to_value()
         }))
     }

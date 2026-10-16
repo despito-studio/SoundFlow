@@ -407,6 +407,7 @@ export component AppWindow inherits Window {
                                 SFMuted { text: root.subscription-message != "" ? root.subscription-message : "Підписка активна"; vertical-alignment: center; }
                                 Rectangle { horizontal-stretch: 1; }
                                 SFButton { text: "Керувати підпискою"; flat: true; clicked => { root.action("open-subscription-modal", ""); } }
+                                SFButton { text: "Скасувати підписку"; flat: true; danger: true; clicked => { root.action("confirm-cancel-subscription", ""); } }
                                 SFButton { text: "Промокод"; flat: true; clicked => { root.action("open-promo-modal", ""); } }
                             }
                         }
@@ -553,6 +554,7 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 8px;
                                     SFButton { text: "Оформити / Керувати Plus"; primary: !root.subscription-active; clicked => { root.action("open-subscription-modal", ""); } }
+                                    if root.subscription-active : SFButton { text: "Скасувати Plus"; flat: true; danger: true; clicked => { root.action("confirm-cancel-subscription", ""); } }
                                     SFButton { text: "Ввести промокод"; clicked => { root.action("open-promo-modal", ""); } }
                                     SFButton { text: "Підключені 3 акаунти"; clicked => { root.action("open-connected-accounts", ""); } }
                                     SFButton { text: "Змінити акаунт"; clicked => { root.action("open-accounts-modal", ""); } }
@@ -577,6 +579,7 @@ export component AppWindow inherits Window {
                                     SFButton { text: "G  Увійти через Google"; primary: true; enabled: !root.task-loading; clicked => { root.google-sign-in(); } }
                                     SFButton { text: "Підключені 3 акаунти"; enabled: !root.task-loading; clicked => { root.action("open-connected-accounts", ""); } }
                                     SFButton { text: "Оформити Plus"; clicked => { root.action("open-subscription-modal", ""); } }
+                                    if root.subscription-active : SFButton { text: "Скасувати Plus"; flat: true; danger: true; clicked => { root.action("confirm-cancel-subscription", ""); } }
                                     SFButton { text: "Промокод"; flat: true; clicked => { root.action("open-promo-modal", ""); } }
                                     SFButton { text: "Акаунти"; flat: true; clicked => { root.action("open-accounts-modal", ""); } }
                                 }
@@ -718,7 +721,7 @@ export component AppWindow inherits Window {
         SFPanel {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(root.modal-kind == "connected-accounts" || root.modal-kind == "subscription-plans" || root.modal-kind == "accounts-list" ? 820px : 650px, parent.width - 40px);
-            height: min(root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? 490px : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
+            height: min(root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? (root.subscription-active ? 555px : 490px) : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
             drop-shadow-blur: 30px; drop-shadow-color: #00000025;
             accessible-role: region; accessible-label: root.modal-title;
             TouchArea { }
@@ -880,6 +883,22 @@ export component AppWindow inherits Window {
                 }
                 if root.modal-kind == "subscription-plans" : VerticalLayout {
                     spacing: 16px;
+                    if root.subscription-active : SFPanel {
+                        preferred-height: 48px;
+                        HorizontalLayout {
+                            padding-left: 16px; padding-right: 16px; alignment: center; spacing: 12px;
+                            SFText { text: "⭐ Підписка активна:"; font-size: 13px; font-weight: 700; color: #f59e0b; }
+                            SFMuted { text: root.subscription-message != "" ? root.subscription-message : "SoundFlow Plus"; font-size: 13px; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            SFButton {
+                                text: "Відмовитись від підписки";
+                                flat: true;
+                                danger: true;
+                                modal-control: true;
+                                clicked => { root.action("confirm-cancel-subscription", ""); }
+                            }
+                        }
+                    }
                     HorizontalLayout {
                         spacing: 12px;
                         SFPanel {
@@ -937,6 +956,13 @@ export component AppWindow inherits Window {
                         alignment: center; spacing: 12px;
                         SFButton { text: "Ввести промокод"; flat: true; modal-control: true; clicked => { root.action("open-promo-modal", ""); } }
                         SFButton { text: "Видати Plus безкоштовно (VIP)"; flat: true; modal-control: true; clicked => { root.action("grant-subscription", "VIP"); } }
+                        if root.subscription-active : SFButton {
+                            text: "Скасувати підписку";
+                            flat: true;
+                            danger: true;
+                            modal-control: true;
+                            clicked => { root.action("confirm-cancel-subscription", ""); }
+                        }
                     }
                 }
                 if root.modal-kind == "promo-code" : VerticalLayout {

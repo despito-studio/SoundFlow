@@ -1120,8 +1120,13 @@ impl Application {
             "open-subscription-modal" => {
                 reset_modal(ui);
                 ui.set_modal_kind("subscription-plans".into());
-                ui.set_modal_title("Підписка SoundFlow Plus ⭐".into());
-                ui.set_modal_description("Отримай повний доступ до детальної статистики прослуховування, ритму та улюблених виконавців:".into());
+                if ui.get_subscription_active() {
+                    ui.set_modal_title("Керування підпискою SoundFlow Plus ⭐".into());
+                    ui.set_modal_description("Ваша підписка активна. Ви можете змінити тарифний план або скасувати підписку:".into());
+                } else {
+                    ui.set_modal_title("Підписка SoundFlow Plus ⭐".into());
+                    ui.set_modal_description("Отримай повний доступ до детальної статистики прослуховування, ритму та улюблених виконавців:".into());
+                }
                 ui.set_modal_open(true);
             }
             "open-promo-modal" => {
@@ -1152,6 +1157,20 @@ impl Application {
             }
             "grant-subscription" | "apply-promo" => {
                 self.submit(ui, "grant_subscription", vec![json!(payload)], false);
+            }
+            "confirm-cancel-subscription" => {
+                let mut data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                data.pending_confirm = Some(("cancel_subscription".into(), vec![]));
+                reset_modal(ui);
+                ui.set_modal_kind("confirm".into());
+                ui.set_modal_title("Скасувати підписку SoundFlow Plus?".into());
+                ui.set_modal_description(
+                    "Ви впевнені, що хочете відмовитись від підписки SoundFlow Plus? Доступ до розширеної аналітики та персональної статистики буде вимкнено.".into(),
+                );
+                ui.set_modal_open(true);
+            }
+            "cancel-subscription" | "cancel_subscription" => {
+                self.submit(ui, "cancel_subscription", vec![], false);
             }
             "switch-account-id" => {
                 self.stop_for_account();
@@ -2011,6 +2030,20 @@ fn apply_response(
                     drop(data);
                     app.submit(ui, "get_subscription_status", vec![], false);
                     app.submit(ui, "get_listening_stats", args, false);
+                }
+                "cancel_subscription" => {
+                    close_modal(&ui);
+                    let msg = value["message"].as_str().unwrap_or("Підписку скасовано.");
+                    ui.set_message(msg.into());
+                    ui.set_subscription_active(false);
+                    ui.set_subscription_message("Підписка не активна".into());
+                    let is_stats = ui.get_view() == "stats";
+                    let args = vec![json!(data.stats_period), json!(data.stats_source)];
+                    drop(data);
+                    app.submit(ui, "get_subscription_status", vec![], false);
+                    if is_stats {
+                        app.submit(ui, "get_listening_stats", args, false);
+                    }
                 }
                 "switch_account" | "google_sign_in" => {
                     close_modal(&ui);

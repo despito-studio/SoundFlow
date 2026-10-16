@@ -758,6 +758,33 @@ mod tests {
         assert!(core.local_rpc("run_shell", &[]).is_err());
     }
     #[test]
+    fn grant_and_cancel_subscription_flow() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = Core::open(dir.path().into(), true).unwrap();
+        assert_eq!(
+            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
+            false
+        );
+        let granted = core
+            .local_rpc("grant_subscription", &[json!("VIP")])
+            .unwrap();
+        assert_eq!(granted["ok"], true);
+        assert_eq!(
+            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
+            true
+        );
+        let cancelled = core.local_rpc("cancel_subscription", &[]).unwrap();
+        assert_eq!(cancelled["ok"], true);
+        assert_eq!(
+            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
+            false
+        );
+        assert_eq!(
+            core.local_rpc("get_listening_stats", &[]).unwrap()["locked"],
+            true
+        );
+    }
+    #[test]
     fn local_files_require_approved_audio() {
         let dir = tempfile::tempdir().unwrap();
         let music = tempfile::tempdir().unwrap();
