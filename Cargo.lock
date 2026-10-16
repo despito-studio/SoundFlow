@@ -4966,7 +4966,7 @@ dependencies = [
 
 [[package]]
 name = "soundflow"
-version = "3.2.0"
+version = "3.4.0"
 dependencies = [
  "chrono",
  "dirs",

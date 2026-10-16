@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="3.2.0"
+VERSION="3.4.0"
 DIST_DIR="$PROJECT_ROOT/dist"
 STAGE_DIR="$DIST_DIR/linux-x64"
 INSTALLER_BIN="$DIST_DIR/SoundFlow-$VERSION-Linux-Installer.run"
@@ -24,7 +24,7 @@ cat > "$INSTALLER_BIN" << 'INSTALLER_HEADER_EOF'
 set -euo pipefail
 
 APP_NAME="SoundFlow"
-APP_VERSION="3.2.0"
+APP_VERSION="3.4.0"
 DEFAULT_INSTALL_DIR="$HOME/.local/share/soundflow"
 
 # Detect desktop / GUI mode

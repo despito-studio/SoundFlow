@@ -5,7 +5,7 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 
 DESTINATION="${1:-}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="3.2.0"
+VERSION="3.4.0"
 RELEASE_EXE="$PROJECT_ROOT/target/release/soundflow"
 
 if [ -z "$DESTINATION" ]; then
