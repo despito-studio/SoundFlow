@@ -27,7 +27,8 @@ fn default_settings() -> Map<String, Value> {
     json!({"volume":0.8,"repeat":"off","shuffle":false,"preferred_source":"all",
         "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,
         "volume_norm_enabled":true,"direct_paste_enabled":true,"smart_cache_enabled":true,
-        "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"light"})
+        "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"light",
+        "language":"uk"})
     .as_object()
     .unwrap()
     .clone()
@@ -298,6 +299,8 @@ impl LibraryStore {
                 "theme"
                     if ["light", "dark", "system"]
                         .contains(&value.as_str().unwrap_or_default()) => {}
+                "language"
+                    if ["uk", "en"].contains(&value.as_str().unwrap_or_default()) => {}
                 "preferred_source"
                     if ["all", "youtube", "soundcloud", "spotify", "local"]
                         .contains(&value.as_str().unwrap_or_default()) => {}

@@ -278,7 +278,9 @@ impl ProviderBridge {
         if self.process.is_none() {
             self.start()?
         }
-        let process = self.process.as_mut().unwrap();
+        let Some(process) = self.process.as_mut() else {
+            return Err("Не вдалося запустити музичний рушій".into());
+        };
         if process
             .child
             .try_wait()

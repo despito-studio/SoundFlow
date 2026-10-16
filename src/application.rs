@@ -523,6 +523,7 @@ impl Application {
                         let mut data = this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
                         data.shuffle = !data.shuffle;
                         ui.set_shuffle(data.shuffle);
+                        let is_en = data.settings["language"] == "en";
                         this.submit(
                             &ui,
                             "update_settings",
@@ -531,9 +532,9 @@ impl Application {
                         );
                         ui.set_message(
                             if data.shuffle {
-                                "Перемішування увімкнено"
+                                if is_en { "Shuffle enabled" } else { "Перемішування увімкнено" }
                             } else {
-                                "Перемішування вимкнено"
+                                if is_en { "Shuffle disabled" } else { "Перемішування вимкнено" }
                             }
                             .into(),
                         );
@@ -541,6 +542,7 @@ impl Application {
                     "repeat" => {
                         let mut data = this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
                         data.repeat = (data.repeat + 1) % 3;
+                        let is_en = data.settings["language"] == "en";
                         ui.set_repeat_mode(["off", "all", "one"][data.repeat as usize].into());
                         this.submit(
                             &ui,
@@ -549,9 +551,12 @@ impl Application {
                             true,
                         );
                         ui.set_message(
-                            ["Повтор вимкнено", "Повтор черги", "Повтор треку"]
-                                [data.repeat as usize]
-                                .into(),
+                            if is_en {
+                                ["Repeat off", "Repeat all", "Repeat one"][data.repeat as usize]
+                            } else {
+                                ["Повтор вимкнено", "Повтор черги", "Повтор треку"][data.repeat as usize]
+                            }
+                            .into(),
                         );
                     }
                     "mute" => this
@@ -1027,6 +1032,9 @@ impl Application {
             "theme" | "set-theme" => {
                 self.submit(ui, "update_settings", vec![json!({"theme":payload})], false)
             }
+            "language" | "set-language" => {
+                self.submit(ui, "update_settings", vec![json!({"language":payload})], false)
+            }
             "reduced-motion" | "set-reduced-motion" => self.submit(
                 ui,
                 "update_settings",
@@ -1299,7 +1307,7 @@ impl Application {
         }
     }
     fn start_workers(&self, ui: &AppWindow) {
-        let Some(receiver) = self.receiver.lock().unwrap().take() else {
+        let Some(receiver) = self.receiver.lock().unwrap_or_else(|e| e.into_inner()).take() else {
             return;
         };
         let receiver = Arc::new(Mutex::new(receiver));
@@ -1308,7 +1316,7 @@ impl Application {
             let this = self.clone();
             let weak = ui.as_weak();
             std::thread::spawn(move || loop {
-                let command = { receiver.lock().unwrap().recv() };
+                let command = { receiver.lock().unwrap_or_else(|e| e.into_inner()).recv() };
                 let Ok(command) = command else {
                     break;
                 };
@@ -1413,7 +1421,7 @@ impl Application {
                 });
             });
         }
-        if let Some(events) = self.audio_events.lock().unwrap().take() {
+        if let Some(events) = self.audio_events.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let this = self.clone();
             let weak = ui.as_weak();
             let (reports, report_receiver) = mpsc::sync_channel(64);
@@ -1823,6 +1831,8 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
     let discord = settings["discord_rpc_enabled"].as_bool().unwrap_or(true);
     shared.discord_rpc.store(discord, Ordering::Relaxed);
     ui.set_discord_rpc(discord);
+    let lang = settings["language"].as_str().unwrap_or("uk");
+    ui.set_language(lang.into());
     {
         let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
         ui.set_shuffle(data.shuffle);

@@ -226,7 +226,11 @@ impl AccountsStore {
 
         let store = Self {
             path,
-            config: config.unwrap(),
+            config: config.unwrap_or_else(|| AccountsConfig {
+                active_id: "guest".into(),
+                accounts: Vec::new(),
+                guest_subscription: SubscriptionState::default(),
+            }),
         };
         let _ = store.save();
         Ok(store)

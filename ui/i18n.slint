@@ -1,0 +1,291 @@
+// SoundFlow Internationalization (i18n) Module
+// Supports instant reactive runtime language switching (Ukrainian & English).
+
+export global I18n {
+    in-out property <string> locale: "uk";
+    out property <bool> is-uk: locale != "en";
+
+    // Navigation & Sidebar
+    out property <string> nav-home: is-uk ? "Головна" : "Home";
+    out property <string> nav-search: is-uk ? "Пошук" : "Search";
+    out property <string> nav-flow: is-uk ? "Flow" : "Flow";
+    out property <string> nav-stats: is-uk ? "Статистика" : "Stats";
+    out property <string> nav-downloads: is-uk ? "Завантаження" : "Downloads";
+    out property <string> nav-settings: is-uk ? "Налаштування" : "Settings";
+    out property <string> nav-connections: is-uk ? "Підключення" : "Connections";
+    out property <string> nav-menu: is-uk ? "Меню SoundFlow" : "SoundFlow Menu";
+    out property <string> side-library: is-uk ? "БІБЛІОТЕКА" : "LIBRARY";
+    out property <string> side-liked: is-uk ? "♡   Улюблене" : "♡   Favorites";
+    out property <string> playlist-likes: is-uk ? "Улюблені пісні" : "Liked songs";
+    out property <string> side-playlists: is-uk ? "♫   Плейлисти" : "♫   Playlists";
+    out property <string> side-downloads: is-uk ? "↓   Завантаження" : "↓   Downloads";
+    out property <string> side-history: is-uk ? "↺   Історія" : "↺   History";
+    out property <string> side-your-playlists: is-uk ? "ТВОЇ ПЛЕЙЛИСТИ" : "YOUR PLAYLISTS";
+    out property <string> side-create-playlist: is-uk ? "Створити плейлист" : "Create playlist";
+    out property <string> side-connections: is-uk ? "↗   Підключення" : "↗   Connections";
+    out property <string> side-settings: is-uk ? "⚙   Налаштування" : "⚙   Settings";
+    out property <string> side-local-lib: is-uk ? "Локальна бібліотека" : "Local Library";
+    out property <string> side-tracks-suffix: is-uk ? "пісень" : "tracks";
+    out property <string> side-label-nav: is-uk ? "Бібліотека та налаштування" : "Library and settings";
+    out property <string> side-label-main-nav: is-uk ? "Основна навігація" : "Main navigation";
+    out property <string> side-label-content: is-uk ? "Вміст SoundFlow" : "SoundFlow Content";
+    out property <string> profile-default: is-uk ? "Слухач" : "Listener";
+    out property <string> profile-guest: is-uk ? "Гість" : "Guest";
+
+    // Player Bar
+    out property <string> player-play: is-uk ? "Відтворити" : "Play";
+    out property <string> player-pause: is-uk ? "Призупинити" : "Pause";
+    out property <string> player-next: is-uk ? "Наступна пісня" : "Next track";
+    out property <string> player-prev: is-uk ? "Попередня пісня" : "Previous track";
+    out property <string> player-shuffle: is-uk ? "Випадково" : "Shuffle";
+    out property <string> player-repeat: is-uk ? "Повтор" : "Repeat";
+    out property <string> player-repeat-one: is-uk ? "Повтор однієї" : "Repeat one";
+    out property <string> player-queue-title: is-uk ? "Черга відтворення" : "Playback Queue";
+    out property <string> player-volume: is-uk ? "Гучність" : "Volume";
+    out property <string> player-pick-song: is-uk ? "Обери пісню" : "Choose a song";
+    out property <string> player-start-here: is-uk ? "Музика починається тут" : "Music starts here";
+    out property <string> player-buffering: is-uk ? "Готуємо звук…" : "Loading audio…";
+    out property <string> player-region-label: is-uk ? "Музичний плеєр" : "Music player";
+    out property <string> player-options-label: is-uk ? "Додаткові налаштування плеєра" : "Extra player options";
+    out property <string> player-pos-label: is-uk ? "Позиція відтворення у секундах" : "Playback position in seconds";
+    out property <string> player-fav-add: is-uk ? "Вподобати поточну пісню" : "Favorite current track";
+    out property <string> player-fav-remove: is-uk ? "Прибрати поточну пісню з улюбленого" : "Remove current track from favorites";
+
+    // Home View
+    out property <string> home-listen-title: is-uk ? "Слухати" : "Listen";
+    out property <string> home-find-song-btn: is-uk ? "Знайти пісню" : "Find a song";
+    out property <string> home-your-wave: is-uk ? "На твоїй хвилі" : "On Your Wave";
+    out property <string> home-album-hint: is-uk ? "Обери альбом, щоб знайти треки" : "Select an album to discover tracks";
+    out property <string> home-mood-title: is-uk ? "Музика під настрій" : "Music For Your Mood";
+    out property <string> mood-lofi-title: is-uk ? "Без поспіху" : "No Rush";
+    out property <string> mood-lofi-sub: is-uk ? "Lo-fi · тихий ранок" : "Lo-fi · calm morning";
+    out property <string> mood-deep-title: is-uk ? "Після заходу сонця" : "After Sunset";
+    out property <string> mood-deep-sub: is-uk ? "Deep house · рух" : "Deep house · vibe";
+    out property <string> mood-ambient-title: is-uk ? "Зосередитись" : "Focus";
+    out property <string> mood-ambient-sub: is-uk ? "Ambient · без зайвого" : "Ambient · clear mind";
+    out property <string> mood-synth-title: is-uk ? "Нічна поїздка" : "Night Drive";
+    out property <string> mood-synth-sub: is-uk ? "Synthwave · місто" : "Synthwave · night city";
+    out property <string> home-flow-card-title: is-uk ? "Відкривай і зберігай пісні" : "Discover & Save Music";
+    out property <string> home-flow-card-desc: is-uk ? "Слухай уривок, гортай і зберігай." : "Listen to snippets, swipe, and save.";
+    out property <string> home-flow-try-btn: is-uk ? "Спробувати Flow" : "Try Flow";
+
+    // Search / Liked / Playlist / History Views
+    out property <string> view-title-search: is-uk ? "Знайди свій звук" : "Find Your Sound";
+    out property <string> view-title-liked: is-uk ? "Улюблене" : "Favorites";
+    out property <string> view-title-history: is-uk ? "Нещодавно слухав" : "Recently Played";
+    out property <string> view-title-playlist: is-uk ? "Твій плейлист" : "Your Playlist";
+    out property <string> search-hint: is-uk ? "Назва, виконавець або посилання на пісню." : "Track title, artist, or song link.";
+    out property <string> tracks-in-library: is-uk ? "пісень у бібліотеці" : "tracks in library";
+    out property <string> search-field-label: is-uk ? "Пошук пісень" : "Search tracks";
+    out property <string> search-field-ph: is-uk ? "Пісня, артист або URL" : "Song, artist, or URL";
+    out property <string> search-btn-find: is-uk ? "Знайти" : "Search";
+    out property <string> search-src-all: is-uk ? "Усі" : "All";
+    out property <string> search-src-sc-label: is-uk ? "Шукати у SoundCloud" : "Search in SoundCloud";
+    out property <string> playlist-play-all: is-uk ? "Відтворити всі" : "Play All";
+    out property <string> playlist-rename: is-uk ? "Перейменувати" : "Rename";
+    out property <string> playlist-delete: is-uk ? "Видалити" : "Delete";
+    out property <string> tracks-searching: is-uk ? "Шукаємо музику…" : "Searching music…";
+    out property <string> tracks-empty-search: is-uk ? "Улюблений звук починається з пошуку" : "Your favorite sound starts with search";
+    out property <string> tracks-empty-library: is-uk ? "Тут з’являться твої пісні" : "Your tracks will appear here";
+    out property <string> tracks-empty-search-sub: is-uk ? "YouTube та SoundCloud. Spotify — через вибір доступного джерела." : "YouTube and SoundCloud. Spotify matches via available streaming source.";
+    out property <string> tracks-empty-library-sub: is-uk ? "Знайди пісню та додай її у свою бібліотеку." : "Find a song and add it to your library.";
+    out property <string> tracks-find-music-btn: is-uk ? "Знайти музику" : "Find Music";
+
+    // Playlists List View
+    out property <string> playlists-title: is-uk ? "Плейлисти" : "Playlists";
+    out property <string> playlists-create-btn: is-uk ? "+ Створити" : "+ Create";
+    out property <string> playlists-sub: is-uk ? "Уся твоя музика, зібрана разом." : "All your music, organized together.";
+    out property <string> playlists-open-btn: is-uk ? "Відкрити" : "Open";
+    out property <string> playlists-empty: is-uk ? "Створи перший плейлист кнопкою вище." : "Create your first playlist with the button above.";
+
+    // Downloads View
+    out property <string> dl-title: is-uk ? "Завантаження" : "Downloads";
+    out property <string> dl-sub: is-uk ? "SoundCloud і YouTube — за посиланням. Для Spotify обери відповідний запис з іншого джерела." : "SoundCloud and YouTube via direct link. For Spotify, match with an available streaming stream.";
+    out property <string> dl-input-label: is-uk ? "Посилання для завантаження" : "Download URL";
+    out property <string> dl-input-ph: is-uk ? "Встав посилання на пісню" : "Paste track or playlist link";
+    out property <string> dl-btn-download: is-uk ? "Завантажити" : "Download";
+    out property <string> dl-btn-folder: is-uk ? "Відкрити папку" : "Open Folder";
+    out property <string> dl-btn-cancel: is-uk ? "Скасувати" : "Cancel";
+    out property <string> dl-empty-queue: is-uk ? "Черга порожня. Додай посилання або обери пісню у пошуку." : "Queue is empty. Enter a link or select a track in search.";
+
+    // Wave (Flow) View
+    out property <string> flow-refresh-btn: is-uk ? "Оновити добірку" : "Refresh Flow";
+    out property <string> flow-hint: is-uk ? "Слухай уривок. Ліворуч — пропустити, праворуч — вподобати." : "Listen to preview. Swipe left to skip, right to like.";
+    out property <string> flow-genre-ua: is-uk ? "Українська" : "Ukrainian";
+    out property <string> flow-discovery-prefix: is-uk ? "ВІДКРИТТЯ " : "DISCOVERY ";
+    out property <string> flow-discovery-new: is-uk ? "НОВІ ВІДКРИТТЯ" : "NEW DISCOVERIES";
+    out property <string> flow-searching: is-uk ? "Шукаємо твій звук…" : "Finding your vibe…";
+    out property <string> flow-start-mood: is-uk ? "Почни з настрою" : "Pick a vibe to start";
+    out property <string> flow-pick-genre: is-uk ? "Обери жанр зверху, щоб відкрити добірку." : "Select a genre above to start listening.";
+    out property <string> flow-snippet-suffix: is-uk ? " · уривок до 30 секунд" : " · 30-sec preview";
+    out property <string> flow-btn-skip-label: is-uk ? "Пропустити пісню" : "Skip track";
+    out property <string> flow-btn-pause-label: is-uk ? "Призупинити уривок" : "Pause preview";
+    out property <string> flow-btn-play-label: is-uk ? "Відтворити уривок" : "Play preview";
+    out property <string> flow-btn-like-label: is-uk ? "Вподобати пісню та перейти до наступної" : "Like track and move to next";
+    out property <string> flow-btn-save-label: is-uk ? "Додати пісню до плейлиста" : "Add track to playlist";
+    out property <string> flow-shortcuts-hint: is-uk ? "← пропустити   → вподобати   Пробіл — слухати" : "← skip   → like   Space — play/pause";
+
+    // Stats View
+    out property <string> stats-title: is-uk ? "Твій музичний портрет" : "Your Music Portrait";
+    out property <string> stats-banner-title: is-uk ? "Ти слухаєш. Музика розповідає." : "You listen. Music tells the story.";
+    out property <string> stats-banner-desc: is-uk ? "Улюблені артисти, пісні та час прослуховування з різних джерел. Статистика доступна з Plus за $1 на місяць." : "Favorite artists, tracks, and listening time from all sources. Stats available with Plus for $1/mo.";
+    out property <string> stats-btn-subscribe: is-uk ? "Оформити Plus · від $1/міс" : "Get Plus · from $1/mo";
+    out property <string> stats-btn-promo: is-uk ? "Ввести промокод / Отримати Plus" : "Enter Promo Code / Get Plus";
+    out property <string> stats-btn-refresh: is-uk ? "Відновити підписку" : "Restore Subscription";
+    out property <string> stats-all-accounts-hint: is-uk ? "Доступно для всіх акаунтів SoundFlow." : "Available for all SoundFlow accounts.";
+    out property <string> stats-active: is-uk ? "Підписка активна" : "Subscription active";
+    out property <string> stats-btn-manage: is-uk ? "Керувати підпискою" : "Manage Subscription";
+    out property <string> stats-btn-cancel: is-uk ? "Скасувати підписку" : "Cancel Subscription";
+    out property <string> stats-btn-promo-short: is-uk ? "Промокод" : "Promo Code";
+    out property <string> stats-period-7d: is-uk ? "7 днів" : "7 days";
+    out property <string> stats-period-30d: is-uk ? "30 днів" : "30 days";
+    out property <string> stats-period-all: is-uk ? "Увесь час" : "All time";
+    out property <string> stats-import: is-uk ? "Імпортувати історію" : "Import History";
+    out property <string> stats-source-all: is-uk ? "Усі" : "All";
+    out property <string> stats-source-local: is-uk ? "Локальні" : "Local";
+    out property <string> stats-rhythm-title: is-uk ? "Ритм прослуховування" : "Listening Rhythm";
+    out property <string> stats-empty: is-uk ? "Статистика з’явиться після прослуховування." : "Stats will appear after listening to tracks.";
+    out property <string> stats-top-artists: is-uk ? "Улюблені артисти" : "Top Artists";
+    out property <string> stats-top-tracks: is-uk ? "Найчастіше слухаєш" : "Most Played Tracks";
+    out property <string> stats-top-providers: is-uk ? "Твої джерела" : "Your Sources";
+
+    // Settings View
+    out property <string> set-title: is-uk ? "Налаштування" : "Settings";
+    out property <string> set-appearance-title: is-uk ? "Як тобі зручно" : "Preferences";
+    out property <string> set-language: is-uk ? "Мова" : "Language";
+    out property <string> set-lang-uk: "Українська 🇺🇦";
+    out property <string> set-lang-en: "English 🇺🇸";
+    out property <string> set-theme: is-uk ? "Вигляд" : "Theme";
+    out property <string> set-theme-light: is-uk ? "Світлий" : "Light";
+    out property <string> set-theme-dark: is-uk ? "Темний" : "Dark";
+    out property <string> set-reduced-motion: is-uk ? "Менше руху" : "Reduced Motion";
+    out property <string> set-reduced-motion-desc: is-uk ? "Прибирає переходи та анімації." : "Disables transitions and animations.";
+    out property <string> set-tray: is-uk ? "Згортати у трей" : "Minimize to Tray";
+    out property <string> set-tray-desc: is-uk ? "Після закриття вікна музика продовжує грати." : "Music continues playing after closing the window.";
+    out property <string> set-hotkeys: is-uk ? "Медіаклавіші" : "Media Hotkeys";
+    out property <string> set-hotkeys-desc: is-uk ? "Керування з клавіатури працює у фоновому режимі." : "Keyboard playback controls work in the background.";
+    out property <string> set-autoplay: is-uk ? "Нескінченне відтворення" : "Endless Autoplay";
+    out property <string> set-autoplay-desc: is-uk ? "Добір схожих пісень тієї ж мови й тематики після кінця плейліста." : "Auto-plays similar tracks after the queue ends.";
+    out property <string> set-discord: "Discord Rich Presence";
+    out property <string> set-discord-desc: is-uk ? "Відображати поточний трек, виконавця та прогрес у твоєму статусі Discord." : "Show current track, artist, and progress in your Discord status.";
+    out property <string> set-enabled: is-uk ? "Увімкнено" : "Enabled";
+    out property <string> set-disabled: is-uk ? "Вимкнено" : "Disabled";
+    out property <string> set-name-label: is-uk ? "Твоє ім’я" : "Your Name";
+    out property <string> set-name-save: is-uk ? "Зберегти ім’я" : "Save Name";
+    out property <string> set-library-title: is-uk ? "Бібліотека" : "Library";
+    out property <string> set-library-desc: is-uk ? "Локальні файли, резервна копія та історія прослуховування." : "Local music files, backup, and listening history.";
+    out property <string> set-add-folder: is-uk ? "Додати папку музики" : "Add Music Folder";
+    out property <string> set-export: is-uk ? "Експортувати" : "Export Library";
+    out property <string> set-import: is-uk ? "Імпортувати" : "Import Library";
+    out property <string> set-clear-history: is-uk ? "Очистити історію" : "Clear History";
+    out property <string> set-account-header: is-uk ? "SoundFlow Account & Музичні сервіси" : "SoundFlow Account & Music Services";
+    out property <string> set-account-desc: is-uk ? "Керування профілем, підпискою SoundFlow Plus та зв'язком з YouTube, SoundCloud і Spotify." : "Manage profile, SoundFlow Plus subscription, and linked streaming accounts.";
+    out property <string> set-user-default: is-uk ? "SoundFlow Користувач" : "SoundFlow User";
+    out property <string> set-local-account: is-uk ? "Локальний акаунт" : "Local Account";
+    out property <string> set-manage-plus: is-uk ? "Оформити / Керувати Plus" : "Get / Manage Plus";
+    out property <string> set-cancel-plus: is-uk ? "Скасувати Plus" : "Cancel Plus";
+    out property <string> set-promo: is-uk ? "Ввести промокод" : "Enter Promo Code";
+    out property <string> set-connected-btn: is-uk ? "Підключені 3 акаунти" : "Connected Services";
+    out property <string> set-switch-account-btn: is-uk ? "Змінити акаунт" : "Switch Account";
+    out property <string> set-accounts-btn: is-uk ? "Акаунти" : "Accounts";
+    out property <string> set-sign-out: is-uk ? "Вийти" : "Sign Out";
+    out property <string> set-sync-push: is-uk ? "Надіслати бібліотеку в хмару" : "Push library to cloud";
+    out property <string> set-sync-pull: is-uk ? "Отримати з хмари" : "Pull library from cloud";
+    out property <string> set-guest-profile: is-uk ? "Гість (Локальний профіль)" : "Guest (Local Profile)";
+    out property <string> set-guest-desc: is-uk ? "Увійди через Google або створи акаунт, щоб зберігати історію та синхронізувати музику." : "Sign in with Google or create an account to sync library across devices.";
+    out property <string> set-free-plan: is-uk ? "Базовий акаунт (Free)" : "Free Account (Basic)";
+    out property <string> set-google-login: is-uk ? "G  Увійти через Google" : "G  Sign in with Google";
+    out property <string> set-custom-server: is-uk ? "Власний сервер SoundFlow (опціонально для приватної хмари):" : "Custom SoundFlow Server (optional private cloud):";
+    out property <string> set-server-url-label: is-uk ? "Адреса сервера SoundFlow" : "SoundFlow Server URL";
+    out property <string> set-server-connect: is-uk ? "Підключити сервер" : "Connect Server";
+    out property <string> set-auth-signin: is-uk ? "Увійти" : "Sign In";
+    out property <string> set-auth-signup: is-uk ? "Створити акаунт" : "Create Account";
+    out property <string> set-auth-name-label: is-uk ? "Ім’я для нового акаунта" : "Name for new account";
+    out property <string> set-auth-email-label: is-uk ? "Електронна пошта" : "Email address";
+    out property <string> set-auth-pass-label: is-uk ? "Пароль" : "Password";
+    out property <string> set-auth-submit-reg: is-uk ? "Зареєструватися" : "Register";
+    out property <string> set-auth-submit-login: is-uk ? "Увійти в SoundFlow" : "Sign in to SoundFlow";
+    out property <string> set-native-app-desc: is-uk ? "Нативний музичний застосунок" : "Native Music Application";
+    out property <string> set-about-btn: is-uk ? "Про застосунок" : "About App";
+
+    // Connections View
+    out property <string> conn-title: is-uk ? "Твоя музика звідусіль" : "Your Music Everywhere";
+    out property <string> conn-desc: is-uk ? "Імпортуй плейлисти та шукай пісні з різних сервісів у спільній бібліотеці." : "Import playlists and search songs across services in a unified library.";
+    out property <string> conn-google-check: is-uk ? "G  Перевірити 3 акаунти через Google" : "G  Check 3 Accounts via Google";
+    out property <string> conn-manage: is-uk ? "Огляд підключених акаунтів" : "Overview Connected Accounts";
+    out property <string> conn-import-btn: is-uk ? "Імпортувати" : "Import";
+
+    // Modals
+    out property <string> modal-done: is-uk ? "Готово" : "Done";
+    out property <string> modal-cancel: is-uk ? "Скасувати" : "Cancel";
+    out property <string> modal-confirm: is-uk ? "Підтвердити" : "Confirm";
+    out property <string> modal-save: is-uk ? "Зберегти" : "Save";
+    out property <string> modal-wait: is-uk ? "Зачекай…" : "Please wait…";
+    out property <string> modal-create-playlist-title: is-uk ? "Створити новий плейлист" : "Create New Playlist";
+    out property <string> modal-create-playlist-desc: is-uk ? "Вкажи назву для нового плейлиста:" : "Enter a name for the new playlist:";
+    out property <string> modal-create-playlist-ph: is-uk ? "Моя улюблена музика" : "My favorite tracks";
+    out property <string> modal-create-playlist-btn: is-uk ? "+ Новий плейлист" : "+ New Playlist";
+    out property <string> modal-enter-value-ph: is-uk ? "Введи значення" : "Enter value";
+
+    // Subscription Modal
+    out property <string> sub-modal-title: is-uk ? "Підписка SoundFlow Plus ⭐" : "SoundFlow Plus Subscription ⭐";
+    out property <string> sub-modal-manage-title: is-uk ? "Керування підпискою SoundFlow Plus ⭐" : "Manage SoundFlow Plus ⭐";
+    out property <string> sub-modal-desc: is-uk ? "Отримай повний доступ до детальної статистики прослуховування, ритму та топів:" : "Get full access to detailed listening statistics, rhythm, and top charts:";
+    out property <string> sub-modal-manage-desc: is-uk ? "Ваша підписка активна. Ви можете змінити тарифний план або скасувати підписку:" : "Your subscription is active. You can change your plan or opt out:";
+    out property <string> sub-plan-1m: is-uk ? "1 Місяць" : "1 Month";
+    out property <string> sub-plan-1y: is-uk ? "1 Рік" : "1 Year";
+    out property <string> sub-plan-lifetime: is-uk ? "Назавжди ⭐" : "Lifetime ⭐";
+    out property <string> sub-price-1m: "$1";
+    out property <string> sub-price-1y: "$10";
+    out property <string> sub-price-lifetime: "$25";
+    out property <string> sub-period-1m: is-uk ? "на місяць" : "per month";
+    out property <string> sub-period-1y: is-uk ? "на рік ($0.83/міс)" : "per year ($0.83/mo)";
+    out property <string> sub-period-lifetime: is-uk ? "разовий платіж" : "one-time payment";
+    out property <string> sub-desc-1m: is-uk ? "Повний доступ до аналітики прослуховування та топів." : "Full access to listening analytics and charts.";
+    out property <string> sub-desc-1y: is-uk ? "12 місяців Plus за вигідною ціною з усіма оновленнями." : "12 months of Plus at the best price with all updates.";
+    out property <string> sub-desc-lifetime: is-uk ? "Пожиттєвий доступ назавжди без будь-яких регулярних списань." : "Lifetime access forever with zero recurring charges.";
+    out property <string> sub-btn-1m: is-uk ? "Обрати $1/міс" : "Select $1/mo";
+    out property <string> sub-btn-1y: is-uk ? "Обрати $10/рік" : "Select $10/yr";
+    out property <string> sub-btn-lifetime: is-uk ? "Назавжди ⭐" : "Get Lifetime ⭐";
+    out property <string> sub-btn-promo: is-uk ? "Ввести промокод" : "Enter Promo Code";
+    out property <string> sub-btn-vip: is-uk ? "Видати Plus безкоштовно (VIP)" : "Grant Plus for Free (VIP)";
+    out property <string> sub-btn-cancel: is-uk ? "Скасувати підписку" : "Cancel Subscription";
+    out property <string> sub-active-banner: is-uk ? "⭐ Підписка активна:" : "⭐ Subscription active:";
+    out property <string> sub-opt-out: is-uk ? "Відмовитись від підписки" : "Opt out of subscription";
+
+    // Promo Modal
+    out property <string> promo-modal-title: is-uk ? "Активація промокоду SoundFlow Plus" : "Activate SoundFlow Plus Promo Code";
+    out property <string> promo-modal-desc: is-uk ? "Введи промокод (наприклад: PLUS, VIP, SOUNDFLOW, FREE) або отримай Plus безкоштовно:" : "Enter promo code (e.g. PLUS, VIP, SOUNDFLOW, FREE) or activate Plus for free:";
+    out property <string> promo-modal-label: is-uk ? "Промокод" : "Promo Code";
+    out property <string> promo-modal-ph: is-uk ? "Наприклад: PLUS, VIP, SOUNDFLOW, FREE" : "e.g. PLUS, VIP, SOUNDFLOW, FREE";
+    out property <string> promo-modal-vip-btn: is-uk ? "Видати Plus (VIP Free)" : "Grant Plus (VIP Free)";
+    out property <string> promo-modal-btn: is-uk ? "Активувати код" : "Activate Code";
+
+    // Confirmation Modal
+    out property <string> confirm-cancel-sub-title: is-uk ? "Скасувати підписку SoundFlow Plus?" : "Cancel SoundFlow Plus Subscription?";
+    out property <string> confirm-cancel-sub-desc: is-uk ? "Ви впевнені, що хочете відмовитись від підписки SoundFlow Plus? Доступ до розширеної аналітики та персональної статистики буде вимкнено." : "Are you sure you want to cancel your SoundFlow Plus subscription? Access to advanced analytics and personal statistics will be disabled.";
+
+    // Connected Accounts
+    out property <string> accounts-connected-title: is-uk ? "Підключені сервіси" : "Connected Services";
+    out property <string> accounts-import-all: is-uk ? "Імпортувати все знайдене" : "Import All Found";
+    out property <string> acc-found: is-uk ? "✓ Знайдено" : "✓ Found";
+    out property <string> acc-not-found: is-uk ? "✕ Не знайдено" : "✕ Not found";
+    out property <string> yt-sub-label: is-uk ? "Канал або плейлист" : "Channel or playlist";
+    out property <string> sc-sub-label: is-uk ? "Вподобані та плейлисти" : "Likes and playlists";
+    out property <string> sp-sub-label: is-uk ? "Плейлист або альбом" : "Playlist or album";
+    out property <string> acc-change: is-uk ? "Змінити акаунт" : "Change Account";
+    out property <string> acc-login: is-uk ? "Увійти в акаунт" : "Sign In to Account";
+    out property <string> acc-import-tracks: is-uk ? "Імпортувати треки" : "Import Tracks";
+
+    // Accounts List
+    out property <string> accounts-list-title: is-uk ? "Керування акаунтами SoundFlow" : "SoundFlow Accounts Management";
+    out property <string> accounts-list-desc: is-uk ? "Обери акаунт для перемикання або додай новий:" : "Choose an account to switch or add a new one:";
+    out property <string> accounts-active-tag: is-uk ? "  (Активний)" : "  (Active)";
+    out property <string> accounts-switch-btn: is-uk ? "Увійти" : "Switch";
+    out property <string> accounts-free-tag: is-uk ? "Безкоштовний" : "Free";
+    out property <string> accounts-new-btn: is-uk ? "+ Новий акаунт" : "+ New Account";
+
+    // About
+    out property <string> about-subtitle: is-uk ? "Нативний музичний застосунок · Rust" : "Native Music Application · Rust";
+    out property <string> about-hotkeys: is-uk ? "Клавіші: Ctrl+K — пошук, Пробіл — відтворення, Esc — закрити діалог. У Flow: ← пропустити, → вподобати." : "Shortcuts: Ctrl+K — search, Space — play/pause, Esc — close dialog. In Flow: ← skip, → like.";
+}

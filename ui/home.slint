@@ -1,5 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, SFButton, SFPanel, SFCover, SFTitle, SFText, SFMuted } from "controls.slint";
+import { I18n } from "i18n.slint";
 
 component AlbumCard inherits Rectangle {
     in property <string> title;
@@ -13,7 +14,7 @@ component AlbumCard inherits Rectangle {
     min-width: 60px;
     forward-focus: focus;
     accessible-role: button;
-    accessible-label: title + ", " + artist + ". Знайти музику";
+    accessible-label: title + ", " + artist + ". " + I18n.tracks-find-music-btn;
     accessible-enabled: !Theme.modal-open;
     accessible-action-default => { if !Theme.modal-open { root.clicked(); } }
     VerticalLayout {
@@ -88,9 +89,9 @@ export component HomeView inherits ScrollView {
             height: 45px;
             VerticalLayout {
                 spacing: 3px;
-                SFTitle { text: "Слухати"; font-size: 28px; }
+                SFTitle { text: I18n.home-listen-title; font-size: 28px; }
             }
-            SFButton { text: "Знайти пісню"; flat: true; horizontal-stretch: 0; clicked => { root.navigate("search"); } }
+            SFButton { text: I18n.home-find-song-btn; flat: true; horizontal-stretch: 0; clicked => { root.navigate("search"); } }
         }
         SFPanel {
             preferred-height: shelf-layout.min-height;
@@ -98,8 +99,8 @@ export component HomeView inherits ScrollView {
                 padding: 12px; spacing: 10px;
                 HorizontalLayout {
                     height: 22px;
-                    SFText { text: "На твоїй хвилі"; font-weight: 600; font-size: 17px; }
-                    SFMuted { text: "Обери альбом, щоб знайти треки"; horizontal-alignment: right; font-size: 12px; }
+                    SFText { text: I18n.home-your-wave; font-weight: 600; font-size: 17px; }
+                    SFMuted { text: I18n.home-album-hint; horizontal-alignment: right; font-size: 12px; }
                 }
                 HorizontalLayout {
                     spacing: 12px;
@@ -114,13 +115,13 @@ export component HomeView inherits ScrollView {
         }
         VerticalLayout {
             spacing: 8px;
-            SFText { height: 22px; text: "Музика під настрій"; font-size: 17px; font-weight: 600; }
+            SFText { height: 22px; text: I18n.home-mood-title; font-size: 17px; font-weight: 600; }
             HorizontalLayout {
                 spacing: 12px;
-                MoodCard { title: "Без поспіху"; subtitle: "Lo-fi · тихий ранок"; artwork: @image-url("../resources/covers/7.jpg"); round: true; clicked => { root.flow("lofi"); } }
-                MoodCard { title: "Після заходу сонця"; subtitle: "Deep house · рух"; artwork: @image-url("../resources/covers/8.jpg"); clicked => { root.flow("deep"); } }
-                MoodCard { title: "Зосередитись"; subtitle: "Ambient · без зайвого"; artwork: @image-url("../resources/covers/1.jpg"); round: true; clicked => { root.flow("ambient"); } }
-                MoodCard { title: "Нічна поїздка"; subtitle: "Synthwave · місто"; artwork: @image-url("../resources/covers/6.jpg"); clicked => { root.flow("synthwave"); } }
+                MoodCard { title: I18n.mood-lofi-title; subtitle: I18n.mood-lofi-sub; artwork: @image-url("../resources/covers/7.jpg"); round: true; clicked => { root.flow("lofi"); } }
+                MoodCard { title: I18n.mood-deep-title; subtitle: I18n.mood-deep-sub; artwork: @image-url("../resources/covers/8.jpg"); clicked => { root.flow("deep"); } }
+                MoodCard { title: I18n.mood-ambient-title; subtitle: I18n.mood-ambient-sub; artwork: @image-url("../resources/covers/1.jpg"); round: true; clicked => { root.flow("ambient"); } }
+                MoodCard { title: I18n.mood-synth-title; subtitle: I18n.mood-synth-sub; artwork: @image-url("../resources/covers/6.jpg"); clicked => { root.flow("synthwave"); } }
             }
         }
         SFPanel {
@@ -130,10 +131,10 @@ export component HomeView inherits ScrollView {
                 SFText { width: 61px; text: "Flow"; font-size: 22px; font-weight: 700; vertical-alignment: center; }
                 VerticalLayout {
                     spacing: 2px; alignment: center;
-                    SFText { text: "Відкривай і зберігай пісні"; font-weight: 600; }
-                    SFMuted { text: "Слухай уривок, гортай і зберігай."; }
+                    SFText { text: I18n.home-flow-card-title; font-weight: 600; }
+                    SFMuted { text: I18n.home-flow-card-desc; }
                 }
-                SFButton { text: "Спробувати Flow"; primary: true; width: 158px; horizontal-stretch: 0; clicked => { root.navigate("flow"); } }
+                SFButton { text: I18n.home-flow-try-btn; primary: true; width: 158px; horizontal-stretch: 0; clicked => { root.navigate("flow"); } }
             }
         }
     }

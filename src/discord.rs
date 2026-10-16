@@ -1,7 +1,6 @@
-//! Discord Rich Presence integration via local IPC named pipe.
+//! Discord Rich Presence integration via local IPC (named pipes on Windows, Unix domain sockets on Linux/macOS).
 use serde_json::{json, Value};
 use std::{
-    fs::{File, OpenOptions},
     io::{Read, Write},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,6 +10,15 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(windows)]
+use std::fs::{File, OpenOptions};
+
+#[cfg(windows)]
+type IpcStream = File;
+
+#[cfg(unix)]
+type IpcStream = std::os::unix::net::UnixStream;
 
 const DEFAULT_CLIENT_ID: &str = "1177081335727267940";
 
@@ -91,7 +99,7 @@ impl DiscordRpc {
 }
 
 fn worker_loop(rx: Receiver<DiscordCommand>, enabled_flag: Arc<AtomicBool>) {
-    let mut pipe: Option<File> = None;
+    let mut pipe: Option<IpcStream> = None;
     let mut current_activity: Option<TrackActivity> = None;
     let mut last_connect_attempt = Instant::now() - Duration::from_secs(10);
     let mut last_sent_activity: Option<String> = None;
@@ -164,7 +172,8 @@ fn worker_loop(rx: Receiver<DiscordCommand>, enabled_flag: Arc<AtomicBool>) {
     }
 }
 
-fn try_connect_discord() -> Option<File> {
+#[cfg(windows)]
+fn try_connect_discord() -> Option<IpcStream> {
     for i in 0..10 {
         let path = format!(r"\\.\pipe\discord-ipc-{i}");
         if let Ok(mut f) = OpenOptions::new().read(true).write(true).open(&path) {
@@ -189,7 +198,42 @@ fn try_connect_discord() -> Option<File> {
     None
 }
 
-fn send_activity(pipe: &mut File, activity: Option<&TrackActivity>) -> Result<(), std::io::Error> {
+#[cfg(unix)]
+fn try_connect_discord() -> Option<IpcStream> {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    let tmp_dir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+    let dirs = [runtime_dir, tmp_dir, "/tmp".into()];
+
+    for i in 0..10 {
+        for dir in &dirs {
+            let path = std::path::Path::new(dir).join(format!("discord-ipc-{i}"));
+            if path.exists() {
+                if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&path) {
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+
+                    let handshake = json!({
+                        "v": 1,
+                        "client_id": DEFAULT_CLIENT_ID
+                    }).to_string();
+
+                    if send_frame(&mut stream, 0, handshake.as_bytes()).is_err() {
+                        continue;
+                    }
+
+                    if let Ok((op, _body)) = read_frame(&mut stream) {
+                        if op == 1 {
+                            return Some(stream);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn send_activity(pipe: &mut IpcStream, activity: Option<&TrackActivity>) -> Result<(), std::io::Error> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -275,7 +319,7 @@ fn send_activity(pipe: &mut File, activity: Option<&TrackActivity>) -> Result<()
     Ok(())
 }
 
-fn send_frame(pipe: &mut File, opcode: u32, payload: &[u8]) -> Result<(), std::io::Error> {
+fn send_frame(pipe: &mut IpcStream, opcode: u32, payload: &[u8]) -> Result<(), std::io::Error> {
     let mut header = Vec::with_capacity(8 + payload.len());
     header.extend_from_slice(&opcode.to_le_bytes());
     header.extend_from_slice(&(payload.len() as u32).to_le_bytes());
@@ -285,7 +329,7 @@ fn send_frame(pipe: &mut File, opcode: u32, payload: &[u8]) -> Result<(), std::i
     Ok(())
 }
 
-fn read_frame(pipe: &mut File) -> Result<(u32, Vec<u8>), std::io::Error> {
+fn read_frame(pipe: &mut IpcStream) -> Result<(u32, Vec<u8>), std::io::Error> {
     let mut header = [0u8; 8];
     pipe.read_exact(&mut header)?;
     let opcode = u32::from_le_bytes(header[0..4].try_into().unwrap());
