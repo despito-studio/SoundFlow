@@ -368,7 +368,8 @@ impl Core {
             "google_sign_in" => {
                 let email = string_arg(args, 0)?;
                 let name = arg(args, 1).as_str().unwrap_or("");
-                let status = self.accounts.google_sign_in(email, name)?;
+                let avatar = arg(args, 2).as_str().unwrap_or("");
+                let status = self.accounts.google_sign_in(email, name, avatar)?;
                 let active = self.accounts.active_id().to_string();
                 self.switch_to_user(&active)?;
                 Ok(status)

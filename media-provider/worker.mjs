@@ -465,19 +465,130 @@ export class MediaProvider {
     invalid('Непідтримувана платформа.');
   }
   async detectConnectedAccounts(email='', name='') {
-    email=text(email,254);name=text(name,100);
-    const username = (email.split('@')[0] || name || 'user').toLowerCase();
+    email = text(email, 254);
+    name = text(name, 100);
+    const cleanEmail = email.trim().toLowerCase();
+    const username = (cleanEmail.split('@')[0] || name || 'user').toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    const cleanHandle = username.replace(/[^a-z0-9_-]/g, '');
+
     const result = {
-      youtube: { found: !!email, name: name || username, identifier: email ? `@${username.replace(/[^A-Za-z0-9_-]/g,'')}` : '' },
+      youtube: {
+        found: !!cleanEmail,
+        name: name || username || 'YouTube Music',
+        identifier: cleanHandle ? `@${cleanHandle}` : ''
+      },
       soundcloud: { found: false, name: '', identifier: '' },
       spotify: { found: false, name: '', identifier: '' }
     };
-    try {
-      const sc = await this.scAPI('resolve', { url: `https://soundcloud.com/${username}` });
-      if(sc && sc.kind === 'user' && sc.username) {
-        result.soundcloud = { found: true, name: sc.username, identifier: sc.permalink_url || `https://soundcloud.com/${username}` };
+
+    // 1. YouTube / YouTube Music channel check
+    if (cleanHandle) {
+      try {
+        const yt = await this.youtube();
+        const endpoint = await yt.resolveURL(`https://www.youtube.com/@${cleanHandle}`);
+        if (endpoint?.payload?.browseId) {
+          const channel = await yt.getChannel(endpoint.payload.browseId);
+          const channelTitle = channel.metadata?.title || name || `@${cleanHandle}`;
+          result.youtube = {
+            found: true,
+            name: channelTitle,
+            identifier: `@${cleanHandle}`
+          };
+        }
+      } catch {}
+    }
+
+    // 2. SoundCloud user check
+    if (username) {
+      try {
+        const sc = await this.scAPI('resolve', { url: `https://soundcloud.com/${username}` });
+        if (sc && sc.kind === 'user' && sc.username) {
+          result.soundcloud = {
+            found: true,
+            name: sc.username,
+            identifier: sc.permalink_url || `https://soundcloud.com/${username}`
+          };
+        }
+      } catch {}
+
+      if (!result.soundcloud.found && cleanHandle && cleanHandle !== username) {
+        try {
+          const sc2 = await this.scAPI('resolve', { url: `https://soundcloud.com/${cleanHandle}` });
+          if (sc2 && sc2.kind === 'user' && sc2.username) {
+            result.soundcloud = {
+              found: true,
+              name: sc2.username,
+              identifier: sc2.permalink_url || `https://soundcloud.com/${cleanHandle}`
+            };
+          }
+        } catch {}
       }
-    } catch {}
+
+      if (!result.soundcloud.found) {
+        try {
+          const scSearch = await this.scAPI('search/users', { q: username, limit: 5 });
+          const matches = scSearch?.collection || [];
+          for (const u of matches) {
+            if (u?.username && (u.permalink?.toLowerCase() === username || u.username.toLowerCase() === username)) {
+              result.soundcloud = {
+                found: true,
+                name: u.username,
+                identifier: u.permalink_url || `https://soundcloud.com/${u.permalink}`
+              };
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 3. Spotify user / public playlists check
+    if (username) {
+      try {
+        const profileUrl = `https://open.spotify.com/user/${username}`;
+        const res = await fetch(profileUrl, {
+          headers: { 'user-agent': UA },
+          signal: AbortSignal.timeout(5000)
+        });
+        if (res.ok) {
+          const html = await res.text();
+          if (!html.includes('Page not found') && !html.includes('Couldn\'t find that user')) {
+            let spName = name || username;
+            const match = html.match(/<title>([^<]+)<\/title>/) || html.match(/<meta property="og:title" content="([^"]+)"/);
+            if (match && !match[1].toLowerCase().includes('spotify')) {
+              spName = match[1].replace(/ \| Spotify$/, '').trim();
+            }
+            result.spotify = {
+              found: true,
+              name: spName,
+              identifier: profileUrl
+            };
+          }
+        }
+      } catch {}
+
+      if (!result.spotify.found) {
+        try {
+          const searchUrl = `https://open.spotify.com/search/${encodeURIComponent(username)}`;
+          const searchRes = await fetch(searchUrl, {
+            headers: { 'user-agent': UA },
+            signal: AbortSignal.timeout(5000)
+          });
+          if (searchRes.ok) {
+            const html = await searchRes.text();
+            const playlistMatch = html.match(/href="\/playlist\/([A-Za-z0-9]{22})"/);
+            if (playlistMatch) {
+              result.spotify = {
+                found: true,
+                name: `${name || username} (Spotify)`,
+                identifier: `https://open.spotify.com/playlist/${playlistMatch[1]}`
+              };
+            }
+          }
+        } catch {}
+      }
+    }
+
     return result;
   }
   async getInfiniteRecommendations(context = {}, count = 16) {

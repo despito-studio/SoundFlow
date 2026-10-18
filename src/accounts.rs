@@ -30,7 +30,7 @@ impl Default for SubscriptionState {
             plan_name: "SoundFlow Plus".into(),
             tier: "free".into(),
             expires_at: 0.0,
-            expires_formatted: "Не активна".into(),
+            expires_formatted: "Неактивна".into(),
             promo_code: String::new(),
             granted_by: String::new(),
         }
@@ -62,14 +62,14 @@ impl SubscriptionState {
             } else if self.active {
                 "Термін підписки минув".into()
             } else {
-                "Підписка не активна".into()
+                "Підписка неактивна".into()
             },
             "promo_code": self.promo_code,
             "granted_by": self.granted_by,
             "message": if valid {
                 format!("SoundFlow Plus активна ⭐ ({})", self.expires_formatted)
             } else {
-                "Підписка не активна".into()
+                "Підписка неактивна".into()
             }
         })
     }
@@ -464,7 +464,7 @@ impl AccountsStore {
         Ok(self.status())
     }
 
-    pub fn google_sign_in(&mut self, email: &str, name: &str) -> CoreResult<Value> {
+    pub fn google_sign_in(&mut self, email: &str, name: &str, avatar_url: &str) -> CoreResult<Value> {
         let email = email.trim().to_lowercase();
         if email.is_empty() || !email.contains('@') {
             return Err("Вкажіть коректний Google email".into());
@@ -480,6 +480,9 @@ impl AccountsStore {
             self.config.active_id = self.config.accounts[idx].id.clone();
             if !name.trim().is_empty() {
                 self.config.accounts[idx].name = display_name;
+            }
+            if !avatar_url.trim().is_empty() {
+                self.config.accounts[idx].avatar_url = avatar_url.trim().to_string();
             }
         } else {
             let id = format!("usr_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
@@ -500,7 +503,7 @@ impl AccountsStore {
                 id: id.clone(),
                 name: display_name,
                 email: email.clone(),
-                avatar_url: String::new(),
+                avatar_url: avatar_url.trim().to_string(),
                 provider: "google".into(),
                 created_at: now(),
                 subscription: sub,

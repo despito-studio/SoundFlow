@@ -143,12 +143,31 @@ impl Desktop {
                         }
                     }
                 }
+                let user_id = core.user().to_string();
+                if let Ok(sup_accounts) = crate::supabase::fetch_connected_accounts(&user_id) {
+                    if let Some(sup_obj) = sup_accounts.as_object() {
+                        for (provider, val) in sup_obj {
+                            if let Some(id_str) = val.as_str() {
+                                if !id_str.is_empty() {
+                                    if let Some(m_obj) = merged.get_mut(provider) {
+                                        m_obj["found"] = json!(true);
+                                        m_obj["identifier"] = json!(id_str);
+                                        if m_obj["name"].as_str().is_none_or(str::is_empty) {
+                                            m_obj["name"] = json!(id_str);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if let Some(merged_obj) = merged.as_object() {
                     for (provider, info) in merged_obj {
                         if info["found"].as_bool() == Some(true) {
                             if let Some(id) = info["identifier"].as_str() {
                                 if !id.is_empty() {
                                     let _ = core.local_rpc("set_connected_account", &[json!(provider), json!(id)]);
+                                    crate::supabase::sync_one_account(&user_id, provider, id);
                                 }
                             }
                         }
@@ -160,7 +179,10 @@ impl Desktop {
                 let provider = string_arg(args, 0)?;
                 let identifier = string_arg(args, 1)?;
                 let mut core = self.core.lock().map_err(lock_error)?;
-                core.local_rpc("set_connected_account", &[json!(provider), json!(identifier)])
+                let user_id = core.user().to_string();
+                let res = core.local_rpc("set_connected_account", &[json!(provider), json!(identifier)])?;
+                crate::supabase::sync_one_account(&user_id, provider, identifier);
+                Ok(res)
             }
             "sync_connected_accounts" => {
                 let (accounts, user) = {
@@ -189,7 +211,7 @@ impl Desktop {
                         );
                         let mut core = self.core.lock().map_err(lock_error)?;
                         if core.user() != user {
-                            return Err("Профіль змінився. Повторіть синхронізації.".into());
+                            return Err("Профіль змінився. Повторіть синхронізацію.".into());
                         }
                         match result.and_then(|tracks| {
                             core.import_provider_tracks(

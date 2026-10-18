@@ -47,3 +47,27 @@ and keeps the revision unknown until that reconciliation succeeds.
 
 Future mobile purchases need server-verified Apple/Google receipt handling and
 the same account entitlement. They are not implemented by the Windows client.
+
+## Supabase & Google Cloud Integration
+
+SoundFlow integrates with **Google Cloud** (OAuth 2.0 Client credentials) and **Supabase** (Auth + PostgreSQL database) for identity and multi-account music synchronization:
+
+1. **Google OAuth 2.0 & Supabase Auth**:
+   - The desktop client launches a local loopback server (`127.0.0.1:43821` with dynamic port fallback) and opens the system browser to the Supabase / Google OAuth authorize URL.
+   - Upon authentication, Supabase or Google returns tokens to the local callback.
+   - User profile details (`id`, `email`, `name`, `avatar_url`) are fetched and persisted in the local accounts store as well as the Supabase `profiles` table.
+
+2. **Immediate Multi-Service Music Detection**:
+   - Immediately following Google sign-in, SoundFlow runs `detect_connected_accounts` across YouTube Music, SoundCloud, and Spotify.
+   - If accounts exist under that user identity or previous linked services, they are automatically resolved and linked.
+
+3. **Mandatory Confirmation & Account Customization Modal**:
+   - Whether accounts were found automatically or not, the "Connected Music Accounts" modal window opens.
+   - The user confirms the identified accounts or connects separate custom handles, playlists, or channels for each service individually.
+   - Accounts are synced to Supabase `connected_accounts` table:
+     - `user_id`: UUID/string
+     - `provider`: `youtube` | `soundcloud` | `spotify`
+     - `identifier`: string handle, URL, or channel ID
+     - `confirmed`: boolean
+     - `updated_at`: timestamp
+

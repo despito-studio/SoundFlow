@@ -783,37 +783,65 @@ impl Application {
         let weak = ui.as_weak();
         ui.on_google_sign_in(move || {
             if let Some(ui) = weak.upgrade() {
-                let (email, name) = {
-                    let data = this.shared.data.lock().unwrap_or_else(|e| e.into_inner());
-                    let email = data.cloud["user"]["email"]
-                        .as_str()
-                        .or_else(|| data.library["profile"]["email"].as_str())
-                        .unwrap_or("")
-                        .to_owned();
-                    let name = data.cloud["user"]["name"]
-                        .as_str()
-                        .or_else(|| data.library["profile"]["name"].as_str())
-                        .unwrap_or("")
-                        .to_owned();
-                    (email, name)
-                };
-                if !email.is_empty() {
-                    this.submit(
-                        &ui,
-                        "detect_connected_accounts",
-                        vec![json!(email), json!(name)],
-                        false,
-                    );
+                let is_en = ui.get_language() == "en";
+                ui.set_message(if is_en {
+                    "Opening Google Sign-In in your browser...".into()
                 } else {
-                    reset_modal(&ui);
-                    ui.set_modal_kind("google-email:".into());
-                    ui.set_modal_title("Вхід через Google".into());
-                    ui.set_modal_description(
-                        "Введи свій Google email для автоматичної перевірки YouTube, SoundCloud та Spotify:"
-                            .into(),
-                    );
-                    ui.set_modal_value("".into());
-                    ui.set_modal_open(true);
+                    "Відкриваємо вхід через Google у браузері...".into()
+                });
+
+                let data_dir = crate::platform::data_dir();
+                let supabase_client = crate::supabase::SupabaseClient::new(&data_dir);
+                let app = this.clone();
+                let weak_ui = ui.as_weak();
+
+                match supabase_client.start_oauth_flow() {
+                    Ok((auth_url, rx)) => {
+                        let _ = open::that_detached(&auth_url);
+
+                        std::thread::spawn(move || {
+                            match rx.recv_timeout(Duration::from_secs(120)) {
+                                Ok(Ok(session)) => {
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(ui) = weak_ui.upgrade() {
+                                            ui.set_message(if ui.get_language() == "en" {
+                                                "Google authorized! Connecting music accounts...".into()
+                                            } else {
+                                                "Авторизація через Google успішна! Шукаємо музичні акаунти...".into()
+                                            });
+                                            app.submit(
+                                                &ui,
+                                                "google_sign_in",
+                                                vec![json!(session.email), json!(session.name), json!(session.avatar_url)],
+                                                false,
+                                            );
+                                        }
+                                    });
+                                }
+                                Ok(Err(err)) => {
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(ui) = weak_ui.upgrade() {
+                                            ui.set_message(format!("Помилка Google авторизації: {err}").into());
+                                        }
+                                    });
+                                }
+                                Err(_) => {
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(ui) = weak_ui.upgrade() {
+                                            ui.set_message(if ui.get_language() == "en" {
+                                                "Google sign-in timed out.".into()
+                                            } else {
+                                                "Час очікування авторизації в браузері минув.".into()
+                                            });
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    Err(err) => {
+                        ui.set_message(format!("Помилка запуску OAuth: {err}").into());
+                    }
                 }
             }
         });
@@ -841,18 +869,32 @@ impl Application {
             if let Some(ui) = weak.upgrade() {
                 reset_modal(&ui);
                 ui.set_modal_kind(format!("connect:{}", provider).into());
+                let is_en = ui.get_language() == "en";
                 let p_title = match provider.as_str() {
                     "youtube" => "YouTube",
                     "soundcloud" => "SoundCloud",
                     "spotify" => "Spotify",
                     _ => provider.as_str(),
                 };
-                ui.set_modal_title(format!("Підключити акаунт {p_title}").into());
-                let p_desc = match provider.as_str() {
-                    "youtube" => "Введи назву каналу, @тег або посилання на плейлист YouTube:",
-                    "soundcloud" => "Введи ім'я профілю або посилання на плейлист/профіль SoundCloud:",
-                    "spotify" => "Введи посилання на плейлист, альбом або пісню Spotify:",
-                    _ => "Введи ідентифікатор акаунта:",
+                ui.set_modal_title(if is_en {
+                    format!("Connect {p_title} Account").into()
+                } else {
+                    format!("Підключити акаунт {p_title}").into()
+                });
+                let p_desc = if is_en {
+                    match provider.as_str() {
+                        "youtube" => "Enter YouTube channel name, @handle, or playlist URL:",
+                        "soundcloud" => "Enter SoundCloud username or profile/playlist URL:",
+                        "spotify" => "Enter Spotify playlist, album, or track URL:",
+                        _ => "Enter account identifier:",
+                    }
+                } else {
+                    match provider.as_str() {
+                        "youtube" => "Введіть назву каналу, @тег або посилання на плейлист YouTube:",
+                        "soundcloud" => "Введіть ім'я профілю або посилання на плейлист/профіль SoundCloud:",
+                        "spotify" => "Введіть посилання на плейлист, альбом або пісню Spotify:",
+                        _ => "Введіть ідентифікатор акаунта:",
+                    }
                 };
                 ui.set_modal_description(p_desc.into());
                 ui.set_modal_value(current);
@@ -864,7 +906,12 @@ impl Application {
         ui.on_import_account(move |provider| {
             if let Some(ui) = weak.upgrade() {
                 ui.set_modal_busy(true);
-                ui.set_accounts_import_status(format!("Імпортуємо треки з {}…", provider).into());
+                let is_en = ui.get_language() == "en";
+                ui.set_accounts_import_status(if is_en {
+                    format!("Importing tracks from {provider}…").into()
+                } else {
+                    format!("Імпортуємо треки з {provider}…").into()
+                });
                 this.submit(
                     &ui,
                     "sync_connected_accounts",
@@ -878,7 +925,12 @@ impl Application {
         ui.on_import_all_accounts(move || {
             if let Some(ui) = weak.upgrade() {
                 ui.set_modal_busy(true);
-                ui.set_accounts_import_status("Імпортуємо треки з усіх знайдених акаунтів…".into());
+                let is_en = ui.get_language() == "en";
+                ui.set_accounts_import_status(if is_en {
+                    "Importing tracks from all discovered accounts…".into()
+                } else {
+                    "Імпортуємо треки з усіх знайдених акаунтів…".into()
+                });
                 this.submit(&ui, "sync_connected_accounts", vec![], false);
             }
         });
@@ -1291,13 +1343,7 @@ impl Application {
             self.submit(
                 ui,
                 "google_sign_in",
-                vec![json!(email), json!(name)],
-                false,
-            );
-            self.submit(
-                ui,
-                "detect_connected_accounts",
-                vec![json!(email), json!(name)],
+                vec![json!(email), json!(name), json!("")],
                 false,
             );
             self.submit(
@@ -2104,7 +2150,7 @@ fn apply_response(
                         app.submit(ui, "get_listening_stats", args, false);
                     }
                 }
-                "switch_account" | "google_sign_in" | "github_sign_in" => {
+                "switch_account" | "github_sign_in" => {
                     close_modal(&ui);
                     ui.set_show_onboarding(false);
                     let is_en = ui.get_language() == "en";
@@ -2116,6 +2162,46 @@ fn apply_response(
                     if is_stats {
                         app.submit(ui, "get_listening_stats", args, false);
                     }
+                }
+                "google_sign_in" => {
+                    ui.set_show_onboarding(false);
+                    let is_en = ui.get_language() == "en";
+                    ui.set_message(if is_en {
+                        "Google sign-in successful! Searching music accounts...".into()
+                    } else {
+                        "Вхід через Google успішний! Шукаємо музичні акаунти...".into()
+                    });
+                    let is_stats = ui.get_view() == "stats";
+                    let args = vec![json!(data.stats_period), json!(data.stats_source)];
+                    let email = value["user"]["email"]
+                        .as_str()
+                        .or_else(|| data.cloud["user"]["email"].as_str())
+                        .unwrap_or("")
+                        .to_owned();
+                    let name = value["user"]["name"]
+                        .as_str()
+                        .or_else(|| data.cloud["user"]["name"].as_str())
+                        .unwrap_or("")
+                        .to_owned();
+                    drop(data);
+                    app.submit(ui, "get_subscription_status", vec![], false);
+                    if is_stats {
+                        app.submit(ui, "get_listening_stats", args, false);
+                    }
+                    ui.set_modal_busy(true);
+                    ui.set_modal_kind("connected-accounts".into());
+                    ui.set_modal_title(if is_en {
+                        "Connecting Music Accounts...".into()
+                    } else {
+                        "Підключення музичних акаунтів...".into()
+                    });
+                    ui.set_modal_description(if is_en {
+                        "Checking YouTube Music, SoundCloud, and Spotify accounts for your Google profile...".into()
+                    } else {
+                        "Перевіряємо наявність акаунтів YouTube Music, SoundCloud та Spotify для вашого Google-профілю...".into()
+                    });
+                    ui.set_modal_open(true);
+                    app.submit(ui, "detect_connected_accounts", vec![json!(email), json!(name)], false);
                 }
                 "create_playlist" => {
                     if data.add_to_new_playlist {
@@ -2153,28 +2239,35 @@ fn apply_response(
                     ui.set_accounts_import_status("".into());
                     reset_modal(&ui);
                     ui.set_modal_kind("connected-accounts".into());
-                    ui.set_modal_title("Підключені музичні акаунти".into());
-                    ui.set_modal_description("SoundFlow перевірив прив'язку сервісів до акаунта. Змінюй акаунти або імпортуй треки:".into());
+                    let is_en = ui.get_language() == "en";
+                    ui.set_modal_title(if is_en {
+                        "Connected Music Accounts (Google Cloud + Supabase)".into()
+                    } else {
+                        "Підключені музичні акаунти (Google Cloud + Supabase)".into()
+                    });
+                    ui.set_modal_description(if is_en {
+                        "SoundFlow checked your Google profile for music services. Confirm these accounts or connect separate accounts for each service:".into()
+                    } else {
+                        "SoundFlow перевірив прив'язку сервісів до вашого Google-профілю. Підтвердіть їх або підключіть окремі акаунти для кожного сервісу:".into()
+                    });
                     ui.set_modal_open(true);
                 }
                 "set_connected_account" => {
                     ui.set_modal_busy(false);
-                    let email = data.cloud["user"]["email"]
-                        .as_str()
-                        .or_else(|| data.library["profile"]["email"].as_str())
-                        .unwrap_or("")
-                        .to_owned();
-                    let name = data.cloud["user"]["name"]
-                        .as_str()
-                        .or_else(|| data.library["profile"]["name"].as_str())
-                        .unwrap_or("")
-                        .to_owned();
+                    let email = data.cloud["user"]["email"].as_str().unwrap_or_default().to_string();
+                    let name = data.cloud["user"]["name"].as_str().unwrap_or_default().to_string();
+                    drop(data);
                     app.submit(ui, "detect_connected_accounts", vec![json!(email), json!(name)], false);
                 }
                 "sync_connected_accounts" => {
                     ui.set_modal_busy(false);
                     let total = value["total_imported"].as_u64().unwrap_or(0);
-                    let msg = format!("Успішно імпортовано {} треків у бібліотеку!", total);
+                    let is_en = ui.get_language() == "en";
+                    let msg = if is_en {
+                        format!("Successfully imported {total} tracks into library!")
+                    } else {
+                        format!("Успішно імпортовано {total} треків у бібліотеку!")
+                    };
                     ui.set_accounts_import_status(msg.clone().into());
                     ui.set_message(msg.into());
                     app.submit(ui, "_refresh", vec![], true);

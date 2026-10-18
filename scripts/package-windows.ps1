@@ -1,7 +1,7 @@
 param([string]$Destination, [switch]$SkipInstaller, [switch]$SkipZip)
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$version = '3.2.0'
+$version = '3.4.0'
 $releaseExe = Join-Path $projectRoot 'target/release/soundflow.exe'
 if (-not $Destination) { $Destination = Join-Path $projectRoot 'dist/windows-x64' }
 $destinationPath = [IO.Path]::GetFullPath($Destination)
