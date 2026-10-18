@@ -58,6 +58,7 @@ export component AppWindow inherits Window {
     in-out property <string> flow-genre: "lofi";
     in-out property <string> search-query;
     in-out property <string> search-source: "all";
+    in-out property <[string]> search-history;
     in-out property <string> modal-kind;
     in-out property <string> modal-title;
     in-out property <string> modal-description;
@@ -273,7 +274,43 @@ export component AppWindow inherits Window {
                         remove(id) => { root.action("remove-track", id); }
                     }
                 }
-                if root.tracks.length == 0 : SFPanel {
+                if root.view == "search" && root.tracks.length == 0 && root.search-history.length > 0 && !root.task-loading : SFPanel {
+                    x: 0px; y: parent.list-top; width: parent.width; height: min(320px, parent.height - self.y);
+                    VerticalLayout {
+                        padding: 16px; spacing: 10px;
+                        HorizontalLayout {
+                            height: 32px;
+                            SFText { text: I18n.search-history-title; font-size: 15px; font-weight: 700; vertical-alignment: center; }
+                            SFButton { text: I18n.search-history-clear; flat: true; clicked => { root.action("clear-search-history", ""); } }
+                        }
+                        ListView {
+                            for query[idx] in root.search-history : Rectangle {
+                                height: 40px;
+                                HorizontalLayout {
+                                    padding-left: 6px; padding-right: 6px; spacing: 8px;
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        border-radius: 8px;
+                                        background: item-touch.has-hover ? Theme.hover : transparent;
+                                        SFText { x: 8px; width: parent.width - 16px; height: parent.height; text: "🔍  " + query; font-size: 14px; font-weight: 500; vertical-alignment: center; }
+                                        item-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.search-query = query;
+                                                root.search(query, root.search-source);
+                                            }
+                                        }
+                                    }
+                                    SFButton {
+                                        width: 32px; text: "×"; label: "Remove"; icon: true; flat: true;
+                                        clicked => { root.action("remove-search-query", query); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.tracks.length == 0 && (root.view != "search" || root.search-history.length == 0 || root.task-loading) : SFPanel {
                     x: 0px; y: parent.list-top; width: parent.width; height: min(175px, parent.height - self.y);
                     VerticalLayout {
                         padding: 20px; spacing: 10px; alignment: center;

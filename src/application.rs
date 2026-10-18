@@ -410,6 +410,15 @@ impl Application {
                         };
                         this.submit(&ui, "get_listening_stats", args, false);
                     }
+                    "search" => {
+                        if let Ok(history) = this.desktop.call("get_search_history", &[]) {
+                            if let Some(arr) = history.as_array() {
+                                let slint_history: Vec<slint::SharedString> = arr.iter().filter_map(|v| v.as_str()).map(Into::into).collect();
+                                ui.set_search_history(slint::ModelRc::new(slint::VecModel::from(slint_history)));
+                            }
+                        }
+                        this.submit(&ui, "_refresh", vec![], true);
+                    }
                     _ => this.submit(&ui, "_refresh", vec![], true),
                 }
             }
@@ -421,6 +430,16 @@ impl Application {
                 ui.set_view("search".into());
                 ui.set_search_query(query.clone());
                 ui.set_search_source(source.clone());
+                let clean = query.trim().to_string();
+                if !clean.is_empty() {
+                    let _ = this.desktop.call("add_search_query", &[json!(clean)]);
+                    if let Ok(history) = this.desktop.call("get_search_history", &[]) {
+                        if let Some(arr) = history.as_array() {
+                            let slint_history: Vec<slint::SharedString> = arr.iter().filter_map(|v| v.as_str()).map(Into::into).collect();
+                            ui.set_search_history(slint::ModelRc::new(slint::VecModel::from(slint_history)));
+                        }
+                    }
+                }
                 this.submit(
                     &ui,
                     "search",
@@ -934,6 +953,12 @@ impl Application {
                 this.submit(&ui, "sync_connected_accounts", vec![], false);
             }
         });
+        if let Ok(history) = self.desktop.call("get_search_history", &[]) {
+            if let Some(arr) = history.as_array() {
+                let slint_history: Vec<slint::SharedString> = arr.iter().filter_map(|v| v.as_str()).map(Into::into).collect();
+                ui.set_search_history(slint::ModelRc::new(slint::VecModel::from(slint_history)));
+            }
+        }
         self.submit(ui, "_refresh", vec![], true);
         self.submit(ui, "restore_session", vec![], true);
         self.submit(ui, "get_subscription_status", vec![], true);
@@ -1264,6 +1289,19 @@ impl Application {
                 self.submit(ui, "get_listening_stats", args, false);
             }
             "dismiss-message" => ui.set_message("".into()),
+            "remove-search-query" => {
+                let _ = self.desktop.call("remove_search_query", &[json!(payload)]);
+                if let Ok(history) = self.desktop.call("get_search_history", &[]) {
+                    if let Some(arr) = history.as_array() {
+                        let slint_history: Vec<slint::SharedString> = arr.iter().filter_map(|v| v.as_str()).map(Into::into).collect();
+                        ui.set_search_history(slint::ModelRc::new(slint::VecModel::from(slint_history)));
+                    }
+                }
+            }
+            "clear-search-history" => {
+                let _ = self.desktop.call("clear_search_history", &[]);
+                ui.set_search_history(slint::ModelRc::new(slint::VecModel::from(vec![])));
+            }
             "refresh" => self.submit(ui, "_refresh", vec![], false),
             "about" => {
                 reset_modal(ui);
@@ -1753,7 +1791,7 @@ fn track_row(value: &Value, shared: &Shared) -> TrackRow {
     }
 }
 fn refresh_models(ui: &AppWindow, shared: &Shared) {
-    let (tracks, playlists, downloads, flow, index, count, cloud, settings, profile, matches) = {
+    let (tracks, playlists, downloads, flow, index, count, cloud, settings, profile, matches, search_history) = {
         let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
         let tracks = match ui.get_view().as_str() {
             "search" => data.search.clone(),
@@ -1811,8 +1849,19 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
             } else {
                 data.matches.clone()
             },
+            data.library
+                .get("search_history")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
         )
     };
+    let slint_history: Vec<slint::SharedString> = search_history
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(Into::into)
+        .collect();
+    ui.set_search_history(rows(slint_history));
     ui.set_tracks(rows(tracks.iter().map(|t| track_row(t, shared)).collect()));
     ui.set_playlists(rows(
         playlists

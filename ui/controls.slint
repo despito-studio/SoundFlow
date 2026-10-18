@@ -58,7 +58,7 @@ export component SFButton inherits Rectangle {
         x: -4px; y: -4px; width: parent.width + 8px; height: parent.height + 8px;
         border-radius: parent.border-radius + 4px;
         border-width: 2px; border-color: Theme.ink; background: transparent;
-        visible: button-focus.has-focus;
+        visible: false;
     }
     caption := Text {
         x: root.icon ? 0px : 14px;
@@ -67,7 +67,7 @@ export component SFButton inherits Rectangle {
         color: root.primary ? Theme.inverse : root.danger ? Theme.danger : Theme.ink;
         font-size: root.icon ? 20px : 13px;
         font-family: root.icon ? "Segoe UI Symbol" : "Segoe UI";
-        font-weight: root.primary || root.active ? 600 : 500;
+        font-weight: root.primary || root.active ? 700 : 600;
         horizontal-alignment: root.left-align ? left : center;
         vertical-alignment: center;
         overflow: elide;
@@ -86,7 +86,7 @@ export component SFButton inherits Rectangle {
     touch := TouchArea {
         enabled: root.interactive;
         mouse-cursor: pointer;
-        clicked => { button-focus.focus(); root.clicked(); }
+        clicked => { root.clicked(); }
     }
 }
 
@@ -125,6 +125,7 @@ export component SFField inherits Rectangle {
             visible: root.text == "";
             text: root.placeholder;
             font-size: 14px;
+            font-weight: 500;
             color: Theme.muted;
             vertical-alignment: center;
             overflow: elide;
@@ -136,6 +137,7 @@ export component SFField inherits Rectangle {
             width: max(parent.width, self.preferred-width);
             height: parent.height;
             font-size: 14px;
+            font-weight: 500;
             color: Theme.ink;
             selection-background-color: Theme.ink;
             selection-foreground-color: Theme.inverse;
@@ -261,7 +263,7 @@ export component SFCover inherits Rectangle {
 export component SFTitle inherits Text {
     horizontal-stretch: 1;
     font-size: 28px;
-    font-weight: 700;
+    font-weight: 800;
     color: Theme.ink;
     overflow: elide;
 }
@@ -269,6 +271,7 @@ export component SFTitle inherits Text {
 export component SFText inherits Text {
     horizontal-stretch: 1;
     font-size: 14px;
+    font-weight: 500;
     color: Theme.ink;
     overflow: elide;
 }
@@ -276,6 +279,7 @@ export component SFText inherits Text {
 export component SFMuted inherits Text {
     horizontal-stretch: 1;
     font-size: 13px;
+    font-weight: 500;
     color: Theme.muted;
     overflow: elide;
 }
@@ -336,7 +340,7 @@ export component SFLangSwitch inherits Rectangle {
         x: -2px; y: -2px; width: parent.width + 4px; height: parent.height + 4px;
         border-radius: parent.border-radius + 2px;
         border-width: 2px; border-color: Theme.ink; background: transparent;
-        visible: focus-scope.has-focus;
+        visible: false;
     }
 
     HorizontalLayout {
