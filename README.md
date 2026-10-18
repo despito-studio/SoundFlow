@@ -13,7 +13,7 @@
 
 ## Завантажити для Windows x64
 
-[Інсталятор SoundFlow 3.4.0](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-Setup.exe) · [Portable ZIP (v3.4.0)](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.2.2-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.4.0)
+[Інсталятор SoundFlow](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-Setup.exe) · [Portable ZIP (v3.4.1)](https://github.com/feodaI/SoundFlow/releases/download/v3.4.1/SoundFlow-3.4.1-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.4.1)
 
 Інсталятор встановлює застосунок для поточного користувача та створює ярлики. Для portable-версії розпакуй увесь архів і запусти `SoundFlow.exe`. Бібліотека залишається окремо від файлів програми.
 

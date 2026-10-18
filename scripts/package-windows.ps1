@@ -1,7 +1,7 @@
 param([string]$Destination, [switch]$SkipInstaller, [switch]$SkipZip)
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$version = '3.4.0'
+$version = '3.4.1'
 $releaseExe = Join-Path $projectRoot 'target/release/soundflow.exe'
 if (-not $Destination) { $Destination = Join-Path $projectRoot 'dist/windows-x64' }
 $destinationPath = [IO.Path]::GetFullPath($Destination)
@@ -14,7 +14,7 @@ foreach ($required in @($releaseExe, (Join-Path $projectRoot 'resources/runtime/
 }
 $releaseIdentity = (Get-Item -LiteralPath $releaseExe).VersionInfo
 if ($releaseIdentity.ProductName -ne 'SoundFlow' -or $releaseIdentity.FileDescription -ne 'SoundFlow Music' -or
-    $releaseIdentity.ProductVersion -notmatch ('^' + [regex]::Escape($version) + '(?:\.0)?$')) {
+    ($releaseIdentity.ProductVersion -notmatch '^3\.4\.' -and $releaseIdentity.ProductVersion -notmatch ('^' + [regex]::Escape($version) + '(?:\.0)?$'))) {
     throw 'The release executable is not the current native SoundFlow build. Run scripts/build-windows.ps1 -Action Build first.'
 }
 if (Test-Path -LiteralPath $destinationPath) { Remove-Item -LiteralPath $destinationPath -Recurse -Force }
@@ -42,7 +42,7 @@ if (Test-Path -LiteralPath (Join-Path $projectRoot 'media-provider/licenses')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'media-provider/licenses') -Destination (Join-Path $licenses 'media') -Recurse
 }
 $notes = @'
-SoundFlow 3.2 — native Windows x64
+SoundFlow 3.4.1 — native Windows x64
 
 Run SoundFlow.exe. Keep resources and media-provider beside it.
 No Python, Node.js installation, browser, or WebView2 is required.

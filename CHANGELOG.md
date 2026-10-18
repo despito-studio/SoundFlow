@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.4.1 — 2026-10-18
+
+SoundFlow 3.4.1 introduces seamless Google Cloud and Supabase OAuth authentication, automatic discovery of connected streaming accounts (YouTube Music, SoundCloud, Spotify), and UI localization refinements.
+
+- **Google Cloud & Supabase OAuth Integration**:
+  - Direct browser-based login flow via secure local loopback (`http://127.0.0.1:43821/login`), eliminating DNS errors and intermediate modal dialogs.
+  - Automatic detection of registered music profiles (YouTube, SoundCloud, Spotify) tied to the authenticated Google account.
+  - Interactive confirmation modal allowing users to verify detected accounts and independently link additional services.
+- **UI Localization & Text Refinements**:
+  - Replaced literal translations and calques with natural Ukrainian wording ("Довічний доступ", "Будь ласка, зачекайте…", "Підписка неактивна").
+  - Fixed grammatical cases in status toasts and subscription views.
+- **Packaging & Build System**:
+  - Modernized Windows x64 release pipeline and bundled media-worker updates.
+
 ## 3.4.0 — 2026-10-16
 
 SoundFlow 3.4.0 delivers a modern segmented language switcher, 1-click subscription cancellation, first-launch onboarding, and Linux font rendering fixes.
