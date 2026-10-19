@@ -18,7 +18,8 @@ use std::{
 
 pub const DEFAULT_SUPABASE_URL: &str = "https://soundflow.supabase.co";
 pub const DEFAULT_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.soundflow_anon";
-pub const DEFAULT_GOOGLE_CLIENT_ID: &str = "soundflow-client.apps.googleusercontent.com";
+pub const DEFAULT_GOOGLE_CLIENT_ID: &str = "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com";
+pub const DEFAULT_GOOGLE_CLIENT_SECRET: &str = "d-FL95Q19q7MQmFpd7hHD0Ty";
 pub const OAUTH_PORT: u16 = 43821;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -39,7 +40,7 @@ impl Default for SupabaseConfig {
             google_client_id: std::env::var("SOUNDFLOW_GOOGLE_CLIENT_ID")
                 .unwrap_or_else(|_| DEFAULT_GOOGLE_CLIENT_ID.to_string()),
             google_client_secret: std::env::var("SOUNDFLOW_GOOGLE_CLIENT_SECRET")
-                .unwrap_or_default(),
+                .unwrap_or_else(|_| DEFAULT_GOOGLE_CLIENT_SECRET.to_string()),
         }
     }
 }
@@ -75,7 +76,7 @@ impl SupabaseConfig {
                     .filter(|s| !s.is_empty())
                     .map(str::to_string)
                     .or_else(|| std::env::var("SOUNDFLOW_GOOGLE_CLIENT_SECRET").ok())
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| DEFAULT_GOOGLE_CLIENT_SECRET.to_string());
 
                 return Self {
                     supabase_url,
@@ -108,17 +109,9 @@ impl SupabaseConfig {
         Ok(())
     }
 
-    pub fn is_google_client_id_configured(&self) -> bool {
-        let id = self.google_client_id.trim();
-        !id.is_empty()
-            && id != DEFAULT_GOOGLE_CLIENT_ID
-            && id.contains(".apps.googleusercontent.com")
-            && id.contains('-')
-    }
-
     pub fn build_google_oauth_url(&self, redirect_uri: &str, state: &str) -> String {
-        let client_id = if self.is_google_client_id_configured() {
-            &self.google_client_id
+        let client_id = if !self.google_client_id.trim().is_empty() {
+            self.google_client_id.trim()
         } else {
             DEFAULT_GOOGLE_CLIENT_ID
         };
@@ -165,7 +158,7 @@ impl SupabaseClient {
         }
     }
 
-    /// Generates the Google OAuth authorization URL and starts the local loopback listener.
+    /// Directly generates the Google OAuth 2.0 authorization URL and starts the local loopback listener.
     pub fn start_oauth_flow(&self) -> CoreResult<(String, Receiver<CoreResult<GoogleUserSession>>)> {
         // Try preferred port or find an ephemeral one
         let (listener, port) = match TcpListener::bind(format!("127.0.0.1:{OAUTH_PORT}")) {
@@ -185,22 +178,8 @@ impl SupabaseClient {
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
         let state = uuid::Uuid::new_v4().simple().to_string();
 
-        let auth_url = if self.config.is_google_client_id_configured() {
-            self.config.build_google_oauth_url(&redirect_uri, &state)
-        } else if !self.config.supabase_url.is_empty()
-            && self.config.supabase_url != "https://"
-            && self.config.supabase_url != DEFAULT_SUPABASE_URL
-            && self.config.supabase_url.contains('.')
-        {
-            let encoded_redirect: String = url::form_urlencoded::byte_serialize(redirect_uri.as_bytes()).collect();
-            format!(
-                "{}/auth/v1/authorize?provider=google&redirect_to={}&scopes=email%20profile%20openid",
-                self.config.supabase_url.trim_end_matches('/'),
-                encoded_redirect
-            )
-        } else {
-            format!("http://127.0.0.1:{port}/login")
-        };
+        // ALWAYS open Google's actual OAuth 2.0 authorization screen directly!
+        let auth_url = self.config.build_google_oauth_url(&redirect_uri, &state);
 
         let (tx, rx) = mpsc::channel();
         let config = self.config.clone();
@@ -360,21 +339,24 @@ pub fn exchange_google_auth_code(
     redirect_uri: &str,
 ) -> CoreResult<GoogleUserSession> {
     let token_endpoint = "https://oauth2.googleapis.com/token";
-    let client_id = if config.is_google_client_id_configured() {
-        &config.google_client_id
+    let client_id = if !config.google_client_id.trim().is_empty() {
+        config.google_client_id.trim()
     } else {
         DEFAULT_GOOGLE_CLIENT_ID
     };
+    let client_secret = if !config.google_client_secret.trim().is_empty() {
+        config.google_client_secret.trim()
+    } else {
+        DEFAULT_GOOGLE_CLIENT_SECRET
+    };
 
-    let mut params = vec![
+    let params = vec![
         ("code", code),
         ("client_id", client_id),
+        ("client_secret", client_secret),
         ("grant_type", "authorization_code"),
         ("redirect_uri", redirect_uri),
     ];
-    if !config.google_client_secret.is_empty() {
-        params.push(("client_secret", config.google_client_secret.as_str()));
-    }
 
     let res = client
         .post(token_endpoint)
@@ -586,11 +568,11 @@ fn read_http_body(reader: &mut BufReader<TcpStream>) -> Vec<u8> {
 fn run_oauth_listener(
     listener: TcpListener,
     tx: Sender<CoreResult<GoogleUserSession>>,
-    mut config: SupabaseConfig,
+    config: SupabaseConfig,
     client: Client,
-    port: u16,
+    _port: u16,
     redirect_uri: String,
-    data_dir: PathBuf,
+    _data_dir: PathBuf,
 ) {
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
 
@@ -612,7 +594,13 @@ fn run_oauth_listener(
                 let path = parts[1];
 
                 if method == "GET" && (path == "/" || path.starts_with("/login")) {
-                    send_login_page_html(reader.get_mut(), &config, port, &redirect_uri);
+                    // Forward immediately to Google's authorization endpoint
+                    let auth_url = config.build_google_oauth_url(&redirect_uri, &uuid::Uuid::new_v4().simple().to_string());
+                    let response = format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {}\r\nConnection: close\r\n\r\n",
+                        auth_url
+                    );
+                    let _ = reader.get_mut().write_all(response.as_bytes());
                 } else if method == "GET" && path.starts_with("/callback") {
                     let query = path.split('?').nth(1).unwrap_or("");
                     let params: std::collections::HashMap<String, String> =
@@ -666,25 +654,6 @@ fn run_oauth_listener(
 
                     // Otherwise, serve HTML page with JavaScript to capture the fragment hash (#access_token=... / #id_token=...)
                     send_hash_catcher_html(reader.get_mut());
-                } else if method == "POST" && path.starts_with("/save-config") {
-                    let body = read_http_body(&mut reader);
-                    if let Ok(json_body) = serde_json::from_slice::<Value>(&body) {
-                        if let Some(cid) = json_body["google_client_id"].as_str() {
-                            config.google_client_id = cid.trim().to_string();
-                        }
-                        if let Some(csec) = json_body["google_client_secret"].as_str() {
-                            config.google_client_secret = csec.trim().to_string();
-                        }
-                        if let Some(surl) = json_body["supabase_url"].as_str() {
-                            config.supabase_url = surl.trim().to_string();
-                        }
-                        let _ = config.save(&data_dir);
-                        let state = uuid::Uuid::new_v4().simple().to_string();
-                        let new_auth_url = config.build_google_oauth_url(&redirect_uri, &state);
-                        send_json_response(reader.get_mut(), json!({ "success": true, "auth_url": new_auth_url }));
-                    } else {
-                        send_json_response(reader.get_mut(), json!({ "success": false, "error": "Недійсний JSON" }));
-                    }
                 } else if method == "POST" && path.starts_with("/callback-token") {
                     let body = read_http_body(&mut reader);
                     if let Ok(json_body) = serde_json::from_slice::<Value>(&body) {
@@ -735,37 +704,8 @@ fn run_oauth_listener(
                                 }
                             }
                         }
-
-                        // Direct quick email authentication fallback
-                        if let Some(email) = json_body["email"].as_str() {
-                            let email = email.trim().to_lowercase();
-                            if !email.is_empty() && email.contains('@') {
-                                let name = json_body["name"].as_str().unwrap_or("").trim().to_string();
-                                let name = if name.is_empty() {
-                                    email.split('@').next().unwrap_or("Користувач").to_string()
-                                } else {
-                                    name
-                                };
-                                let avatar_url = json_body["avatar_url"].as_str().unwrap_or("").to_string();
-                                let session = GoogleUserSession {
-                                    id: format!("usr_google_{}", uuid::Uuid::new_v4().simple()),
-                                    email: email.clone(),
-                                    name: name.clone(),
-                                    avatar_url,
-                                    token: "google_oauth_local".to_string(),
-                                    provider_token: None,
-                                };
-                                send_json_response(reader.get_mut(), json!({
-                                    "success": true,
-                                    "name": name,
-                                    "email": email
-                                }));
-                                let _ = tx.send(Ok(session));
-                                return;
-                            }
-                        }
                     }
-                    send_json_response(reader.get_mut(), json!({ "success": false, "error": "Не вказано дійсний токен або email" }));
+                    send_json_response(reader.get_mut(), json!({ "success": false, "error": "Не вказано дійсний токен авторизації" }));
                 } else {
                     let _ = reader.get_mut().write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
                 }
@@ -800,16 +740,15 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .card {{ background: #111827; border: 1px solid #1f293d; padding: 40px 48px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.7); text-align: center; max-width: 460px; }}
 h1 {{ color: {color}; margin: 0 0 14px; font-size: 22px; font-weight: 700; }}
 p {{ color: #94a3b8; font-size: 15px; margin: 0 0 20px; line-height: 1.6; }}
-.btn {{ display: inline-block; padding: 10px 24px; border-radius: 12px; background: #38bdf8; color: #090d16; font-weight: 700; text-decoration: none; font-size: 14px; cursor: pointer; }}
 </style></head>
 <body>
 <div class="card">
   <h1>{title}</h1>
   {email_badge}
   <p>{msg}</p>
-  <p style="font-size:13px;color:#64748b;">SoundFlow автоматично оновлює стан підключення. Це вікно закриється.</p>
+  <p style="font-size:13px;color:#64748b;">SoundFlow автоматично підключає ваші музичні сервіси. Це вікно зараз закриється.</p>
 </div>
-<script>setTimeout(() => window.close(), 2200);</script>
+<script>setTimeout(() => window.close(), 1600);</script>
 </body>
 </html>"#
     );
@@ -865,7 +804,7 @@ p { color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.6; }
           document.getElementById('title').innerText = '✓ Успішний вхід!';
           document.getElementById('title').style.color = '#22c55e';
           document.getElementById('msg').innerText = 'Google-профіль ' + (res.email ? '(' + res.email + ') ' : '') + 'підключено. Поверніться до SoundFlow!';
-          setTimeout(() => window.close(), 1800);
+          setTimeout(() => window.close(), 1600);
         } else {
           document.getElementById('title').innerText = 'Помилка валідації токена';
           document.getElementById('title').style.color = '#ef4444';
@@ -882,7 +821,7 @@ p { color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.6; }
       document.getElementById('title').innerText = '✓ Авторизовано';
       document.getElementById('title').style.color = '#22c55e';
       document.getElementById('msg').innerText = 'Поверніться до вікна SoundFlow.';
-      setTimeout(() => window.close(), 1600);
+      setTimeout(() => window.close(), 1500);
     }
   } catch(e) {
     document.getElementById('msg').innerText = String(e);
@@ -902,447 +841,6 @@ fn send_json_response(stream: &mut TcpStream, value: Value) {
     let body = serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string());
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    let _ = stream.write_all(response.as_bytes());
-}
-
-fn send_login_page_html(
-    stream: &mut TcpStream,
-    config: &SupabaseConfig,
-    _port: u16,
-    redirect_uri: &str,
-) {
-    let state = uuid::Uuid::new_v4().simple().to_string();
-    let google_oauth_url = config.build_google_oauth_url(redirect_uri, &state);
-    let _is_configured = config.is_google_client_id_configured();
-    let current_client_id = &config.google_client_id;
-    let current_client_secret = &config.google_client_secret;
-
-    let body = format!(
-        r##"<!DOCTYPE html>
-<html lang="uk">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SoundFlow — Google OAuth 2.0</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    background: #090d16;
-    color: #f1f5f9;
-    padding: 24px;
-  }}
-  .card {{
-    background: #111827;
-    border: 1px solid #1f293d;
-    border-radius: 24px;
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);
-    padding: 36px 40px;
-    width: 100%;
-    max-width: 480px;
-    text-align: center;
-  }}
-  .logo-row {{
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    margin-bottom: 16px;
-  }}
-  .logo-icon {{
-    width: 48px;
-    height: 48px;
-  }}
-  h1 {{
-    font-size: 24px;
-    font-weight: 800;
-    color: #f8fafc;
-    margin-bottom: 6px;
-  }}
-  .badge {{
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 12px;
-    background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    margin-bottom: 14px;
-  }}
-  p.subtitle {{
-    color: #94a3b8;
-    font-size: 14px;
-    line-height: 1.5;
-    margin-bottom: 20px;
-  }}
-  .services-icons {{
-    display: flex;
-    justify-content: center;
-    gap: 16px;
-    margin-bottom: 24px;
-    color: #cbd5e1;
-    font-size: 13px;
-    font-weight: 600;
-  }}
-  .services-icons span {{
-    background: #1e293b;
-    padding: 6px 12px;
-    border-radius: 20px;
-    border: 1px solid #334155;
-  }}
-  .oauth-btn {{
-    width: 100%;
-    padding: 14px 18px;
-    border-radius: 14px;
-    border: none;
-    background: #ffffff;
-    color: #0f172a;
-    font-size: 15px;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    text-decoration: none;
-    transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
-    box-shadow: 0 4px 16px rgba(255, 255, 255, 0.1);
-  }}
-  .oauth-btn:hover {{
-    background: #f1f5f9;
-    box-shadow: 0 6px 20px rgba(255, 255, 255, 0.2);
-  }}
-  .oauth-btn:active {{
-    transform: scale(0.98);
-  }}
-  .gis-container {{
-    display: flex;
-    justify-content: center;
-    margin-top: 14px;
-  }}
-  .divider {{
-    display: flex;
-    align-items: center;
-    text-align: center;
-    margin: 22px 0 18px;
-    color: #475569;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }}
-  .divider::before, .divider::after {{
-    content: '';
-    flex: 1;
-    border-bottom: 1px solid #1f293d;
-  }}
-  .divider span {{
-    padding: 0 10px;
-  }}
-  .form-group {{
-    text-align: left;
-    margin-bottom: 12px;
-  }}
-  label {{
-    display: block;
-    font-size: 12px;
-    font-weight: 600;
-    color: #cbd5e1;
-    margin-bottom: 5px;
-  }}
-  input {{
-    width: 100%;
-    padding: 11px 13px;
-    border-radius: 10px;
-    border: 1px solid #334155;
-    background: #1e293b;
-    color: #fff;
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }}
-  input:focus {{
-    border-color: #38bdf8;
-    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
-  }}
-  .secondary-btn {{
-    width: 100%;
-    padding: 11px 14px;
-    border-radius: 10px;
-    border: 1px solid #334155;
-    background: #1e293b;
-    color: #38bdf8;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-top: 8px;
-    transition: background 0.2s;
-  }}
-  .secondary-btn:hover {{
-    background: #273549;
-  }}
-  .accordion-toggle {{
-    background: none;
-    border: none;
-    color: #64748b;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-top: 18px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }}
-  .accordion-toggle:hover {{
-    color: #94a3b8;
-  }}
-  .config-panel {{
-    display: none;
-    margin-top: 16px;
-    padding: 16px;
-    background: #0c121e;
-    border: 1px solid #1f293d;
-    border-radius: 14px;
-    text-align: left;
-  }}
-  .note {{
-    margin-top: 18px;
-    font-size: 12px;
-    color: #64748b;
-    line-height: 1.4;
-  }}
-  .spinner {{
-    display: none;
-    border: 3px solid #334155;
-    border-top: 3px solid #38bdf8;
-    border-radius: 50%;
-    width: 28px;
-    height: 28px;
-    animation: spin 0.8s linear infinite;
-    margin: 16px auto;
-  }}
-  @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-  .success-view {{
-    display: none;
-  }}
-  .success-icon {{
-    font-size: 52px;
-    color: #22c55e;
-    margin-bottom: 12px;
-  }}
-</style>
-</head>
-<body>
-<div class="card" id="card">
-  <div id="loginView">
-    <div class="logo-row">
-      <svg class="logo-icon" viewBox="0 0 48 48">
-        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-      </svg>
-    </div>
-    <h1>Вхід через Google</h1>
-    <div class="badge">OAuth 2.0 • OpenID Connect</div>
-    <p class="subtitle">Увійдіть зі своїм Google-акаунтом. SoundFlow автоматично знайде підключені музичні профілі:</p>
-    
-    <div class="services-icons">
-      <span>▶ YouTube Music</span>
-      <span>☁ SoundCloud</span>
-      <span>♫ Spotify</span>
-    </div>
-
-    <!-- Main Google OAuth 2.0 Direct Button -->
-    <a href="{google_oauth_url}" class="oauth-btn" id="googleOAuthLink">
-      <svg style="width:20px;height:20px;" viewBox="0 0 48 48">
-        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-      </svg>
-      Увійти через Google (OAuth 2.0)
-    </a>
-
-    <!-- Google Identity Services (One Tap & Sign In Button) -->
-    <div id="g_id_onload"
-         data-client_id="{current_client_id}"
-         data-callback="handleCredentialResponse"
-         data-auto_prompt="false">
-    </div>
-    <div class="gis-container">
-      <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="signin_with" data-shape="rectangular" data-logo_alignment="left"></div>
-    </div>
-
-    <div class="divider"><span>або швидкий вхід</span></div>
-
-    <!-- Quick Sign-in Form -->
-    <form id="quickForm" onsubmit="handleQuickLogin(event)">
-      <div class="form-group">
-        <label for="email">Google Email</label>
-        <input type="email" id="email" placeholder="example@gmail.com" required />
-      </div>
-      <div class="form-group">
-        <label for="name">Ім'я (за бажанням)</label>
-        <input type="text" id="name" placeholder="Ваше ім'я" />
-      </div>
-      <button type="submit" class="secondary-btn" id="quickBtn">Увійти з цим Google-профілем</button>
-    </form>
-
-    <div class="spinner" id="spinner"></div>
-
-    <!-- Collapsible Settings Accordion -->
-    <div>
-      <button class="accordion-toggle" onclick="toggleConfig()">
-        ⚙ Налаштувати власний Google Cloud Client ID
-      </button>
-      <div class="config-panel" id="configPanel">
-        <div class="form-group">
-          <label for="clientId">Google OAuth 2.0 Client ID</label>
-          <input type="text" id="clientId" value="{current_client_id}" placeholder="1234567890-xxx.apps.googleusercontent.com" />
-        </div>
-        <div class="form-group">
-          <label for="clientSecret">Client Secret (необов'язково)</label>
-          <input type="password" id="clientSecret" value="{current_client_secret}" placeholder="GOCSPX-..." />
-        </div>
-        <p style="font-size:11px;color:#94a3b8;margin-bottom:10px;">
-          Redirect URI для Google Cloud Console: <br><strong style="color:#38bdf8;">{redirect_uri}</strong>
-        </p>
-        <button type="button" class="secondary-btn" style="color:#22c55e;border-color:#22c55e;" onclick="saveConfig()">
-          Зберегти та оновити посилання OAuth
-        </button>
-      </div>
-    </div>
-
-    <p class="note">Після підтвердження відкриється SoundFlow із знайденими музичними акаунтами.</p>
-  </div>
-
-  <div class="success-view" id="successView">
-    <div class="success-icon">✓</div>
-    <h1 style="color:#22c55e;">Авторизація успішна!</h1>
-    <div id="userBadge" style="display:inline-block;padding:6px 14px;background:#1e293b;border:1px solid #334155;border-radius:20px;color:#38bdf8;font-size:14px;margin-top:12px;"></div>
-    <p class="subtitle" style="margin-top:14px;">Google-акаунт підключено. SoundFlow синхронізує ваші музичні сервіси...</p>
-    <p class="note">Це вікно закриється автоматично через мить.</p>
-  </div>
-</div>
-
-<script>
-function handleCredentialResponse(response) {{
-  if (response.credential) {{
-    showSpinner();
-    fetch('/callback-token', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ id_token: response.credential, token: response.credential }})
-    }}).then(r => r.json()).then(res => {{
-      if (res.success) {{
-        showSuccess(res.name, res.email);
-      }} else {{
-        hideSpinner();
-        alert(res.error || 'Помилка валідації токена Google');
-      }}
-    }}).catch(err => {{
-      hideSpinner();
-      alert('Помилка з\'єднання: ' + err.message);
-    }});
-  }}
-}}
-
-async function handleQuickLogin(e) {{
-  e.preventDefault();
-  const email = document.getElementById('email').value.trim();
-  const name = document.getElementById('name').value.trim();
-  if (!email || !email.includes('@')) {{
-    alert('Будь ласка, вкажіть коректний Google email');
-    return;
-  }}
-  showSpinner();
-
-  try {{
-    const res = await fetch('/callback-token', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ email: email, name: name, avatar_url: '' }})
-    }});
-    const data = await res.json();
-    if (data.success) {{
-      showSuccess(data.name, data.email);
-    }} else {{
-      hideSpinner();
-      alert(data.error || 'Помилка авторизації');
-    }}
-  }} catch (err) {{
-    hideSpinner();
-    alert('Помилка зв\'язку з додатком: ' + err.message);
-  }}
-}}
-
-async function saveConfig() {{
-  const cid = document.getElementById('clientId').value.trim();
-  const csec = document.getElementById('clientSecret').value.trim();
-  try {{
-    const res = await fetch('/save-config', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ google_client_id: cid, google_client_secret: csec }})
-    }});
-    const data = await res.json();
-    if (data.success) {{
-      if (data.auth_url) {{
-        document.getElementById('googleOAuthLink').href = data.auth_url;
-      }}
-      alert('Налаштування Google Cloud збережено! Можете натиснути кнопку Увійти через Google (OAuth 2.0).');
-    }} else {{
-      alert(data.error || 'Помилка збереження');
-    }}
-  }} catch (e) {{
-    alert('Помилка збереження: ' + e.message);
-  }}
-}}
-
-function toggleConfig() {{
-  const panel = document.getElementById('configPanel');
-  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-}}
-
-function showSpinner() {{
-  document.getElementById('spinner').style.display = 'block';
-  document.getElementById('quickBtn').style.display = 'none';
-}}
-
-function hideSpinner() {{
-  document.getElementById('spinner').style.display = 'none';
-  document.getElementById('quickBtn').style.display = 'block';
-}}
-
-function showSuccess(name, email) {{
-  document.getElementById('loginView').style.display = 'none';
-  document.getElementById('successView').style.display = 'block';
-  if (email) {{
-    document.getElementById('userBadge').innerText = '📧 ' + email + (name ? ' (' + name + ')' : '');
-  }}
-  setTimeout(() => window.close(), 1800);
-}}
-</script>
-</body>
-</html>"##,
-        google_oauth_url = google_oauth_url,
-        current_client_id = current_client_id,
-        current_client_secret = current_client_secret,
-        redirect_uri = redirect_uri
-    );
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
