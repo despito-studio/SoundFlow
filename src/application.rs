@@ -369,6 +369,7 @@ impl Application {
     }
     pub fn bind(&self, ui: &AppWindow) -> UiBinding {
         self.start_workers(ui);
+        ui.set_app_version(env!("CARGO_PKG_VERSION").into());
         let this = self.clone();
         let weak = ui.as_weak();
         ui.on_navigate(move |view| {
@@ -698,7 +699,23 @@ impl Application {
         ui.on_modal_action(move |method, value| {
             if let Some(ui) = weak.upgrade() {
                 match method.as_str() {
-                    "close" => close_modal(&ui),
+                    "close" => {
+                        // "Більше не питати" зберігається лише коли його справді обрали.
+                        if ui.get_modal_kind() == "import-prompt" && ui.get_import_prompt_disabled() {
+                            this.shared
+                                .data
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .settings["import_prompt_disabled"] = json!(true);
+                            this.submit(
+                                &ui,
+                                "update_settings",
+                                vec![json!({"import_prompt_disabled": true})],
+                                true,
+                            );
+                        }
+                        close_modal(&ui);
+                    }
                     "select-match" | "play-match" => {
                         if this.confirm_match(&ui, value.as_str()).is_none() {
                             return;
@@ -841,6 +858,7 @@ impl Application {
                                 Ok(Err(err)) => {
                                     let _ = slint::invoke_from_event_loop(move || {
                                         if let Some(ui) = weak_ui.upgrade() {
+                                            ui.set_message_error(true);
                                             ui.set_message(format!("Помилка Google авторизації: {err}").into());
                                         }
                                     });
@@ -848,6 +866,7 @@ impl Application {
                                 Err(_) => {
                                     let _ = slint::invoke_from_event_loop(move || {
                                         if let Some(ui) = weak_ui.upgrade() {
+                                            ui.set_message_error(true);
                                             ui.set_message(if ui.get_language() == "en" {
                                                 "Google sign-in timed out.".into()
                                             } else {
@@ -860,6 +879,7 @@ impl Application {
                         });
                     }
                     Err(err) => {
+                        ui.set_message_error(true);
                         ui.set_message(format!("Помилка запуску OAuth: {err}").into());
                     }
                 }
@@ -968,6 +988,18 @@ impl Application {
         self.submit(ui, "_refresh", vec![], true);
         self.submit(ui, "restore_session", vec![], true);
         self.submit(ui, "get_subscription_status", vec![], true);
+        // Тихо перевіряємо, чи на GitHub уже є новіший реліз.
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            if let Some((tag, url)) = crate::update::check() {
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_update_version(tag.into());
+                        ui.set_update_url(url.into());
+                    }
+                });
+            }
+        });
         let poll = slint::Timer::default();
         let this = self.clone();
         let weak = ui.as_weak();
@@ -1309,6 +1341,11 @@ impl Application {
                 ui.set_search_history(slint::ModelRc::new(slint::VecModel::from(vec![])));
             }
             "refresh" => self.submit(ui, "_refresh", vec![], false),
+            "open-release" => {
+                if !payload.is_empty() {
+                    let _ = open::that_detached(payload);
+                }
+            }
             "about" => {
                 reset_modal(ui);
                 ui.set_modal_kind("about".into());
@@ -2062,9 +2099,11 @@ fn apply_response(
     ) {
         ui.set_modal_busy(false);
     }
+    ui.set_message_error(false);
     match result {
         Err(error) => {
             if !quiet {
+                ui.set_message_error(true);
                 ui.set_message(error.clone().into());
                 if matches!(
                     method,
@@ -2293,7 +2332,12 @@ fn apply_response(
                     ui.set_accounts_import_status("".into());
                     let is_en = ui.get_language() == "en";
                     let prompt = args.get(2).and_then(|v| v.as_str()) == Some("prompt");
-                    if prompt {
+                    let prompt_suppressed =
+                        prompt && data.settings["import_prompt_disabled"].as_bool() == Some(true);
+                    if prompt_suppressed {
+                        // Користувач уже попросив більше не питати про імпорт.
+                    } else if prompt {
+                        ui.set_import_prompt_disabled(false);
                         // Питаємо про імпорт лише тоді, коли сервіси справді знайдені
                         // через Google-профіль, а не підключені вручну раніше.
                         let mut found: Vec<String> = Vec::new();

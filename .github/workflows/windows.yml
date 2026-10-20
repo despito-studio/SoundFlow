@@ -1,0 +1,28 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --release --locked
+      - name: Build
+        run: cargo build --release --locked
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: soundflow-windows-x64
+          path: target/release/soundflow.exe
+          if-no-files-found: error

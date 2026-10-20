@@ -29,6 +29,11 @@ export component AppWindow inherits Window {
     in-out property <[DailyRow]> daily;
     in-out property <bool> task-loading;
     in-out property <string> message;
+    in-out property <bool> message-error: false;
+    in-out property <string> app-version: "";
+    in-out property <string> update-version: "";
+    in-out property <string> update-url: "";
+    in-out property <bool> import-prompt-disabled: false;
     in-out property <bool> dark;
     in-out property <bool> reduced-motion;
     in-out property <bool> close-to-tray: true;
@@ -131,7 +136,8 @@ export component AppWindow inherits Window {
 
     // Тост із повідомленням автоматично зникає через 3 секунди після появи.
     toast-timer := Timer {
-        interval: 3s;
+        // Помилки тримаємо довше, ніж звичайні повідомлення.
+        interval: root.message-error ? 7s : 3s;
         running: false;
         triggered() => { root.message = ""; }
     }
@@ -773,7 +779,7 @@ export component AppWindow inherits Window {
         }
 
         if root.app-menu : SFPanel {
-            x: navbar.x + navbar.width - self.width; y: 74px; width: 220px; height: 145px;
+            x: navbar.x + navbar.width - self.width; y: 74px; width: 220px; height: root.update-url != "" ? 182px : 145px;
             drop-shadow-blur: 20px; drop-shadow-color: #00000018;
             VerticalLayout {
                 padding: 8px; spacing: 5px;
@@ -791,6 +797,11 @@ export component AppWindow inherits Window {
                         root.app-menu = false;
                     }
                 }
+                if root.update-url != "" : SFButton {
+                    text: I18n.update-available + " " + root.update-version;
+                    flat: true;
+                    clicked => { root.action("open-release", root.update-url); root.app-menu = false; }
+                }
                 SFButton { text: I18n.nav-settings; flat: true; clicked => { root.navigate("settings"); root.app-menu = false; } }
                 SFButton { text: I18n.set-about-btn; flat: true; clicked => { root.action("about", ""); root.app-menu = false; } }
             }
@@ -799,7 +810,7 @@ export component AppWindow inherits Window {
             x: root.side-width + (root.workspace-width - self.width) / 2;
             y: root.height - 155px; width: min(650px, root.workspace-width - 48px); height: 50px;
             accessible-role: region; accessible-label: "Message"; accessible-live-region: polite;
-            HorizontalLayout { padding-left: 14px; padding-right: 6px; spacing: 8px; SFText { text: root.message; font-size: 13px; vertical-alignment: center; } SFButton { text: "×"; label: "Close message"; icon: true; flat: true; clicked => { root.action("dismiss-message", ""); } } }
+            HorizontalLayout { padding-left: 14px; padding-right: 6px; spacing: 8px; SFText { text: root.message; font-size: 13px; vertical-alignment: center; color: root.message-error ? Theme.danger : Theme.ink; } SFButton { text: "×"; label: "Close message"; icon: true; flat: true; clicked => { root.action("dismiss-message", ""); } } }
         }
     }
 
@@ -817,7 +828,7 @@ export component AppWindow inherits Window {
         SFPanel {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(root.modal-kind == "connected-accounts" || root.modal-kind == "subscription-plans" || root.modal-kind == "accounts-list" ? 820px : 650px, parent.width - 40px);
-            height: min(root.modal-kind == "import-prompt" ? 400px : root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? 555px : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
+            height: min(root.modal-kind == "import-prompt" ? 440px : root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? 555px : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
             drop-shadow-blur: 30px; drop-shadow-color: #00000025;
             accessible-role: region; accessible-label: root.modal-title;
             TouchArea { }
@@ -970,11 +981,26 @@ export component AppWindow inherits Window {
                         Rectangle { width: 10px; height: 10px; border-radius: 5px; background: #1DB954; }
                         SFText { text: "Spotify" + (root.sp-account != "" ? "  ·  " + root.sp-account : ""); font-size: 14px; }
                     }
+                    Rectangle {
+                        height: 24px; background: transparent;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            SFText {
+                                text: root.import-prompt-disabled ? "☑" : "☐";
+                                font-size: 16px;
+                                vertical-alignment: center;
+                                color: root.import-prompt-disabled ? Theme.ink : Theme.control-line;
+                            }
+                            SFMuted { text: I18n.acc-import-never; font-size: 12px; vertical-alignment: center; }
+                        }
+                        TouchArea { clicked => { root.import-prompt-disabled = !root.import-prompt-disabled; } }
+                    }
                     SFMuted { text: I18n.acc-import-prompt-hint; font-size: 12px; wrap: word-wrap; }
                 }
                 if root.modal-kind == "about" : VerticalLayout {
                     spacing: 15px;
                     HorizontalLayout { spacing: 14px; Image { width: 64px; height: 64px; source: @image-url("../resources/icon.png"); accessible-role: none; } VerticalLayout { SFTitle { text: "SoundFlow"; font-size: 24px; } SFMuted { text: I18n.about-subtitle; } } }
+                    SFMuted { text: I18n.about-version + " " + root.app-version + (root.update-version != "" ? "  ·  " + I18n.update-available + " " + root.update-version : ""); font-size: 12px; }
                     SFMuted { text: I18n.about-hotkeys; wrap: word-wrap; }
                     AboutSlint { }
                 }

@@ -23,6 +23,56 @@ pub struct Desktop {
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
     "Локальне сховище тимчасово недоступне".into()
 }
+
+/// Перевіряє, чи справді існує публічний профіль сервісу.
+/// Провайдер вгадує ідентифікатор з Google-пошти, тож без цієї перевірки
+/// застосунок показував би "знайдено" навіть для неіснуючих акаунтів.
+fn public_profile_exists(provider: &str, identifier: &str) -> bool {
+    let identifier = identifier.trim();
+    if identifier.is_empty() {
+        return false;
+    }
+    let url = match provider {
+        "youtube" => {
+            if identifier.starts_with('@') {
+                format!("https://www.youtube.com/{identifier}")
+            } else {
+                return true;
+            }
+        }
+        "soundcloud" => {
+            if identifier.starts_with("http") {
+                identifier.to_string()
+            } else {
+                format!("https://soundcloud.com/{identifier}")
+            }
+        }
+        "spotify" => {
+            if identifier.starts_with("http") {
+                identifier.to_string()
+            } else {
+                format!("https://open.spotify.com/user/{identifier}")
+            }
+        }
+        _ => return true,
+    };
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .user_agent(format!(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SoundFlow/{}",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .build()
+    else {
+        return true;
+    };
+    match client.get(&url).send() {
+        // 404 — профілю немає; будь-яка інша відповідь (включно з 403 від ботозахисту)
+        // не дає права стверджувати, що акаунта не існує.
+        Ok(response) => response.status().as_u16() != 404,
+        Err(_) => true,
+    }
+}
 impl Desktop {
     pub fn open(data_dir: PathBuf, resources: PathBuf, offline: bool) -> CoreResult<Self> {
         let core = Core::open(data_dir.clone(), offline)?;
@@ -125,9 +175,26 @@ impl Desktop {
                     "detect_connected_accounts",
                     &[json!(email), json!(name)],
                 )?;
+                // Провайдер лише вгадує ідентифікатор з пошти, тому кожну знахідку
+                // підтверджуємо реальним запитом до публічного профілю (404 = немає).
+                let mut detected = detected;
+                if let Some(obj) = detected.as_object_mut() {
+                    for (provider, info) in obj.iter_mut() {
+                        let found = info["found"].as_bool() == Some(true);
+                        let identifier = info["identifier"].as_str().unwrap_or("").to_string();
+                        if found
+                            && !identifier.is_empty()
+                            && !public_profile_exists(provider, &identifier)
+                        {
+                            info["found"] = json!(false);
+                            info["identifier"] = json!("");
+                            info["name"] = json!("");
+                        }
+                    }
+                }
                 let mut core = self.core.lock().map_err(lock_error)?;
                 let saved = core.local_rpc("get_connected_accounts", &[])?;
-                let mut merged = detected.clone();
+                let mut merged = detected;
                 // Позначаємо сервіси, які справді знайдені через Google-профіль
                 // (а не підключені вручну раніше): за цим прапорцем застосунок
                 // питає про імпорт бібліотеки одразу після входу.

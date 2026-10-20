@@ -11,6 +11,7 @@ mod media_keys;
 pub mod platform;
 pub mod playback;
 pub mod supabase;
+pub mod update;
 pub mod verification;
 
 slint::include_modules!();
