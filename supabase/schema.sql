@@ -29,6 +29,10 @@ drop policy if exists "soundflow update" on public.connected_accounts;
 create policy "soundflow update" on public.connected_accounts
     for update to anon using (true) with check (true);
 
+-- Явні права для ролей Supabase (RLS усе одно обмежує доступ політиками).
+grant usage on schema public to anon, authenticated;
+grant select, insert, update on public.connected_accounts to anon, authenticated;
+
 -- Видалення не дозволяємо: застосунок ним не користується.
 
 -- Перевірка після запуску:
