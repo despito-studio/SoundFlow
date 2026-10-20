@@ -16,6 +16,29 @@ export global Theme {
     out property <color> control-line: dark ? #8c8c86 : #8a8a84;
     out property <color> inverse: dark ? #161616 : #ffffff;
     out property <color> danger: dark ? #f4aaa2 : #9d2b21;
+    // Акцент: "mono" зберігає початковий монохромний вигляд.
+    in-out property <string> accent: "mono";
+    out property <color> palette-mono: dark ? #f7f7f5 : #191919;
+    out property <color> palette-blue: dark ? #7fb2ff : #1f6feb;
+    out property <color> palette-violet: dark ? #c0a8ff : #6d42d9;
+    out property <color> palette-rose: dark ? #ff9fb0 : #d81b52;
+    out property <color> palette-amber: dark ? #ffcc66 : #a86400;
+    out property <color> palette-green: dark ? #86e0a0 : #1f7a3d;
+    out property <color> accent-color:
+        accent == "blue" ? palette-blue :
+        accent == "violet" ? palette-violet :
+        accent == "rose" ? palette-rose :
+        accent == "amber" ? palette-amber :
+        accent == "green" ? palette-green :
+        palette-mono;
+    out property <color> accent-ink: accent == "mono" ? inverse : (dark ? #111111 : #ffffff);
+    out property <color> accent-soft:
+        accent == "blue" ? (dark ? #1c2b45 : #e8f0ff) :
+        accent == "violet" ? (dark ? #2a2145 : #f1ecff) :
+        accent == "rose" ? (dark ? #3a2029 : #ffe9ee) :
+        accent == "amber" ? (dark ? #3a2f1a : #fff3dc) :
+        accent == "green" ? (dark ? #1d3325 : #e7f6ec) :
+        (dark ? #2d2d2d : #f4f4f2);
 }
 
 export component SFButton inherits Rectangle {
@@ -30,6 +53,7 @@ export component SFButton inherits Rectangle {
     in property <bool> modal-control: false;
     in property <bool> icon: false;
     in property <bool> danger: false;
+    in property <bool> accent: false;
     in property <bool> left-align: false;
     callback clicked();
     out property <bool> has-focus: button-focus.has-focus;
@@ -43,7 +67,7 @@ export component SFButton inherits Rectangle {
     horizontal-stretch: 0;
     vertical-stretch: 0;
     border-radius: icon ? 20px : 12px;
-    background: primary ? Theme.ink : active ? Theme.hover : touch.has-hover ? Theme.hover : flat ? transparent : Theme.raised;
+    background: root.accent ? Theme.accent-color : primary ? Theme.ink : active ? Theme.hover : touch.has-hover ? Theme.hover : flat ? transparent : Theme.raised;
     border-width: 0px;
     opacity: interactive ? 1 : 0.45;
     forward-focus: button-focus;
@@ -64,7 +88,7 @@ export component SFButton inherits Rectangle {
         x: root.icon ? 0px : 14px;
         width: root.icon ? parent.width : parent.width - 28px;
         text: root.text;
-        color: root.primary ? Theme.inverse : root.danger ? Theme.danger : Theme.ink;
+        color: root.accent ? Theme.accent-ink : root.primary ? Theme.inverse : root.danger ? Theme.danger : Theme.ink;
         font-size: root.icon ? 20px : 13px;
         font-family: root.icon ? "Segoe UI Symbol" : "Segoe UI";
         font-weight: root.primary || root.active ? 700 : 600;
@@ -191,7 +215,11 @@ export component SFSlider inherits Rectangle {
         width: parent.width - 12px; height: 4px;
         border-radius: 2px;
         background: root.interactive ? Theme.control-line : Theme.line;
-        Rectangle { x: 0px; y: 0px; width: parent.width * root.fraction; height: parent.height; border-radius: 2px; background: Theme.ink; }
+        Rectangle {
+            x: 0px; y: 0px; width: parent.width * root.fraction; height: parent.height; border-radius: 2px;
+            background: Theme.accent-color;
+            animate width { duration: Theme.reduced-motion ? 0ms : 120ms; }
+        }
     }
     Rectangle {
         x: 2px + (parent.width - 12px) * root.fraction;
@@ -419,3 +447,41 @@ export component SFLangSwitch inherits Rectangle {
     }
 }
 
+export component SFSkeleton inherits Rectangle {
+    in property <bool> wide: false;
+    min-height: 68px;
+    preferred-height: 68px;
+    background: transparent;
+    HorizontalLayout {
+        padding-top: 12px; padding-bottom: 12px; padding-left: 8px; padding-right: 8px; spacing: 12px;
+        Rectangle { width: 44px; height: 44px; border-radius: 12px; background: Theme.raised; }
+        VerticalLayout {
+            spacing: 8px; horizontal-stretch: 1;
+            Rectangle { width: root.wide ? 62% : 42%; height: 12px; border-radius: 6px; background: Theme.raised; }
+            Rectangle { width: root.wide ? 34% : 26%; height: 10px; border-radius: 5px; background: Theme.hover; }
+        }
+    }
+    private property <bool> pulse: false;
+    Timer {
+        interval: 780ms;
+        running: true;
+        triggered => { root.pulse = !root.pulse; }
+    }
+    animate opacity { duration: Theme.reduced-motion ? 0ms : 780ms; }
+    opacity: root.pulse ? 0.62 : 1;
+}
+
+export component SFAccentDot inherits Rectangle {
+    in property <color> dot-color;
+    in property <bool> selected: false;
+    in property <string> label;
+    callback picked();
+    width: 30px; height: 30px; border-radius: 15px;
+    background: dot-color;
+    border-width: selected ? 3px : 0px;
+    border-color: Theme.ink;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { root.picked(); }
+    TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
+}

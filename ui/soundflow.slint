@@ -1,7 +1,7 @@
 import { ScrollView, ListView, AboutSlint, Palette } from "std-widgets.slint";
-import { TrackRow, PlaylistRow, DownloadRow, RankRow, StatMetric, DailyRow, AccountRow } from "models.slint";
+import { TrackRow, PlaylistRow, DownloadRow, RankRow, StatMetric, DailyRow, AccountRow, CommandRow } from "models.slint";
 export { TrackRow, PlaylistRow, DownloadRow, RankRow, StatMetric, DailyRow, AccountRow } from "models.slint";
-import { Theme, SFButton, SFField, SFSlider, SFPanel, SFCover, SFTitle, SFText, SFMuted, SFLangSwitch } from "controls.slint";
+import { Theme, SFButton, SFField, SFSlider, SFPanel, SFCover, SFTitle, SFText, SFMuted, SFLangSwitch, SFAccentDot, SFSkeleton } from "controls.slint";
 import { TrackItem } from "track-item.slint";
 import { HomeView } from "home.slint";
 import { I18n } from "i18n.slint";
@@ -41,6 +41,11 @@ export component AppWindow inherits Window {
     in-out property <string> profile-name: "Слухач";
     in-out property <bool> cloud-configured;
     in-out property <bool> supabase-linked: false;
+    in-out property <string> accent: "mono";
+    in-out property <color> player-accent: transparent;
+    in-out property <bool> command-open: false;
+    in-out property <string> command-query: "";
+    in-out property <[CommandRow]> commands;
     in-out property <bool> cloud-signed-in;
     in-out property <string> cloud-name;
     in-out property <string> cloud-email;
@@ -126,12 +131,15 @@ export component AppWindow inherits Window {
     private property <int> search-focus-request;
     init => {
         Theme.dark = root.dark; Theme.reduced-motion = root.reduced-motion; Theme.modal-open = root.modal-open;
+        Theme.accent = root.accent;
         Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
         I18n.locale = root.language;
     }
     changed language => { I18n.locale = root.language; }
     changed dark => { Theme.dark = root.dark; Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
     changed reduced-motion => { Theme.reduced-motion = root.reduced-motion; }
+    changed accent => { Theme.accent = root.accent; }
+    changed current-track => { if !Theme.reduced-motion { player.track-fading = true; } }
     changed modal-open => { Theme.modal-open = root.modal-open; if !root.modal-open { app-focus.focus(); } }
     forward-focus: app-focus;
 
@@ -156,8 +164,11 @@ export component AppWindow inherits Window {
                 root.player-options = false; root.app-menu = false;
                 return accept;
             }
-            if event.modifiers.control && (event.text == "k" || event.text == "K") && !root.modal-open {
-                root.navigate("search"); root.search-focus-request += 1; return accept;
+            if event.modifiers.control && (event.text == "k" || event.text == "K") && !root.modal-open && !root.command-open {
+                root.command-open = true;
+                root.command-query = "";
+                root.action("command-query", "");
+                return accept;
             }
             return reject;
         }
@@ -328,7 +339,14 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.tracks.length == 0 && (root.view != "search" || root.search-history.length == 0 || root.task-loading) : SFPanel {
+                if root.task-loading && root.tracks.length == 0 : VerticalLayout {
+                    x: 0px; y: parent.list-top; width: parent.width; height: min(parent.height - self.y, 408px);
+                    spacing: 2px;
+                    for index in 6 : SFSkeleton {
+                        wide: Math.mod(index, 3) == 1;
+                    }
+                }
+                if root.tracks.length == 0 && !root.task-loading && (root.view != "search" || root.search-history.length == 0) : SFPanel {
                     x: 0px; y: parent.list-top; width: parent.width; height: min(175px, parent.height - self.y);
                     VerticalLayout {
                         padding: 20px; spacing: 10px; alignment: center;
@@ -568,6 +586,16 @@ export component AppWindow inherits Window {
                                 SFButton { text: I18n.set-theme-dark; checkable: true; active: root.dark; clicked => { root.action("set-theme", "dark"); } }
                             }
                             HorizontalLayout {
+                                spacing: 8px;
+                                SFText { text: I18n.set-accent; vertical-alignment: center; }
+                                SFAccentDot { dot-color: Theme.palette-mono; selected: root.accent == "mono"; label: I18n.set-accent + " mono"; picked => { root.action("set-accent", "mono"); } }
+                                SFAccentDot { dot-color: Theme.palette-blue; selected: root.accent == "blue"; label: I18n.set-accent + " blue"; picked => { root.action("set-accent", "blue"); } }
+                                SFAccentDot { dot-color: Theme.palette-violet; selected: root.accent == "violet"; label: I18n.set-accent + " violet"; picked => { root.action("set-accent", "violet"); } }
+                                SFAccentDot { dot-color: Theme.palette-rose; selected: root.accent == "rose"; label: I18n.set-accent + " rose"; picked => { root.action("set-accent", "rose"); } }
+                                SFAccentDot { dot-color: Theme.palette-amber; selected: root.accent == "amber"; label: I18n.set-accent + " amber"; picked => { root.action("set-accent", "amber"); } }
+                                SFAccentDot { dot-color: Theme.palette-green; selected: root.accent == "green"; label: I18n.set-accent + " green"; picked => { root.action("set-accent", "green"); } }
+                            }
+                            HorizontalLayout {
                                 VerticalLayout { SFText { text: I18n.set-reduced-motion; } SFMuted { text: I18n.set-reduced-motion-desc; } }
                                 SFButton { text: root.reduced-motion ? I18n.set-enabled : I18n.set-disabled; label: I18n.set-reduced-motion + ": " + (root.reduced-motion ? I18n.set-enabled : I18n.set-disabled); checkable: true; active: root.reduced-motion; clicked => { root.action("set-reduced-motion", root.reduced-motion ? "false" : "true"); } }
                             }
@@ -740,18 +768,37 @@ export component AppWindow inherits Window {
             drop-shadow-blur: 22px; drop-shadow-offset-y: 3px; drop-shadow-color: #00000012;
             accessible-role: region;
             accessible-label: I18n.player-region-label;
+            private property <bool> track-fading: false;
+            // М'який градієнт кольору поточної обкладинки.
+            Rectangle {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                border-radius: parent.border-radius;
+                background: root.player-accent;
+                animate background { duration: Theme.reduced-motion ? 0ms : 320ms; }
+            }
+            Timer {
+                interval: 150ms;
+                running: player.track-fading;
+                triggered => { player.track-fading = false; }
+            }
             HorizontalLayout {
                 x: 0px; y: 0px; width: parent.width; height: parent.height;
                 padding-left: 14px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px; spacing: 8px;
-                SFCover { width: 47px; height: 47px; artwork: root.current-track.artwork; }
+                SFCover {
+                    width: 47px; height: 47px; artwork: root.current-track.artwork;
+                    opacity: player.track-fading ? 0.25 : 1;
+                    animate opacity { duration: Theme.reduced-motion ? 0ms : 150ms; }
+                }
                 VerticalLayout {
                     width: min(206px, root.workspace-width * 0.22); alignment: center; spacing: 3px;
+                    opacity: player.track-fading ? 0.25 : 1;
+                    animate opacity { duration: Theme.reduced-motion ? 0ms : 150ms; }
                     SFText { text: root.current-track.id == "" ? I18n.player-pick-song : root.current-track.title; font-size: 13px; font-weight: 600; }
                     SFMuted { text: root.loading ? I18n.player-buffering : root.current-track.id == "" ? I18n.player-start-here : root.current-track.artist; font-size: 12px; }
                 }
-                SFButton { text: root.current-track.liked ? "♥" : "♡"; label: root.current-track.liked ? I18n.player-fav-remove : I18n.player-fav-add; checkable: true; checked: root.current-track.liked; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.like-track(root.current-track.id); } }
+                SFButton { text: root.current-track.liked ? "♥" : "♡"; label: root.current-track.liked ? I18n.player-fav-remove : I18n.player-fav-add; checkable: true; checked: root.current-track.liked; accent: root.current-track.liked; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.like-track(root.current-track.id); } }
                 SFButton { text: "‹"; label: I18n.player-prev; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.player-action("previous"); } }
-                SFButton { text: root.playing ? "Ⅱ" : "▶"; label: root.playing ? I18n.player-pause : I18n.player-play; primary: true; icon: true; enabled: root.current-track.id != ""; clicked => { root.player-action("toggle"); } }
+                SFButton { text: root.playing ? "Ⅱ" : "▶"; label: root.playing ? I18n.player-pause : I18n.player-play; accent: true; icon: true; enabled: root.current-track.id != ""; clicked => { root.player-action("toggle"); } }
                 SFButton { text: "›"; label: I18n.player-next; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.player-action("next"); } }
                 VerticalLayout {
                     horizontal-stretch: 1; min-width: 60px; spacing: 0px; alignment: center;
@@ -780,7 +827,7 @@ export component AppWindow inherits Window {
         }
 
         if root.app-menu : SFPanel {
-            x: navbar.x + navbar.width - self.width; y: 74px; width: 220px; height: root.update-url != "" ? 182px : 145px;
+            x: navbar.x + navbar.width - self.width; y: 74px; width: 220px; height: root.update-url != "" ? 227px : 190px;
             drop-shadow-blur: 20px; drop-shadow-color: #00000018;
             VerticalLayout {
                 padding: 8px; spacing: 5px;
@@ -802,6 +849,16 @@ export component AppWindow inherits Window {
                     text: I18n.update-available + " " + root.update-version;
                     flat: true;
                     clicked => { root.action("open-release", root.update-url); root.app-menu = false; }
+                }
+                SFButton {
+                    text: I18n.command-menu + "   Ctrl+K";
+                    flat: true;
+                    clicked => {
+                        root.app-menu = false;
+                        root.command-open = true;
+                        root.command-query = "";
+                        root.action("command-query", "");
+                    }
                 }
                 SFButton { text: I18n.nav-settings; flat: true; clicked => { root.navigate("settings"); root.app-menu = false; } }
                 SFButton { text: I18n.set-about-btn; flat: true; clicked => { root.action("about", ""); root.app-menu = false; } }
@@ -1169,6 +1226,48 @@ export component AppWindow inherits Window {
                 }
             }
             FocusScope { width: 0px; height: 0px; changed has-focus => { if self.has-focus { dialog-close.focus(); } } }
+        }
+    }
+
+    if root.command-open : FocusScope {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { root.command-open = false; return accept; }
+            return reject;
+        }
+        Rectangle {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            background: #00000055;
+            TouchArea { clicked => { root.command-open = false; } }
+        }
+        SFPanel {
+            x: (parent.width - self.width) / 2; y: 110px;
+            width: min(560px, parent.width - 80px);
+            height: min(430px, parent.height - 190px);
+            drop-shadow-blur: 30px; drop-shadow-color: #00000033;
+            VerticalLayout {
+                padding: 14px; spacing: 10px;
+                SFField {
+                    height: 42px;
+                    text <=> root.command-query;
+                    label: I18n.command-placeholder;
+                    placeholder: I18n.command-placeholder;
+                    input-type: InputType.search;
+                    edited(value) => { root.action("command-query", value); }
+                    accepted(_) => { root.action("run-command", root.commands.length > 0 ? root.commands[0].id : ""); }
+                }
+                if root.commands.length == 0 : SFMuted { text: I18n.command-empty; }
+                ListView {
+                    horizontal-scrollbar-policy: always-off;
+                    for command in root.commands : SFButton {
+                        text: command.title + (command.hint != "" ? "   ·   " + command.hint : "");
+                        left-align: true;
+                        horizontal-stretch: 1;
+                        flat: true;
+                        clicked => { root.action("run-command", command.id); }
+                    }
+                }
+            }
         }
     }
 

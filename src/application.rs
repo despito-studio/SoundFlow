@@ -2,7 +2,8 @@
 use crate::{
     desktop::Desktop,
     playback::{AudioEvent, AudioPlayer, ListeningReport},
-    AppWindow, AccountRow, DailyRow, DownloadRow, PlaylistRow, RankRow, StatMetric, TrackRow,
+    AppWindow, AccountRow, CommandRow, DailyRow, DownloadRow, PlaylistRow, RankRow, StatMetric,
+    TrackRow,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -370,6 +371,7 @@ impl Application {
     pub fn bind(&self, ui: &AppWindow) -> UiBinding {
         self.start_workers(ui);
         ui.set_app_version(env!("CARGO_PKG_VERSION").into());
+        ui.set_commands(rows(command_catalog(ui.get_language().as_str())));
         let this = self.clone();
         let weak = ui.as_weak();
         ui.on_navigate(move |view| {
@@ -1072,8 +1074,49 @@ impl Application {
         self.shared.generation.fetch_add(1, Ordering::SeqCst);
         self.audio.pause();
     }
+    /// Виконує команду з палітри Ctrl+K.
+    fn run_command(&self, ui: &AppWindow, id: &str) {
+        ui.set_command_open(false);
+        let (kind, value) = id.split_once(':').unwrap_or((id, ""));
+        match (kind, value) {
+            ("nav", view) => ui.invoke_navigate(view.into()),
+            ("action", "create-playlist") => self.action(ui, "create-playlist", ""),
+            ("action", "toggle-theme") => {
+                let next = if ui.get_dark() { "light" } else { "dark" };
+                self.action(ui, "set-theme", next);
+            }
+            ("action", "cycle-accent") => {
+                const ORDER: [&str; 6] = ["mono", "blue", "violet", "rose", "amber", "green"];
+                let current = ui.get_accent().to_string();
+                let index = ORDER.iter().position(|name| *name == current).unwrap_or(0);
+                let next = ORDER[(index + 1) % ORDER.len()];
+                self.action(ui, "set-accent", next);
+            }
+            ("action", "connected") => self.action(ui, "open-connected-accounts", ""),
+            ("action", "about") => self.action(ui, "about", ""),
+            ("sync", mode) => self.submit(ui, "sync_library", vec![json!(mode)], false),
+            _ => {}
+        }
+    }
     fn action(&self, ui: &AppWindow, method: &str, payload: &str) {
         match method {
+            "command-query" => {
+                let catalog = command_catalog(ui.get_language().as_str());
+                let query = payload.trim().to_lowercase();
+                let filtered: Vec<CommandRow> = if query.is_empty() {
+                    catalog
+                } else {
+                    catalog
+                        .into_iter()
+                        .filter(|item| {
+                            item.title.to_lowercase().contains(&query)
+                                || item.hint.to_lowercase().contains(&query)
+                        })
+                        .collect()
+                };
+                ui.set_commands(rows(filtered));
+            }
+            "run-command" => self.run_command(ui, payload),
             "create-playlist" | "create_playlist" => {
                 self.shared
                     .data
@@ -1180,6 +1223,14 @@ impl Application {
             }
             "theme" | "set-theme" => {
                 self.submit(ui, "update_settings", vec![json!({"theme":payload})], false)
+            }
+            "set-accent" => {
+                let accent = match payload {
+                    "blue" | "violet" | "rose" | "amber" | "green" => payload,
+                    _ => "mono",
+                };
+                ui.set_accent(accent.into());
+                self.submit(ui, "update_settings", vec![json!({"accent":accent})], true)
             }
             "language" | "set-language" => {
                 self.submit(ui, "update_settings", vec![json!({"language":payload})], false)
@@ -1682,10 +1733,9 @@ impl Application {
                                 this.discord.clear();
                             }
                             let _ = weak.upgrade_in_event_loop(move |ui| {
-                                ui.set_current_track(track_row(
-                                    &state.track.unwrap_or(Value::Null),
-                                    &shared,
-                                ));
+                                let playing_track = state.track.unwrap_or(Value::Null);
+                                ui.set_player_accent(accent_for(&playing_track, &shared.cache));
+                                ui.set_current_track(track_row(&playing_track, &shared));
                                 ui.set_playing(state.playing);
                                 ui.set_loading(state.loading);
                                 ui.set_position(state.position as f32);
@@ -1829,6 +1879,99 @@ fn artwork(value: &Value, cache: &Path) -> slint::Image {
     }
     slint::Image::default()
 }
+
+/// Середній насичений колір обкладинки для градієнта плеєра.
+fn accent_for(value: &Value, cache: &Path) -> slint::Color {
+    let url = text(value, "thumbnail");
+    if url.is_empty() {
+        return slint::Color::from_argb_f32(0.0, 0.0, 0.0, 0.0);
+    }
+    let id = format!("{:x}", Sha256::digest(url.as_bytes()));
+    for extension in ["jpg", "png", "webp"] {
+        let file = cache.join(format!("{id}.{extension}"));
+        if !file.is_file() {
+            continue;
+        }
+        let Ok(image) = image::open(&file) else { continue };
+        let small = image
+            .resize(14, 14, image::imageops::FilterType::Triangle)
+            .to_rgb8();
+        let (mut r, mut g, mut b, mut weight) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for pixel in small.pixels() {
+            let (pr, pg, pb) = (
+                pixel[0] as f32 / 255.0,
+                pixel[1] as f32 / 255.0,
+                pixel[2] as f32 / 255.0,
+            );
+            let max = pr.max(pg).max(pb);
+            let min = pr.min(pg).min(pb);
+            let saturation = if max <= f32::EPSILON { 0.0 } else { (max - min) / max };
+            // Насичені пікселі важливіші за сірі, темні — трохи підсвічуємо.
+            let w = 0.15 + saturation;
+            r += pr * w;
+            g += pg * w;
+            b += pb * w;
+            weight += w;
+        }
+        if weight <= f32::EPSILON {
+            break;
+        }
+        let (mut r, mut g, mut b) = (r / weight, g / weight, b / weight);
+        let max = r.max(g).max(b);
+        if max < 0.35 {
+            let boost = 0.35 / max.max(0.05);
+            r = (r * boost).min(1.0);
+            g = (g * boost).min(1.0);
+            b = (b * boost).min(1.0);
+        }
+        return slint::Color::from_argb_f32(0.22, r, g, b);
+    }
+    slint::Color::from_argb_f32(0.0, 0.0, 0.0, 0.0)
+}
+
+/// Команди для палітри Ctrl+K. Заголовки локалізуються під час відкриття.
+fn command_catalog(language: &str) -> Vec<CommandRow> {
+    let uk = language != "en";
+    let section = if uk { "Розділ" } else { "Section" };
+    let action = if uk { "Дія" } else { "Action" };
+    let sync = if uk { "Хмара" } else { "Cloud" };
+    let mut items = Vec::new();
+    let mut push = |id: &str, title_uk: &str, title_en: &str, hint: &str| {
+        items.push(CommandRow {
+            id: id.into(),
+            title: (if uk { title_uk } else { title_en }).into(),
+            hint: hint.into(),
+        });
+    };
+    push("nav:home", "Головна", "Home", section);
+    push("nav:search", "Пошук", "Search", section);
+    push("nav:flow", "Flow", "Flow", section);
+    push("nav:stats", "Статистика", "Statistics", section);
+    push("nav:liked", "Улюблене", "Liked", section);
+    push("nav:history", "Історія", "History", section);
+    push("nav:downloads", "Завантаження", "Downloads", section);
+    push("nav:connections", "Підключення", "Connections", section);
+    push("nav:settings", "Налаштування", "Settings", section);
+    push("action:create-playlist", "Створити плейлист", "Create playlist", action);
+    push(
+        "action:toggle-theme",
+        "Перемкнути світлу/темну тему",
+        "Toggle light/dark theme",
+        action,
+    );
+    push(
+        "action:cycle-accent",
+        "Змінити акцентний колір",
+        "Cycle accent colour",
+        action,
+    );
+    push("action:connected", "Підключені акаунти", "Connected accounts", action);
+    push("action:about", "Про SoundFlow", "About SoundFlow", action);
+    push("sync:push", "Надіслати бібліотеку в хмару", "Push library to cloud", sync);
+    push("sync:pull", "Отримати бібліотеку з хмари", "Pull library from cloud", sync);
+    items
+}
+
 fn track_row(value: &Value, shared: &Shared) -> TrackRow {
     let liked = shared
         .data
@@ -2022,6 +2165,7 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
     shared.media_hotkeys.store(hotkeys, Ordering::Relaxed);
     ui.set_close_to_tray(close);
     ui.set_media_hotkeys(hotkeys);
+    ui.set_accent(settings["accent"].as_str().unwrap_or("mono").into());
     ui.set_infinite_autoplay(settings["infinite_autoplay"].as_bool().unwrap_or(true));
     let discord = settings["discord_rpc_enabled"].as_bool().unwrap_or(true);
     shared.discord_rpc.store(discord, Ordering::Relaxed);
@@ -2048,7 +2192,8 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
                 .cloned()
         };
         if let Some(value) = value {
-            ui.set_current_track(track_row(&value, shared));
+            ui.set_player_accent(accent_for(&value, &shared.cache));
+    ui.set_current_track(track_row(&value, shared));
         }
     }
 }
