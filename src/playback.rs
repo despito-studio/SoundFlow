@@ -7,7 +7,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
         Arc,
     },
@@ -80,6 +80,8 @@ enum Command {
     Toggle,
     Seek(f64),
     Volume(f32),
+    Speed(f32),
+    Normalize(bool),
     Identity(String),
     Stop,
     Drain(Sender<Option<ListeningReport>>),
@@ -94,6 +96,8 @@ struct LoadRequest {
 pub struct AudioPlayer {
     commands: Sender<Command>,
     generation: Arc<AtomicU64>,
+    speed: Arc<AtomicU32>,
+    normalize: Arc<AtomicBool>,
 }
 impl AudioPlayer {
     pub fn new() -> (Self, Receiver<AudioEvent>) {
@@ -104,6 +108,10 @@ impl AudioPlayer {
         let (events, output) = mpsc::channel();
         let (loads, pending) = mpsc::channel::<LoadRequest>();
         let generation = Arc::new(AtomicU64::new(0));
+        let speed = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        let normalize = Arc::new(AtomicBool::new(true));
+        let speed_handle = speed.clone();
+        let normalize_handle = normalize.clone();
         let loader_commands = commands.clone();
         let loader_generation = generation.clone();
         std::thread::Builder::new()
@@ -133,13 +141,22 @@ impl AudioPlayer {
         std::thread::Builder::new()
             .name("soundflow-audio".into())
             .spawn(move || {
-                audio_loop(input, events, loads, actor_generation);
+                audio_loop(
+                    input,
+                    events,
+                    loads,
+                    actor_generation,
+                    speed_handle.clone(),
+                    normalize_handle.clone(),
+                );
             })
             .expect("Start native audio worker");
         (
             Self {
                 commands,
                 generation,
+                speed,
+                normalize,
             },
             output,
         )
@@ -179,6 +196,15 @@ impl AudioPlayer {
             let _ = self.commands.send(Command::Volume(volume.clamp(0.0, 1.0)));
         }
     }
+    pub fn set_speed(&self, speed: f32) {
+        let speed = speed.clamp(0.5, 2.0);
+        self.speed.store(speed.to_bits(), Ordering::Relaxed);
+        let _ = self.commands.send(Command::Speed(speed));
+    }
+    pub fn set_normalize(&self, enabled: bool) {
+        self.normalize.store(enabled, Ordering::Relaxed);
+        let _ = self.commands.send(Command::Normalize(enabled));
+    }
     pub fn set_identity(&self, user_id: String) {
         let _ = self.commands.send(Command::Identity(user_id));
     }
@@ -194,6 +220,56 @@ impl AudioPlayer {
     pub fn shutdown(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
         let _ = self.commands.send(Command::Shutdown);
+    }
+}
+
+/// М'яка нормалізація гучності: плавно підтягує тихі треки до цільового рівня
+/// і приглушує гучні, не даючи пікам виходити за межі.
+struct NormalizedSource<S> {
+    inner: S,
+    enabled: bool,
+    rms: f32,
+    gain: f32,
+}
+
+impl<S> NormalizedSource<S> {
+    fn new(inner: S, enabled: bool) -> Self {
+        Self {
+            inner,
+            enabled,
+            rms: 0.02,
+            gain: 1.0,
+        }
+    }
+}
+
+impl<S: Source<Item = f32>> Iterator for NormalizedSource<S> {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        let sample = self.inner.next()?;
+        if !self.enabled {
+            return Some(sample);
+        }
+        self.rms = self.rms * 0.9992 + sample * sample * 0.0008;
+        let rms = self.rms.sqrt().max(1e-5);
+        let target = (0.16 / rms).clamp(0.35, 4.0);
+        self.gain += (target - self.gain) * 0.0008;
+        Some((sample * self.gain).clamp(-1.0, 1.0))
+    }
+}
+
+impl<S: Source<Item = f32>> Source for NormalizedSource<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+    fn channels(&self) -> rodio::ChannelCount {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
     }
 }
 
@@ -373,6 +449,8 @@ fn audio_loop(
     events: Sender<AudioEvent>,
     loads: Sender<LoadRequest>,
     generation: Arc<AtomicU64>,
+    speed_store: Arc<AtomicU32>,
+    normalize_store: Arc<AtomicBool>,
 ) {
     let mut state = PlayerState::default();
     let mut stream: Option<OutputStream> = None;
@@ -386,6 +464,9 @@ fn audio_loop(
     let mut clock = Instant::now();
     let mut last_position = 0.0;
     let mut heartbeat = Instant::now();
+    let mut speed = f32::from_bits(speed_store.load(Ordering::Relaxed));
+    let mut normalize_enabled = normalize_store.load(Ordering::Relaxed);
+    let mut current_source: Option<String> = None;
     loop {
         let command = input.recv_timeout(Duration::from_millis(200));
         let elapsed = clock.elapsed().as_secs_f64();
@@ -423,6 +504,7 @@ fn audio_loop(
             }) => {
                 emit_listening(&mut session, &events);
                 sink.take();
+                current_source = Some(source.clone());
                 current_generation = id;
                 start = position;
                 limit = preview
@@ -486,7 +568,10 @@ fn audio_loop(
                             let output = Sink::connect_new(device.mixer());
                             output.pause();
                             output.set_volume(state.volume);
-                            output.append(decoder);
+                            output.append(NormalizedSource::new(
+                                decoder.speed(speed),
+                                normalize_enabled,
+                            ));
                             state.duration = duration;
                             if duration > 0.0 {
                                 if let Some(track) = state.track.as_mut() {
@@ -564,6 +649,30 @@ fn audio_loop(
                         last_position = target_pos;
                         clock = Instant::now();
                         let _ = events.send(AudioEvent::State(state.clone()));
+                    }
+                }
+            }
+            Ok(Command::Speed(value)) => {
+                speed = value.clamp(0.5, 2.0);
+                let _ = speed_store.store(speed.to_bits(), Ordering::Relaxed);
+                if sink.is_some() {
+                    if let Some(source) = current_source.clone() {
+                        let id = generation.fetch_add(1, Ordering::AcqRel) + 1;
+                        current_generation = id;
+                        start = state.position;
+                        let _ = loads.send(LoadRequest { generation: id, source });
+                    }
+                }
+            }
+            Ok(Command::Normalize(enabled)) => {
+                normalize_enabled = enabled;
+                let _ = normalize_store.store(enabled, Ordering::Relaxed);
+                if sink.is_some() {
+                    if let Some(source) = current_source.clone() {
+                        let id = generation.fetch_add(1, Ordering::AcqRel) + 1;
+                        current_generation = id;
+                        start = state.position;
+                        let _ = loads.send(LoadRequest { generation: id, source });
                     }
                 }
             }

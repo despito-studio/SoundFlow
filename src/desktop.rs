@@ -114,8 +114,40 @@ impl Desktop {
                     .map_err(lock_error)?
                     .call(method, &args)
             }
-            "search"
-            | "resolve_direct_url"
+            "search" => {
+                let query = string_arg(args, 0).unwrap_or("").to_string();
+                let source = arg(args, 1).as_str().unwrap_or("all").to_string();
+                let local: Vec<Value> = self
+                    .core
+                    .lock()
+                    .map_err(lock_error)?
+                    .local_rpc("search_library", &[json!(query)])
+                    .ok()
+                    .and_then(|value| value.as_array().cloned())
+                    .unwrap_or_default();
+                let mut results: Vec<Value> = if source == "all" || source == "local" {
+                    local
+                } else {
+                    Vec::new()
+                };
+                let mut seen: std::collections::HashSet<String> = results
+                    .iter()
+                    .filter_map(|track| track["id"].as_str().map(str::to_string))
+                    .collect();
+                if let Ok(remote) = self.provider.lock().map_err(lock_error)?.call("search", args) {
+                    if let Some(items) = remote.as_array() {
+                        for track in items {
+                            let id = track["id"].as_str().unwrap_or("").to_string();
+                            if id.is_empty() || !seen.insert(id) {
+                                continue;
+                            }
+                            results.push(track.clone());
+                        }
+                    }
+                }
+                Ok(json!(results))
+            }
+            "resolve_direct_url"
             | "get_similar_tracks"
             | "get_infinite_recommendations"
             | "match_spotify_track"

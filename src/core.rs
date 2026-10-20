@@ -301,6 +301,37 @@ impl Core {
                 self.library.save()?;
                 Ok(json!([]))
             }
+            "search_library" => {
+                let query = string_arg(args, 0)?.trim().to_lowercase();
+                if query.is_empty() {
+                    return Ok(json!([]));
+                }
+                let data = &self.library.data;
+                let mut found: Vec<Value> = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                let mut candidates: Vec<&Value> = Vec::new();
+                candidates.extend(data.liked_tracks.iter());
+                candidates.extend(data.history.iter());
+                for playlist in data.playlists.values() {
+                    candidates.extend(playlist.tracks.iter());
+                }
+                for track in candidates {
+                    let title = track["title"].as_str().unwrap_or("").to_lowercase();
+                    let artist = track["artist"].as_str().unwrap_or("").to_lowercase();
+                    if !(title.contains(&query) || artist.contains(&query)) {
+                        continue;
+                    }
+                    let id = track["id"].as_str().unwrap_or("");
+                    if id.is_empty() || !seen.insert(id.to_string()) {
+                        continue;
+                    }
+                    found.push(track.clone());
+                    if found.len() >= 40 {
+                        break;
+                    }
+                }
+                Ok(json!(found))
+            }
             "smart_playlist" => {
                 let kind = string_arg(args, 0)?;
                 let data = &self.library.data;

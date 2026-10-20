@@ -28,7 +28,7 @@ fn default_settings() -> Map<String, Value> {
         "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,
         "volume_norm_enabled":true,"direct_paste_enabled":true,"smart_cache_enabled":true,
         "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"light",
-        "language":"uk","accent":"mono","onboarding_completed":false,"import_prompt_disabled":false})
+        "language":"uk","accent":"mono","playback_speed":1.0,"onboarding_completed":false,"import_prompt_disabled":false})
     .as_object()
     .unwrap()
     .clone()
@@ -290,6 +290,10 @@ impl LibraryStore {
         let values = payload.as_object().ok_or("Недійсні налаштування")?;
         for (key, value) in values {
             match key.as_str() {
+                "playback_speed"
+                    if value
+                        .as_f64()
+                        .is_some_and(|v| v.is_finite() && (0.5..=2.0).contains(&v)) => {}
                 "volume"
                     if value
                         .as_f64()

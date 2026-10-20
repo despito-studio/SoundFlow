@@ -68,6 +68,7 @@ struct Shared {
     discord_rpc: Arc<AtomicBool>,
     playback_gate: Mutex<()>,
     offline: Mutex<std::collections::HashSet<String>>,
+    audio_applied: Mutex<(f32, bool)>,
     account_pending: AtomicUsize,
 }
 struct Command {
@@ -119,6 +120,7 @@ impl Application {
                 discord_rpc: Arc::new(AtomicBool::new(true)),
                 playback_gate: Mutex::new(()),
                 offline: Mutex::new(std::collections::HashSet::new()),
+                audio_applied: Mutex::new((1.0, true)),
                 account_pending: AtomicUsize::new(0),
             }),
             sender,
@@ -1261,6 +1263,39 @@ impl Application {
             "theme" | "set-theme" => {
                 self.submit(ui, "update_settings", vec![json!({"theme":payload})], false)
             }
+            "set-speed" => {
+                let speed = payload.parse::<f32>().unwrap_or(1.0).clamp(0.5, 2.0);
+                if let Ok(mut applied) = self.shared.audio_applied.lock() {
+                    applied.0 = speed;
+                }
+                self.audio.set_speed(speed);
+                ui.set_speed(speed);
+                self.submit(
+                    ui,
+                    "update_settings",
+                    vec![json!({"playback_speed": speed})],
+                    true,
+                );
+                ui.set_message(crate::tr!(
+                    ui,
+                    &format!("Швидкість відтворення: {speed}×"),
+                    &format!("Playback speed: {speed}×")
+                ));
+            }
+            "set-volume-norm" => {
+                let enabled = payload == "true";
+                if let Ok(mut applied) = self.shared.audio_applied.lock() {
+                    applied.1 = enabled;
+                }
+                self.audio.set_normalize(enabled);
+                ui.set_volume_norm(enabled);
+                self.submit(
+                    ui,
+                    "update_settings",
+                    vec![json!({"volume_norm_enabled": enabled})],
+                    true,
+                );
+            }
             "set-accent" => {
                 let accent = match payload {
                     "blue" | "violet" | "rose" | "amber" | "green" => payload,
@@ -2209,6 +2244,8 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
     ui.set_close_to_tray(close);
     ui.set_media_hotkeys(hotkeys);
     ui.set_accent(settings["accent"].as_str().unwrap_or("mono").into());
+    ui.set_speed(settings["playback_speed"].as_f64().unwrap_or(1.0) as f32);
+    ui.set_volume_norm(settings["volume_norm_enabled"].as_bool().unwrap_or(true));
     ui.set_infinite_autoplay(settings["infinite_autoplay"].as_bool().unwrap_or(true));
     let discord = settings["discord_rpc_enabled"].as_bool().unwrap_or(true);
     shared.discord_rpc.store(discord, Ordering::Relaxed);
@@ -2761,6 +2798,25 @@ fn apply_response(
     }
     if ui.get_view().as_str() == scope || !matches!(method, "search" | "get_discover_tracks") {
         refresh_models(ui, shared);
+    }
+    {
+        let (speed, normalize) = {
+            let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
+            (
+                data.settings["playback_speed"].as_f64().unwrap_or(1.0) as f32,
+                data.settings["volume_norm_enabled"].as_bool().unwrap_or(true),
+            )
+        };
+        if let Ok(mut applied) = shared.audio_applied.lock() {
+            if (applied.0 - speed).abs() > f32::EPSILON {
+                applied.0 = speed;
+                app.audio.set_speed(speed);
+            }
+            if applied.1 != normalize {
+                applied.1 = normalize;
+                app.audio.set_normalize(normalize);
+            }
+        }
     }
     let stats = shared
         .data

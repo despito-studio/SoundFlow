@@ -16,6 +16,7 @@ export component AppWindow inherits Window {
     background: Theme.canvas;
     default-font-family: "Segoe UI";
     default-font-size: 14px;
+    default-font-weight: 500;
 
     in-out property <string> language: "uk";
     in-out property <string> view: "home";
@@ -46,6 +47,8 @@ export component AppWindow inherits Window {
     in-out property <bool> command-open: false;
     in-out property <string> command-query: "";
     in-out property <string> smart-kind: "recent";
+    in-out property <float> speed: 1.0;
+    in-out property <bool> volume-norm: true;
     in-out property <[CommandRow]> commands;
     in-out property <bool> cloud-signed-in;
     in-out property <string> cloud-name;
@@ -621,6 +624,10 @@ export component AppWindow inherits Window {
                                 SFButton { text: root.infinite-autoplay ? I18n.set-enabled : I18n.set-disabled; label: I18n.set-autoplay + ": " + (root.infinite-autoplay ? I18n.set-enabled : I18n.set-disabled); checkable: true; active: root.infinite-autoplay; clicked => { root.action("set-infinite-autoplay", root.infinite-autoplay ? "false" : "true"); } }
                             }
                             HorizontalLayout {
+                                VerticalLayout { SFText { text: I18n.set-volume-norm; } SFMuted { text: I18n.set-volume-norm-desc; } }
+                                SFButton { text: root.volume-norm ? I18n.set-enabled : I18n.set-disabled; label: I18n.set-volume-norm + ": " + (root.volume-norm ? I18n.set-enabled : I18n.set-disabled); checkable: true; active: root.volume-norm; clicked => { root.action("set-volume-norm", root.volume-norm ? "false" : "true"); } }
+                            }
+                            HorizontalLayout {
                                 VerticalLayout { SFText { text: I18n.set-discord; } SFMuted { text: I18n.set-discord-desc; } }
                                 SFButton { text: root.discord-rpc ? I18n.set-enabled : I18n.set-disabled; label: I18n.set-discord + ": " + (root.discord-rpc ? I18n.set-enabled : I18n.set-disabled); checkable: true; active: root.discord-rpc; clicked => { root.action("set-discord-rpc", root.discord-rpc ? "false" : "true"); } }
                             }
@@ -825,11 +832,19 @@ export component AppWindow inherits Window {
 
         if root.player-options : SFPanel {
             x: player.x + player.width - self.width;
-            y: root.height - 249px; width: 260px; height: 146px;
+            y: root.height - 305px; width: 330px; height: 202px;
             drop-shadow-blur: 20px; drop-shadow-color: #00000018;
             VerticalLayout {
                 padding: 13px; spacing: 8px;
                 HorizontalLayout { SFMuted { width: 61px; text: I18n.player-volume; vertical-alignment: center; } SFSlider { value: root.volume; maximum: 1; step: 0.05; label: I18n.player-volume; changed(value) => { root.set-volume(value); } released(value) => { root.set-volume(value); } } }
+                SFMuted { text: I18n.player-speed; vertical-alignment: center; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    SFButton { text: "0.75×"; horizontal-stretch: 1; checkable: true; active: Math.abs(root.speed - 0.75) < 0.01; clicked => { root.action("set-speed", "0.75"); } }
+                    SFButton { text: "1×"; horizontal-stretch: 1; checkable: true; active: Math.abs(root.speed - 1.0) < 0.01; clicked => { root.action("set-speed", "1"); } }
+                    SFButton { text: "1.25×"; horizontal-stretch: 1; checkable: true; active: Math.abs(root.speed - 1.25) < 0.01; clicked => { root.action("set-speed", "1.25"); } }
+                    SFButton { text: "1.5×"; horizontal-stretch: 1; checkable: true; active: Math.abs(root.speed - 1.5) < 0.01; clicked => { root.action("set-speed", "1.5"); } }
+                }
                 HorizontalLayout { spacing: 7px; SFButton { text: I18n.player-shuffle; checkable: true; active: root.shuffle; clicked => { root.player-action("shuffle"); } } SFButton { text: root.repeat-mode == "one" ? I18n.player-repeat-one : I18n.player-repeat; checkable: true; active: root.repeat-mode != "off"; clicked => { root.player-action("repeat"); } } }
                 SFButton { text: I18n.player-queue-title; flat: true; clicked => { root.player-action("queue"); root.player-options = false; } }
             }
