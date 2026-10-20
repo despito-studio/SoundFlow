@@ -22,6 +22,19 @@ pub const DEFAULT_GOOGLE_CLIENT_ID: &str = "764086051850-6qr4p6gpi6hn506pt8ejuq8
 pub const DEFAULT_GOOGLE_CLIENT_SECRET: &str = "d-FL95Q19q7MQmFpd7hHD0Ty";
 pub const OAUTH_PORT: u16 = 43821;
 
+/// Активна конфігурація Supabase (з cloud.json або змінних середовища).
+static ACTIVE: std::sync::OnceLock<SupabaseConfig> = std::sync::OnceLock::new();
+
+/// Запам'ятовує конфігурацію, щоб глобальні хелпери не ходили у вигаданий
+/// типовий проєкт, коли користувач налаштував власний Supabase.
+pub fn configure(config: SupabaseConfig) {
+    let _ = ACTIVE.set(config);
+}
+
+fn active_config() -> SupabaseConfig {
+    ACTIVE.get().cloned().unwrap_or_default()
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SupabaseConfig {
     pub supabase_url: String,
@@ -147,6 +160,7 @@ pub struct SupabaseClient {
 impl SupabaseClient {
     pub fn new(data_dir: &Path) -> Self {
         let config = SupabaseConfig::load(data_dir);
+        configure(config.clone());
         let client = Client::builder()
             .timeout(Duration::from_secs(15))
             .build()
@@ -499,8 +513,12 @@ fn b64_val(c: u8) -> Result<u8, &'static str> {
 
 /// Global helper to sync an account using default or loaded configuration
 pub fn sync_one_account(user_id: &str, provider: &str, identifier: &str) {
+    let config = active_config();
     let client = Client::builder().timeout(Duration::from_secs(5)).build().unwrap_or_default();
-    let url = format!("{}/rest/v1/connected_accounts", DEFAULT_SUPABASE_URL);
+    let url = format!(
+        "{}/rest/v1/connected_accounts",
+        config.supabase_url.trim_end_matches('/')
+    );
     let body = json!({
         "user_id": user_id,
         "provider": provider,
@@ -511,8 +529,8 @@ pub fn sync_one_account(user_id: &str, provider: &str, identifier: &str) {
 
     let _ = client
         .post(&url)
-        .header("apikey", DEFAULT_SUPABASE_ANON_KEY)
-        .header("Authorization", format!("Bearer {DEFAULT_SUPABASE_ANON_KEY}"))
+        .header("apikey", &config.supabase_anon_key)
+        .header("Authorization", format!("Bearer {}", config.supabase_anon_key))
         .header("Prefer", "resolution=merge-duplicates")
         .json(&body)
         .send();
@@ -520,16 +538,18 @@ pub fn sync_one_account(user_id: &str, provider: &str, identifier: &str) {
 
 /// Global helper to fetch connected accounts from Supabase
 pub fn fetch_connected_accounts(user_id: &str) -> CoreResult<Value> {
+    let config = active_config();
     let client = Client::builder().timeout(Duration::from_secs(5)).build().unwrap_or_default();
     let url = format!(
         "{}/rest/v1/connected_accounts?user_id=eq.{}",
-        DEFAULT_SUPABASE_URL, user_id
+        config.supabase_url.trim_end_matches('/'),
+        user_id
     );
 
     let res = client
         .get(&url)
-        .header("apikey", DEFAULT_SUPABASE_ANON_KEY)
-        .header("Authorization", format!("Bearer {DEFAULT_SUPABASE_ANON_KEY}"))
+        .header("apikey", &config.supabase_anon_key)
+        .header("Authorization", format!("Bearer {}", config.supabase_anon_key))
         .send()
         .map_err(|e| e.to_string())?;
 

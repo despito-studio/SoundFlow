@@ -75,6 +75,9 @@ fn public_profile_exists(provider: &str, identifier: &str) -> bool {
 }
 impl Desktop {
     pub fn open(data_dir: PathBuf, resources: PathBuf, offline: bool) -> CoreResult<Self> {
+        // Конфігурація Supabase з cloud.json стає доступною глобальним хелперам
+        // (синхронізація підключених акаунтів) ще до першого входу.
+        crate::supabase::configure(crate::supabase::SupabaseConfig::load(&data_dir));
         let core = Core::open(data_dir.clone(), offline)?;
         let audio_listening =
             crate::listening::ListeningStore::open(&data_dir.join("listening.sqlite3"))?;
