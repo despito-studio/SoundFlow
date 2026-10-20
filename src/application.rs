@@ -124,7 +124,7 @@ impl Application {
     }
     fn submit(&self, ui: &AppWindow, method: &str, args: Vec<Value>, quiet: bool) {
         if self.shared.account_pending.load(Ordering::SeqCst) > 0 && profile_write(method) {
-            ui.set_message("Зачекайте на завершення зміни профілю".into());
+            ui.set_message(crate::tr!(ui, "Зачекайте на завершення зміни профілю", "Wait for the profile change to finish"));
             return;
         }
         if account_method(method) {
@@ -149,7 +149,7 @@ impl Application {
                 self.shared.pending.fetch_sub(1, Ordering::Relaxed);
                 ui.set_task_loading(self.shared.pending.load(Ordering::Relaxed) > 0);
             }
-            ui.set_message("Зачекайте на завершення поточного запиту".into());
+            ui.set_message(crate::tr!(ui, "Зачекайте на завершення поточного запиту", "Wait for the current request to finish"));
         }
     }
     fn play_track(&self, ui: &AppWindow, id: &str, preview: bool) {
@@ -157,7 +157,7 @@ impl Application {
     }
     fn play_track_in(&self, ui: &AppWindow, id: &str, preview: bool, retain_queue: bool) {
         if self.shared.account_pending.load(Ordering::SeqCst) > 0 {
-            ui.set_message("Зачекайте на завершення зміни профілю".into());
+            ui.set_message(crate::tr!(ui, "Зачекайте на завершення зміни профілю", "Wait for the profile change to finish"));
             return;
         }
         let mut data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
@@ -167,7 +167,7 @@ impl Application {
             .cloned()
             .or_else(|| data.queue.iter().find(|t| text(t, "id") == id).cloned())
         else {
-            ui.set_message("Трек більше недоступний. Оновіть список.".into());
+            ui.set_message(crate::tr!(ui, "Трек більше недоступний. Оновіть список.", "This track is no longer available. Refresh the list."));
             return;
         };
         data.registry.insert(id.to_string(), track.clone());
@@ -183,8 +183,8 @@ impl Application {
             drop(data);
             reset_modal(&ui);
             ui.set_modal_kind("match".into());
-            ui.set_modal_title("Оберіть джерело відтворення".into());
-            ui.set_modal_description("Spotify надає метадані. Відтворення й завантаження потребують вашого вибору версії з YouTube або SoundCloud.".into());
+            ui.set_modal_title(crate::tr!(ui, "Оберіть джерело відтворення", "Choose a playback source"));
+            ui.set_modal_description(crate::tr!(ui, "Spotify надає метадані. Відтворення й завантаження потребують вашого вибору версії з YouTube або SoundCloud.", "Spotify provides metadata. Playback and downloads need a version from YouTube or SoundCloud."));
             ui.set_modal_open(true);
             self.submit(
                 ui,
@@ -498,7 +498,7 @@ impl Application {
                             .pending_track = Some(original.clone());
                         reset_modal(&ui);
                         ui.set_modal_kind("match".into());
-                        ui.set_modal_title("Оберіть версію для завантаження".into());
+                        ui.set_modal_title(crate::tr!(ui, "Оберіть версію для завантаження", "Choose a version to download"));
                         ui.set_modal_open(true);
                         this.submit(
                             &ui,
@@ -527,7 +527,7 @@ impl Application {
                     .pending_track = track;
                 reset_modal(&ui);
                 ui.set_modal_kind("add-to-playlist".into());
-                ui.set_modal_title("Додати до плейлиста".into());
+                ui.set_modal_title(crate::tr!(ui, "Додати до плейлиста", "Add to playlist"));
                 ui.set_modal_open(true);
             }
         });
@@ -603,7 +603,7 @@ impl Application {
                         ));
                         reset_modal(&ui);
                         ui.set_modal_kind("queue".into());
-                        ui.set_modal_title("Черга відтворення".into());
+                        ui.set_modal_title(crate::tr!(ui, "Черга відтворення", "Playback queue"));
                         ui.set_modal_open(true);
                     }
                     _ => {}
@@ -663,7 +663,7 @@ impl Application {
                             .pending_track = track;
                         reset_modal(&ui);
                         ui.set_modal_kind("add-to-playlist".into());
-                        ui.set_modal_title("Зберегти відкриття".into());
+                        ui.set_modal_title(crate::tr!(ui, "Зберегти відкриття", "Save discovery"));
                         ui.set_modal_open(true);
                     }
                     "refresh" => this.submit(
@@ -1070,7 +1070,7 @@ impl Application {
                     ui.get_modal_kind() == "add-to-playlist" && ui.get_modal_open();
                 reset_modal(&ui);
                 ui.set_modal_kind("create-playlist".into());
-                ui.set_modal_title("Новий плейлист".into());
+                ui.set_modal_title(crate::tr!(ui, "Новий плейлист", "New playlist"));
                 ui.set_modal_value("".into());
                 ui.set_modal_open(true);
             }
@@ -1082,12 +1082,12 @@ impl Application {
                     payload
                 };
                 if id.is_empty() {
-                    ui.set_message("Спершу відкрийте плейлист".into());
+                    ui.set_message(crate::tr!(ui, "Спершу відкрийте плейлист", "Open a playlist first"));
                     return;
                 }
                 reset_modal(&ui);
                 ui.set_modal_kind(format!("rename:{id}").into());
-                ui.set_modal_title("Назва плейлиста".into());
+                ui.set_modal_title(crate::tr!(ui, "Назва плейлиста", "Playlist name"));
                 ui.set_modal_value(
                     data.library["playlists"][id]["name"]
                         .as_str()
@@ -1104,16 +1104,18 @@ impl Application {
                     payload.into()
                 };
                 if id.is_empty() {
-                    ui.set_message("Спершу відкрийте плейлист".into());
+                    ui.set_message(crate::tr!(ui, "Спершу відкрийте плейлист", "Open a playlist first"));
                     return;
                 }
                 data.pending_confirm = Some(("delete_playlist".into(), vec![json!(id)]));
                 reset_modal(&ui);
                 ui.set_modal_kind("confirm".into());
-                ui.set_modal_title("Видалити плейлист?".into());
-                ui.set_modal_description(
-                    "Цю дію неможливо скасувати. Самі аудіофайли залишаться на диску.".into(),
-                );
+                ui.set_modal_title(crate::tr!(ui, "Видалити плейлист?", "Delete playlist?"));
+                ui.set_modal_description(crate::tr!(
+                    ui,
+                    "Цю дію неможливо скасувати. Самі аудіофайли залишаться на диску.",
+                    "This cannot be undone. The audio files stay on disk."
+                ));
                 ui.set_modal_open(true);
             }
             "remove-track" => {
@@ -1224,10 +1226,12 @@ impl Application {
             "import-provider" => {
                 reset_modal(&ui);
                 ui.set_modal_kind(format!("import:{payload}").into());
-                ui.set_modal_title("Імпорт музики".into());
-                ui.set_modal_description(
-                    "Вставте публічне посилання на профіль або плейлист".into(),
-                );
+                ui.set_modal_title(crate::tr!(ui, "Імпорт музики", "Import music"));
+                ui.set_modal_description(crate::tr!(
+                    ui,
+                    "Вставте публічне посилання на профіль або плейлист",
+                    "Paste a public profile or playlist link"
+                ));
                 ui.set_modal_value("".into());
                 ui.set_modal_open(true);
             }
@@ -1243,9 +1247,11 @@ impl Application {
                     payload.into()
                 };
                 if provider == "all" || provider == "local" {
-                    ui.set_message(
-                        "Оберіть Spotify, SoundCloud або YouTube для імпорту історії".into(),
-                    );
+                    ui.set_message(crate::tr!(
+                        ui,
+                        "Оберіть Spotify, SoundCloud або YouTube для імпорту історії",
+                        "Choose Spotify, SoundCloud or YouTube to import the history"
+                    ));
                 } else {
                     self.submit(
                         ui,
@@ -1263,34 +1269,34 @@ impl Application {
                 reset_modal(ui);
                 ui.set_modal_kind("subscription-plans".into());
                 if ui.get_subscription_active() {
-                    ui.set_modal_title("Керування підпискою SoundFlow Plus ⭐".into());
-                    ui.set_modal_description("Ваша підписка активна. Ви можете змінити тарифний план або скасувати підписку:".into());
+                    ui.set_modal_title(crate::tr!(ui, "Керування підпискою SoundFlow Plus ⭐", "SoundFlow Plus subscription ⭐"));
+                    ui.set_modal_description(crate::tr!(ui, "Ваша підписка активна. Ви можете змінити тарифний план або скасувати підписку:", "Your subscription is active. Change the plan or cancel it:"));
                 } else {
-                    ui.set_modal_title("Підписка SoundFlow Plus ⭐".into());
-                    ui.set_modal_description("Отримай повний доступ до детальної статистики прослуховування, ритму та улюблених виконавців:".into());
+                    ui.set_modal_title(crate::tr!(ui, "Підписка SoundFlow Plus ⭐", "SoundFlow Plus ⭐"));
+                    ui.set_modal_description(crate::tr!(ui, "Отримай повний доступ до детальної статистики прослуховування, ритму та улюблених виконавців:", "Get full access to detailed listening stats, rhythm and favourite artists:"));
                 }
                 ui.set_modal_open(true);
             }
             "open-promo-modal" => {
                 reset_modal(ui);
                 ui.set_modal_kind("promo-code".into());
-                ui.set_modal_title("Активація промокоду SoundFlow Plus".into());
-                ui.set_modal_description("Введи промокод (наприклад: PLUS, VIP, SOUNDFLOW, FREE) або отримай Plus безкоштовно:".into());
+                ui.set_modal_title(crate::tr!(ui, "Активація промокоду SoundFlow Plus", "Activate a SoundFlow Plus promo code"));
+                ui.set_modal_description(crate::tr!(ui, "Введи промокод (наприклад: PLUS, VIP, SOUNDFLOW, FREE) або отримай Plus безкоштовно:", "Enter a promo code (e.g. PLUS, VIP, SOUNDFLOW, FREE) or unlock Plus for free:"));
                 ui.set_modal_value("".into());
                 ui.set_modal_open(true);
             }
             "open-accounts-modal" => {
                 reset_modal(ui);
                 ui.set_modal_kind("accounts-list".into());
-                ui.set_modal_title("Керування акаунтами SoundFlow".into());
-                ui.set_modal_description("Обери акаунт для перемикання або додай новий:".into());
+                ui.set_modal_title(crate::tr!(ui, "Керування акаунтами SoundFlow", "SoundFlow account management"));
+                ui.set_modal_description(crate::tr!(ui, "Обери акаунт для перемикання або додай новий:", "Choose an account to switch or add a new one:"));
                 ui.set_modal_open(true);
             }
             "open-create-account-modal" => {
                 reset_modal(ui);
                 ui.set_modal_kind("create-account:".into());
-                ui.set_modal_title("Створити новий акаунт".into());
-                ui.set_modal_description("Введи ім'я або email для нового локального акаунта:".into());
+                ui.set_modal_title(crate::tr!(ui, "Створити новий акаунт", "Create a new account"));
+                ui.set_modal_description(crate::tr!(ui, "Введи ім'я або email для нового локального акаунта:", "Enter a name or email for the new local account:"));
                 ui.set_modal_value("".into());
                 ui.set_modal_open(true);
             }
@@ -1350,7 +1356,7 @@ impl Application {
                 reset_modal(ui);
                 ui.set_modal_kind("about".into());
                 ui.set_modal_title("SoundFlow".into());
-                ui.set_modal_description("Нативний музичний застосунок. Rust · Slint · локальне аудіо. Статистика Plus потребує налаштованого сервера й активної підписки.".into());
+                ui.set_modal_description(crate::tr!(ui, "Нативний музичний застосунок. Rust · Slint · локальне аудіо. Статистика Plus потребує налаштованого сервера й активної підписки.", "Native music application. Rust · Slint · local audio. Plus statistics need a configured server and an active subscription."));
                 ui.set_modal_open(true);
             }
             "open-connected-accounts" => {
@@ -1378,11 +1384,11 @@ impl Application {
             value if value.starts_with("import:") => {
                 reset_modal(ui);
                 ui.set_modal_kind(value.into());
-                ui.set_modal_title("Імпорт музики".into());
+                ui.set_modal_title(crate::tr!(ui, "Імпорт музики", "Import music"));
                 ui.set_modal_value("".into());
                 ui.set_modal_open(true);
             }
-            _ => ui.set_message("Ця дія недоступна".into()),
+            _ => ui.set_message(crate::tr!(ui, "Ця дія недоступна", "This action is not available")),
         }
     }
     fn modal_submit(&self, ui: &AppWindow, value: &str) {
@@ -2160,9 +2166,11 @@ fn apply_response(
                         data.registry.insert(text(&track, "id"), track);
                     }
                     if data.matches.is_empty() {
-                        ui.set_modal_error(
-                            "Не знайдено доступних версій. Спробуйте пошук вручну.".into(),
-                        );
+                        ui.set_modal_error(crate::tr!(
+                            ui,
+                            "Не знайдено доступних версій. Спробуйте пошук вручну.",
+                            "No playable versions found. Try searching manually."
+                        ));
                     }
                 }
                 "get_downloads" => {
@@ -2179,7 +2187,7 @@ fn apply_response(
                             data.pending_track = Some(value.clone());
                             reset_modal(&ui);
                             ui.set_modal_kind("match".into());
-                            ui.set_modal_title("Оберіть версію для завантаження".into());
+                            ui.set_modal_title(crate::tr!(ui, "Оберіть версію для завантаження", "Choose a version to download"));
                             ui.set_modal_open(true);
                             app.submit(
                                 ui,
@@ -2191,7 +2199,7 @@ fn apply_response(
                             app.submit(ui, "download_track", vec![value], false);
                         }
                     } else {
-                        ui.set_message("Не вдалося розпізнати музичне посилання".into());
+                        ui.set_message(crate::tr!(ui, "Не вдалося розпізнати музичне посилання", "Could not recognise that music link"));
                     }
                 }
                 "get_listening_stats" => {
@@ -2309,11 +2317,11 @@ fn apply_response(
                         }
                     }
                     close_modal(&ui);
-                    ui.set_message("Плейлист створено".into());
+                    ui.set_message(crate::tr!(ui, "Плейлист створено", "Playlist created"));
                 }
                 "rename_playlist" | "import_external_profile" => {
                     close_modal(&ui);
-                    ui.set_message("Бібліотеку оновлено".into());
+                    ui.set_message(crate::tr!(ui, "Бібліотеку оновлено", "Library updated"));
                 }
                 "detect_connected_accounts" => {
                     ui.set_modal_busy(false);
@@ -2750,7 +2758,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _keys = crate::media_keys::start(app.shared.media_hotkeys.clone(), move |action| {
         let _ = weak.upgrade_in_event_loop(move |ui| {
             if action == "registration-error" {
-                ui.set_message("Деякі медіаклавіші зайняті іншим застосунком".into());
+                ui.set_message(crate::tr!(ui, "Деякі медіаклавіші зайняті іншим застосунком", "Some media hotkeys are taken by another app"));
             } else {
                 ui.invoke_player_action(action.into());
             }
