@@ -31,8 +31,13 @@ pub fn configure(config: SupabaseConfig) {
     let _ = ACTIVE.set(config);
 }
 
-fn active_config() -> SupabaseConfig {
+/// Поточна конфігурація (використовується модулями синхронізації).
+pub fn current_config() -> SupabaseConfig {
     ACTIVE.get().cloned().unwrap_or_default()
+}
+
+fn active_config() -> SupabaseConfig {
+    current_config()
 }
 
 /// Додає заголовки доступу Supabase. Нові publishable-ключі (sb_publishable_…)

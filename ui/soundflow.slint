@@ -40,6 +40,7 @@ export component AppWindow inherits Window {
     in-out property <bool> media-hotkeys: true;
     in-out property <string> profile-name: "Слухач";
     in-out property <bool> cloud-configured;
+    in-out property <bool> supabase-linked: false;
     in-out property <bool> cloud-signed-in;
     in-out property <string> cloud-name;
     in-out property <string> cloud-email;
@@ -631,7 +632,7 @@ export component AppWindow inherits Window {
                                     SFButton { text: I18n.set-switch-account-btn; clicked => { root.action("open-accounts-modal", ""); } }
                                     SFButton { text: I18n.set-sign-out; flat: true; danger: true; clicked => { root.sign-out(); } }
                                 }
-                                if root.cloud-configured : HorizontalLayout {
+                                if root.cloud-configured || root.supabase-linked : HorizontalLayout {
                                     spacing: 8px;
                                     SFButton { text: I18n.set-sync-push; enabled: !root.task-loading; clicked => { root.sync-library("push"); } }
                                     SFButton { text: I18n.set-sync-pull; enabled: !root.task-loading; clicked => { root.sync-library("pull"); } }

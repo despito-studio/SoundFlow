@@ -464,6 +464,30 @@ impl Desktop {
                     json!({"memory_mb":system.process(pid).map(|p| p.memory() as f64 / 1024.0 / 1024.0),"runtime":"native","provider_isolated":true}),
                 )
             }
+            "sync_library" if crate::supabase_auth::remote_user_id().is_some() => {
+                let mode = string_arg(args, 0).unwrap_or("push").to_string();
+                if mode == "pull" || mode == "merge" {
+                    let remote = crate::supabase_sync::pull()?;
+                    let Some((payload, revision)) = remote else {
+                        return Ok(json!({"ok": true, "mode": mode, "revision": 0, "empty": true}));
+                    };
+                    let mut core = self.core.lock().map_err(lock_error)?;
+                    let result = core.local_rpc(
+                        "import_library",
+                        &[json!(payload), json!(mode == "merge")],
+                    )?;
+                    core.refresh_local_files();
+                    Ok(json!({"ok": true, "mode": mode, "revision": revision, "result": result}))
+                } else {
+                    let payload = {
+                        let mut core = self.core.lock().map_err(lock_error)?;
+                        core.local_rpc("export_library", &[])?
+                    };
+                    let text = payload.as_str().unwrap_or("").to_string();
+                    let revision = crate::supabase_sync::push(&text)?;
+                    Ok(json!({"ok": true, "mode": "push", "revision": revision}))
+                }
+            }
             "update_playback_state" => Ok(json!(true)),
             _ => self
                 .core

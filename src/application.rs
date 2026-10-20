@@ -1986,6 +1986,7 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
             .into(),
     );
     ui.set_cloud_configured(cloud["configured"] == true);
+    ui.set_supabase_linked(crate::supabase_auth::current().is_some());
     ui.set_cloud_signed_in(cloud["signed_in"] == true);
     ui.set_cloud_url(cloud["base_url"].as_str().unwrap_or("").into());
     ui.set_cloud_name(cloud["user"]["name"].as_str().unwrap_or("").into());
@@ -2444,6 +2445,27 @@ fn apply_response(
                     }
                     ui.set_message(msg.into());
                     app.submit(ui, "_refresh", vec![], true);
+                }
+                "sync_library" => {
+                    let revision = value["revision"].as_u64().unwrap_or(0);
+                    let push = value["mode"].as_str() == Some("push");
+                    let empty = value["empty"].as_bool() == Some(true);
+                    let message = if empty {
+                        crate::tr!(ui, "У хмарі ще немає збереженої бібліотеки", "There is no library snapshot in the cloud yet")
+                    } else if push {
+                        crate::tr!(
+                            ui,
+                            &format!("Бібліотеку надіслано в хмару (ревізія {revision})"),
+                            &format!("Library pushed to the cloud (revision {revision})")
+                        )
+                    } else {
+                        crate::tr!(
+                            ui,
+                            &format!("Бібліотеку отримано з хмари (ревізія {revision})"),
+                            &format!("Library pulled from the cloud (revision {revision})")
+                        )
+                    };
+                    ui.set_message(message);
                 }
                 "get_infinite_recommendations" => {
                     data.radio_fetching = false;

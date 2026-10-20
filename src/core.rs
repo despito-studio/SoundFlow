@@ -306,7 +306,9 @@ impl Core {
             )
             .map_err(|e| e.to_string())?)),
             "import_library" => {
-                let result = self.library.import_json(string_arg(args, 0)?, false)?;
+                // Другий аргумент — режим злиття (використовується синхронізацією).
+                let merge = arg(args, 1).as_bool().unwrap_or(false);
+                let result = self.library.import_json(string_arg(args, 0)?, merge)?;
                 self.refresh_local_files();
                 Ok(result)
             }

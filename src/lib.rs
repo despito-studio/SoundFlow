@@ -13,6 +13,7 @@ pub mod platform;
 pub mod playback;
 pub mod supabase;
 pub mod supabase_auth;
+pub mod supabase_sync;
 pub mod update;
 pub mod verification;
 
