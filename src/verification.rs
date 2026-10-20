@@ -225,12 +225,12 @@ fn verify(
             5 => {
                 ui.set_dark(false); ui.set_view("flow".into());
                 let artwork = slint::Image::load_from_path(&resources_for_ui.join("resources/covers/7.jpg")).unwrap_or_default();
-                let row = TrackRow { id:"verification".into(),title:"Show Me How".into(),artist:"Men I Trust".into(),source:"soundcloud".into(),duration:"3:35".into(),liked:false,artwork };
+                let row = TrackRow { id:"verification".into(),title:"Show Me How".into(),artist:"Men I Trust".into(),source:"soundcloud".into(),duration:"3:35".into(),liked:false,offline:false,artwork };
                 ui.set_flow_track(row.clone()); ui.set_flow_count(12); ui.set_current_track(row); ui.set_duration(215.0); ui.set_position(42.0);
             }
             6 => {
                 ui.set_view("search".into()); ui.set_search_query("SoundFlow".into());
-                let row = TrackRow { id:"local-verification".into(),title:"Native audio".into(),artist:"SoundFlow".into(),source:"local".into(),duration:"0:03".into(),liked:true,artwork:slint::Image::default() };
+                let row = TrackRow { id:"local-verification".into(),title:"Native audio".into(),artist:"SoundFlow".into(),source:"local".into(),duration:"0:03".into(),liked:true,offline:false,artwork:slint::Image::default() };
                 ui.set_tracks(ModelRc::from(Rc::new(VecModel::from(vec![row]))));
             }
             7 => { ui.set_modal_kind("create-playlist".into()); ui.set_modal_title("Новий плейлист".into()); ui.set_modal_open(true); }

@@ -28,6 +28,7 @@ struct UiData {
     settings: Value,
     registry: HashMap<String, Value>,
     search: Vec<Value>,
+    smart: Vec<Value>,
     home: Vec<Value>,
     flow: Vec<Value>,
     flow_index: usize,
@@ -66,6 +67,7 @@ struct Shared {
     media_hotkeys: Arc<AtomicBool>,
     discord_rpc: Arc<AtomicBool>,
     playback_gate: Mutex<()>,
+    offline: Mutex<std::collections::HashSet<String>>,
     account_pending: AtomicUsize,
 }
 struct Command {
@@ -116,6 +118,7 @@ impl Application {
                 media_hotkeys: Arc::new(AtomicBool::new(true)),
                 discord_rpc: Arc::new(AtomicBool::new(true)),
                 playback_gate: Mutex::new(()),
+                offline: Mutex::new(std::collections::HashSet::new()),
                 account_pending: AtomicUsize::new(0),
             }),
             sender,
@@ -1003,6 +1006,7 @@ impl Application {
         self.submit(ui, "_refresh", vec![], true);
         self.submit(ui, "restore_session", vec![], true);
         self.submit(ui, "get_subscription_status", vec![], true);
+        self.submit(ui, "get_downloads", vec![], true);
         // Тихо перевіряємо, чи на GitHub уже є новіший реліз.
         let weak = ui.as_weak();
         std::thread::spawn(move || {
@@ -1117,6 +1121,15 @@ impl Application {
                 ui.set_commands(rows(filtered));
             }
             "run-command" => self.run_command(ui, payload),
+            "smart-playlist" => {
+                let kind = match payload {
+                    "top" | "forgotten" => payload,
+                    _ => "recent",
+                };
+                ui.set_view("smart".into());
+                ui.set_smart_kind(kind.into());
+                self.submit(ui, "smart_playlist", vec![json!(kind)], false);
+            }
             "create-playlist" | "create_playlist" => {
                 self.shared
                     .data
@@ -1189,6 +1202,30 @@ impl Application {
                         vec![json!(id), json!(payload)],
                         false,
                     );
+                }
+            }
+            "download-playlist" => {
+                let tracks = {
+                    let data = self.shared.data.lock().unwrap_or_else(|e| e.into_inner());
+                    if data.selected_playlist.is_empty() {
+                        Vec::new()
+                    } else {
+                        values(&data.library["playlists"][&data.selected_playlist]["tracks"])
+                    }
+                };
+                if tracks.is_empty() {
+                    ui.set_message(crate::tr!(ui, "Спершу відкрийте плейлист", "Open a playlist first"));
+                } else {
+                    let mut queued = 0usize;
+                    for track in tracks.iter().take(200) {
+                        self.submit(ui, "download_track", vec![track.clone()], true);
+                        queued += 1;
+                    }
+                    ui.set_message(crate::tr!(
+                        ui,
+                        &format!("У чергу завантажень додано {queued} треків"),
+                        &format!("Queued {queued} tracks for download")
+                    ));
                 }
             }
             "play-playlist" => {
@@ -1992,6 +2029,11 @@ fn track_row(value: &Value, shared: &Shared) -> TrackRow {
             SharedString::default()
         },
         liked,
+        offline: shared
+            .offline
+            .lock()
+            .map(|set| set.contains(value["id"].as_str().unwrap_or("")))
+            .unwrap_or(false),
         artwork: artwork(value, &shared.cache),
     }
 }
@@ -2000,6 +2042,7 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
         let data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
         let tracks = match ui.get_view().as_str() {
             "search" => data.search.clone(),
+            "smart" => data.smart.clone(),
             "likes" | "liked" => values(&data.library["liked_tracks"]),
             "home" => {
                 if data.home.is_empty() {
@@ -2293,6 +2336,9 @@ fn apply_response(
         Ok(value) => {
             let mut data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
             match method {
+                "smart_playlist" => {
+                    data.smart = values(&value);
+                }
                 "search" => {
                     if ui.get_search_query().as_str() == args[0].as_str().unwrap_or("")
                         && ui.get_search_source().as_str() == args[1].as_str().unwrap_or("all")
@@ -2337,6 +2383,18 @@ fn apply_response(
                         values(&value)
                     } else {
                         values(&value["jobs"])
+                    };
+                    if let Ok(mut set) = shared.offline.lock() {
+                        set.clear();
+                        for job in &data.downloads {
+                            if job["status"].as_str() == Some("completed") {
+                                if let Some(id) = job["track"]["id"].as_str() {
+                                    if !id.is_empty() {
+                                        set.insert(id.to_string());
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 "resolve_direct_url" => {

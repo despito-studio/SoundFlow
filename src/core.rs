@@ -301,6 +301,51 @@ impl Core {
                 self.library.save()?;
                 Ok(json!([]))
             }
+            "smart_playlist" => {
+                let kind = string_arg(args, 0)?;
+                let data = &self.library.data;
+                let tracks: Vec<Value> = match kind {
+                    "recent" => data.liked_tracks.iter().take(80).cloned().collect(),
+                    "top" => data
+                        .playlists
+                        .get("frequently_played")
+                        .map(|playlist| playlist.tracks.clone())
+                        .unwrap_or_default(),
+                    "forgotten" => {
+                        let mut last: std::collections::HashMap<String, f64> =
+                            std::collections::HashMap::new();
+                        for track in &data.history {
+                            if let (Some(id), Some(played)) =
+                                (track["id"].as_str(), track["played_at"].as_f64())
+                            {
+                                let entry = last.entry(id.to_string()).or_insert(played);
+                                if played > *entry {
+                                    *entry = played;
+                                }
+                            }
+                        }
+                        let cutoff = crate::library::now() - 30.0 * 24.0 * 3600.0;
+                        let mut items: Vec<(f64, Value)> = data
+                            .liked_tracks
+                            .iter()
+                            .map(|track| {
+                                let played = track["id"]
+                                    .as_str()
+                                    .and_then(|id| last.get(id).copied())
+                                    .unwrap_or(0.0);
+                                (played, track.clone())
+                            })
+                            .filter(|(played, _)| *played < cutoff)
+                            .collect();
+                        items.sort_by(|a, b| {
+                            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        items.into_iter().map(|(_, track)| track).take(80).collect()
+                    }
+                    _ => return Err("Невідома добірка".into()),
+                };
+                Ok(json!(tracks))
+            }
             "export_library" => Ok(json!(serde_json::to_string_pretty(
                 &self.library.snapshot()
             )

@@ -45,6 +45,7 @@ export component AppWindow inherits Window {
     in-out property <color> player-accent: transparent;
     in-out property <bool> command-open: false;
     in-out property <string> command-query: "";
+    in-out property <string> smart-kind: "recent";
     in-out property <[CommandRow]> commands;
     in-out property <bool> cloud-signed-in;
     in-out property <string> cloud-name;
@@ -196,21 +197,22 @@ export component AppWindow inherits Window {
             SFMuted { x: 19px; y: 80px; width: parent.width - 30px; height: 16px; text: I18n.side-library; font-size: 10px; font-weight: 600; }
             VerticalLayout {
                 x: 10px; y: 103px; width: parent.width - 20px;
-                height: 198px; spacing: 6px;
+                height: 244px; spacing: 6px;
                 SFButton { width: root.side-width - 20px; left-align: true; text: I18n.side-liked; label: I18n.playlist-likes; flat: true; checkable: true; active: root.view == "liked"; clicked => { root.navigate("liked"); } }
                 SFButton { width: root.side-width - 20px; left-align: true; text: I18n.side-playlists; flat: true; checkable: true; active: root.view == "playlists" || root.view == "playlist"; clicked => { root.navigate("playlists"); } }
                 SFButton { width: root.side-width - 20px; left-align: true; text: I18n.side-downloads; flat: true; checkable: true; active: root.view == "downloads"; clicked => { root.navigate("downloads"); } }
                 SFButton { width: root.side-width - 20px; left-align: true; text: I18n.side-history; flat: true; checkable: true; active: root.view == "history"; clicked => { root.navigate("history"); } }
+                SFButton { width: root.side-width - 20px; left-align: true; text: I18n.side-smart; flat: true; checkable: true; active: root.view == "smart"; clicked => { root.action("smart-playlist", root.smart-kind); } }
             }
-            Rectangle { x: 18px; y: 319px; width: parent.width - 36px; height: 1px; background: Theme.line; }
+            Rectangle { x: 18px; y: 365px; width: parent.width - 36px; height: 1px; background: Theme.line; }
             HorizontalLayout {
-                x: 18px; y: 335px; width: parent.width - 30px; height: 34px;
+                x: 18px; y: 381px; width: parent.width - 30px; height: 34px;
                 SFMuted { text: I18n.side-your-playlists; font-size: 10px; font-weight: 600; vertical-alignment: center; }
                 SFButton { text: "+"; label: I18n.side-create-playlist; icon: true; flat: true; width: 34px; height: 34px; clicked => { root.action("create-playlist", ""); } }
             }
             for playlist[index] in root.playlists : SFButton {
                 visible: index < 3 && root.height > 640px;
-                x: 10px; y: 377px + index * 40px;
+                x: 10px; y: 423px + index * 40px;
                 width: parent.width - 20px; height: 36px;
                 text: playlist.name; label: (I18n.is-uk ? "Плейлист «" : "Playlist \"") + playlist.name + (I18n.is-uk ? "», " : "\", ") + playlist.count + " " + I18n.side-tracks-suffix;
                 flat: true;
@@ -272,11 +274,17 @@ export component AppWindow inherits Window {
                 flow(genre) => { root.flow-action("genre:" + genre); root.navigate("flow"); }
             }
 
-            if root.view == "search" || root.view == "liked" || root.view == "playlist" || root.view == "history" : Rectangle {
+            if root.view == "search" || root.view == "liked" || root.view == "playlist" || root.view == "history" || root.view == "smart" : Rectangle {
                 x: 0px; y: 0px; width: parent.width; height: parent.height;
-                private property <length> list-top: root.view == "search" ? 150px : 97px;
-                SFTitle { x: 0px; y: 0px; width: parent.width; height: 36px; text: root.view == "search" ? I18n.view-title-search : root.view == "liked" ? I18n.view-title-liked : root.view == "history" ? I18n.view-title-history : I18n.view-title-playlist; }
+                private property <length> list-top: root.view == "search" ? 150px : root.view == "smart" ? 128px : 97px;
+                SFTitle { x: 0px; y: 0px; width: parent.width; height: 36px; text: root.view == "search" ? I18n.view-title-search : root.view == "liked" ? I18n.view-title-liked : root.view == "smart" ? I18n.smart-title : root.view == "history" ? I18n.view-title-history : I18n.view-title-playlist; }
                 SFMuted { x: 0px; y: 40px; width: parent.width; height: 21px; text: root.view == "search" ? I18n.search-hint : root.tracks.length + " " + I18n.tracks-in-library; }
+                if root.view == "smart" : HorizontalLayout {
+                    x: 0px; y: 77px; width: parent.width; height: 40px; spacing: 6px;
+                    SFButton { text: I18n.smart-recent; checkable: true; active: root.smart-kind == "recent"; clicked => { root.action("smart-playlist", "recent"); } }
+                    SFButton { text: I18n.smart-top; checkable: true; active: root.smart-kind == "top"; clicked => { root.action("smart-playlist", "top"); } }
+                    SFButton { text: I18n.smart-forgotten; checkable: true; active: root.smart-kind == "forgotten"; clicked => { root.action("smart-playlist", "forgotten"); } }
+                }
                 if root.view == "search" : HorizontalLayout {
                     x: 0px; y: 77px; width: parent.width; height: 43px; spacing: 8px;
                     SFField { horizontal-stretch: 1; text <=> root.search-query; label: I18n.search-field-label; placeholder: I18n.search-field-ph; input-type: InputType.search; focus-request: root.search-focus-request; accepted(query) => { root.search(query, root.search-source); } }
@@ -288,6 +296,7 @@ export component AppWindow inherits Window {
                 if root.view == "playlist" : HorizontalLayout {
                     x: 0px; y: 58px; width: parent.width; height: 37px; spacing: 6px; alignment: start;
                     SFButton { text: I18n.playlist-play-all; primary: true; enabled: root.tracks.length > 0; clicked => { root.action("play-playlist", ""); } }
+                    SFButton { text: I18n.playlist-download-all; enabled: root.tracks.length > 0 && !root.task-loading; clicked => { root.action("download-playlist", ""); } }
                     SFButton { text: I18n.playlist-rename; flat: true; clicked => { root.action("rename-playlist", ""); } }
                     SFButton { text: I18n.playlist-delete; flat: true; danger: true; clicked => { root.action("delete-playlist", ""); } }
                 }

@@ -27,6 +27,7 @@ export component TrackItem inherits Rectangle {
             SFText { text: root.track.title; font-weight: 700; }
             SFMuted { text: root.track.artist + "  ·  " + root.track.source; }
         }
+        if root.track.offline : SFMuted { text: "↓"; font-size: 13px; color: Theme.accent-color; vertical-alignment: center; }
         SFMuted { width: 48px; text: root.track.duration; horizontal-alignment: right; vertical-alignment: center; }
         SFButton { text: "▶"; label: "Відтворити «" + root.track.title + "»"; icon: true; flat: true; modal-control: root.modal-control; clicked => { root.play(root.track.id); } }
         SFButton { text: root.track.liked ? "♥" : "♡"; label: root.track.liked ? "Прибрати «" + root.track.title + "» з улюбленого" : "Вподобати «" + root.track.title + "»"; icon: true; flat: true; checkable: true; active: root.track.liked; accent: root.track.liked; modal-control: root.modal-control; clicked => { root.like(root.track.id); } }
