@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $git = Join-Path $root 'output\toolchain\mingit\cmd\git.exe'
-$repo = 'feodaI/SoundFlow'
+$repo = 'despito-studio/SoundFlow'
 $tag = 'v3.5.0'
 $zip = Join-Path $root 'dist\SoundFlow-3.5.0-windows-x64.zip'
 $sums = Join-Path $root 'dist\SHA256SUMS-3.5.0.txt'
