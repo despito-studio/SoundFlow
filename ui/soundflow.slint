@@ -101,7 +101,7 @@ export component AppWindow inherits Window {
     callback github-sign-in();
     callback connect-account(string, string);
     callback import-account(string);
-    callback import-all-accounts();
+    callback import-all-accounts(string);
 
     private property <length> side-width: root.width < 1000px ? 170px : 188px;
     private property <length> workspace-width: root.width - side-width;
@@ -128,6 +128,17 @@ export component AppWindow inherits Window {
     changed reduced-motion => { Theme.reduced-motion = root.reduced-motion; }
     changed modal-open => { Theme.modal-open = root.modal-open; if !root.modal-open { app-focus.focus(); } }
     forward-focus: app-focus;
+
+    // Тост із повідомленням автоматично зникає через 3 секунди після появи.
+    toast-timer := Timer {
+        interval: 3s;
+        running: false;
+        triggered() => { root.message = ""; }
+    }
+    changed message => {
+        toast-timer.running = false;
+        if root.message != "" { toast-timer.running = true; }
+    }
 
     app-focus := FocusScope {
         x: 0px; y: 0px; width: root.width; height: root.height;
@@ -806,7 +817,7 @@ export component AppWindow inherits Window {
         SFPanel {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
             width: min(root.modal-kind == "connected-accounts" || root.modal-kind == "subscription-plans" || root.modal-kind == "accounts-list" ? 820px : 650px, parent.width - 40px);
-            height: min(root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? 555px : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
+            height: min(root.modal-kind == "import-prompt" ? 400px : root.modal-kind == "connected-accounts" ? 440px : root.modal-kind == "subscription-plans" ? 555px : root.modal-kind == "accounts-list" ? 470px : root.modal-kind == "match" || root.modal-kind == "queue" || root.modal-kind == "add-to-playlist" ? 490px : root.modal-kind == "about" ? 430px : root.modal-kind == "promo-code" ? 330px : 310px, parent.height - 50px);
             drop-shadow-blur: 30px; drop-shadow-color: #00000025;
             accessible-role: region; accessible-label: root.modal-title;
             TouchArea { }
@@ -941,6 +952,25 @@ export component AppWindow inherits Window {
                         font-weight: 600;
                         font-size: 13px;
                     }
+                }
+                if root.modal-kind == "import-prompt" : VerticalLayout {
+                    spacing: 9px;
+                    if root.yt-found : HorizontalLayout {
+                        spacing: 10px; alignment: center;
+                        Rectangle { width: 10px; height: 10px; border-radius: 5px; background: #FF0000; }
+                        SFText { text: "YouTube Music" + (root.yt-account != "" ? "  ·  " + root.yt-account : ""); font-size: 14px; }
+                    }
+                    if root.sc-found : HorizontalLayout {
+                        spacing: 10px; alignment: center;
+                        Rectangle { width: 10px; height: 10px; border-radius: 5px; background: #FF5500; }
+                        SFText { text: "SoundCloud" + (root.sc-account != "" ? "  ·  " + root.sc-account : ""); font-size: 14px; }
+                    }
+                    if root.sp-found : HorizontalLayout {
+                        spacing: 10px; alignment: center;
+                        Rectangle { width: 10px; height: 10px; border-radius: 5px; background: #1DB954; }
+                        SFText { text: "Spotify" + (root.sp-account != "" ? "  ·  " + root.sp-account : ""); font-size: 14px; }
+                    }
+                    SFMuted { text: I18n.acc-import-prompt-hint; font-size: 12px; wrap: word-wrap; }
                 }
                 if root.modal-kind == "about" : VerticalLayout {
                     spacing: 15px;
@@ -1085,7 +1115,7 @@ export component AppWindow inherits Window {
                         SFButton { text: I18n.set-google-login; primary: true; modal-control: true; clicked => { root.google-sign-in(); } }
                     }
                 }
-                if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" && root.modal-kind != "confirm" && root.modal-kind != "connected-accounts" && root.modal-kind != "subscription-plans" && root.modal-kind != "promo-code" && root.modal-kind != "accounts-list" : SFField {
+                if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" && root.modal-kind != "confirm" && root.modal-kind != "connected-accounts" && root.modal-kind != "import-prompt" && root.modal-kind != "subscription-plans" && root.modal-kind != "promo-code" && root.modal-kind != "accounts-list" : SFField {
                     text <=> root.modal-value; label: root.modal-title; placeholder: I18n.modal-enter-value-ph; modal-control: true; enabled: !root.modal-busy;
                     accepted(value) => { root.modal-submit(value); }
                 }
@@ -1097,10 +1127,17 @@ export component AppWindow inherits Window {
                         primary: true;
                         modal-control: true;
                         enabled: !root.modal-busy && (root.yt-found || root.sc-found || root.sp-found);
-                        clicked => { root.import-all-accounts(); }
+                        clicked => { root.import-all-accounts(""); }
                     }
-                    dialog-cancel := SFButton { text: root.modal-kind == "connected-accounts" ? I18n.acc-confirm-btn : root.modal-kind == "about" || root.modal-kind == "subscription-plans" || root.modal-kind == "accounts-list" ? I18n.modal-done : I18n.modal-cancel; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-action("close", ""); } }
-                    if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" && root.modal-kind != "connected-accounts" && root.modal-kind != "subscription-plans" && root.modal-kind != "promo-code" && root.modal-kind != "accounts-list" : SFButton { text: root.modal-busy ? I18n.modal-wait : root.modal-kind == "confirm" ? I18n.modal-confirm : I18n.modal-save; primary: true; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-submit(root.modal-value); } }
+                    if root.modal-kind == "import-prompt" : SFButton {
+                        text: I18n.acc-import-now;
+                        primary: true;
+                        modal-control: true;
+                        enabled: !root.modal-busy;
+                        clicked => { root.import-all-accounts((root.yt-found ? "youtube," : "") + (root.sc-found ? "soundcloud," : "") + (root.sp-found ? "spotify," : "")); }
+                    }
+                    dialog-cancel := SFButton { text: root.modal-kind == "import-prompt" ? I18n.acc-import-later : root.modal-kind == "connected-accounts" ? I18n.acc-confirm-btn : root.modal-kind == "about" || root.modal-kind == "subscription-plans" || root.modal-kind == "accounts-list" ? I18n.modal-done : I18n.modal-cancel; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-action("close", ""); } }
+                    if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" && root.modal-kind != "connected-accounts" && root.modal-kind != "import-prompt" && root.modal-kind != "subscription-plans" && root.modal-kind != "promo-code" && root.modal-kind != "accounts-list" : SFButton { text: root.modal-busy ? I18n.modal-wait : root.modal-kind == "confirm" ? I18n.modal-confirm : I18n.modal-save; primary: true; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-submit(root.modal-value); } }
                     if root.modal-kind == "add-to-playlist" : SFButton { text: I18n.modal-create-playlist-btn; primary: true; modal-control: true; clicked => { root.modal-action("create-playlist", ""); } }
                 }
             }

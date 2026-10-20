@@ -21,4 +21,7 @@ __pycache__/
 /backend/
 /installer/
 /build/
+/downloads/
+/releases/
+/backups/
 /scripts/portable-msvc.py

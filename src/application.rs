@@ -823,6 +823,7 @@ impl Application {
                                 Ok(Ok(session)) => {
                                     let _ = slint::invoke_from_event_loop(move || {
                                         if let Some(ui) = weak_ui.upgrade() {
+                                            crate::platform::focus_main_window();
                                             ui.set_message(if ui.get_language() == "en" {
                                                 "Google authorized! Connecting music accounts...".into()
                                             } else {
@@ -941,7 +942,7 @@ impl Application {
         });
         let this = self.clone();
         let weak = ui.as_weak();
-        ui.on_import_all_accounts(move || {
+        ui.on_import_all_accounts(move |providers| {
             if let Some(ui) = weak.upgrade() {
                 ui.set_modal_busy(true);
                 let is_en = ui.get_language() == "en";
@@ -950,7 +951,12 @@ impl Application {
                 } else {
                     "Імпортуємо треки з усіх знайдених акаунтів…".into()
                 });
-                this.submit(&ui, "sync_connected_accounts", vec![], false);
+                let args = if providers.is_empty() {
+                    vec![]
+                } else {
+                    vec![json!(providers.as_str())]
+                };
+                this.submit(&ui, "sync_connected_accounts", args, false);
             }
         });
         if let Ok(history) = self.desktop.call("get_search_history", &[]) {
@@ -2074,6 +2080,11 @@ fn apply_response(
             if method == "_play" {
                 ui.set_loading(false);
             }
+            // Якщо імпорт запускали з питання після Google-входу — прибираємо діалог,
+            // текст помилки вже показано в тості.
+            if matches!(method, "sync_connected_accounts") && ui.get_modal_kind() == "import-prompt" {
+                close_modal(ui);
+            }
         }
         Ok(value) => {
             let mut data = shared.data.lock().unwrap_or_else(|e| e.into_inner());
@@ -2237,20 +2248,14 @@ fn apply_response(
                     if is_stats {
                         app.submit(ui, "get_listening_stats", args, false);
                     }
-                    ui.set_modal_busy(true);
-                    ui.set_modal_kind("connected-accounts".into());
-                    ui.set_modal_title(if is_en {
-                        "Connecting Music Accounts...".into()
-                    } else {
-                        "Підключення музичних акаунтів...".into()
-                    });
-                    ui.set_modal_description(if is_en {
-                        "Checking YouTube Music, SoundCloud, and Spotify accounts for your Google profile...".into()
-                    } else {
-                        "Перевіряємо наявність акаунтів YouTube Music, SoundCloud та Spotify для вашого Google-профілю...".into()
-                    });
-                    ui.set_modal_open(true);
-                    app.submit(ui, "detect_connected_accounts", vec![json!(email), json!(name)], false);
+                    // Жодних проміжних вікон: тихо перевіряємо, чи прив'язані до цього
+                    // Google-акаунта музичні сервіси, і питаємо про імпорт лише якщо так.
+                    app.submit(
+                        ui,
+                        "detect_connected_accounts",
+                        vec![json!(email), json!(name), json!("prompt")],
+                        true,
+                    );
                 }
                 "create_playlist" => {
                     if data.add_to_new_playlist {
@@ -2286,20 +2291,71 @@ fn apply_response(
                     ui.set_sp_found(sp_found);
                     ui.set_sp_account(sp_acc.into());
                     ui.set_accounts_import_status("".into());
-                    reset_modal(&ui);
-                    ui.set_modal_kind("connected-accounts".into());
                     let is_en = ui.get_language() == "en";
-                    ui.set_modal_title(if is_en {
-                        "Connected Music Accounts (Google Cloud + Supabase)".into()
+                    let prompt = args.get(2).and_then(|v| v.as_str()) == Some("prompt");
+                    if prompt {
+                        // Питаємо про імпорт лише тоді, коли сервіси справді знайдені
+                        // через Google-профіль, а не підключені вручну раніше.
+                        let mut found: Vec<String> = Vec::new();
+                        if yt_found && value["youtube"]["google_linked"].as_bool() == Some(true) {
+                            found.push(if yt_acc.is_empty() {
+                                "YouTube Music".to_string()
+                            } else {
+                                format!("YouTube Music · {yt_acc}")
+                            });
+                        }
+                        if sc_found && value["soundcloud"]["google_linked"].as_bool() == Some(true) {
+                            found.push(if sc_acc.is_empty() {
+                                "SoundCloud".to_string()
+                            } else {
+                                format!("SoundCloud · {sc_acc}")
+                            });
+                        }
+                        if sp_found && value["spotify"]["google_linked"].as_bool() == Some(true) {
+                            found.push(if sp_acc.is_empty() {
+                                "Spotify".to_string()
+                            } else {
+                                format!("Spotify · {sp_acc}")
+                            });
+                        }
+                        if found.is_empty() {
+                            ui.set_message(if is_en {
+                                "No music accounts linked to your Google profile. You can connect them in Settings.".into()
+                            } else {
+                                "Не знайдено музичних акаунтів, прив'язаних до Google. Підключіть їх у Налаштуваннях.".into()
+                            });
+                        } else {
+                            let list = found.join(", ");
+                            let description = if is_en {
+                                format!("These accounts are linked to your Google profile: {list}. Import their music into SoundFlow?")
+                            } else {
+                                format!("До вашого Google-профілю прив'язані: {list}. Імпортувати цю музику в SoundFlow?")
+                            };
+                            reset_modal(&ui);
+                            ui.set_modal_kind("import-prompt".into());
+                            ui.set_modal_title(if is_en {
+                                "Import your music library?".into()
+                            } else {
+                                "Імпортувати музичну бібліотеку?".into()
+                            });
+                            ui.set_modal_description(description.into());
+                            ui.set_modal_open(true);
+                        }
                     } else {
-                        "Підключені музичні акаунти (Google Cloud + Supabase)".into()
-                    });
-                    ui.set_modal_description(if is_en {
-                        "SoundFlow checked your Google profile for music services. Confirm these accounts or connect separate accounts for each service:".into()
-                    } else {
-                        "SoundFlow перевірив прив'язку сервісів до вашого Google-профілю. Підтвердіть їх або підключіть окремі акаунти для кожного сервісу:".into()
-                    });
-                    ui.set_modal_open(true);
+                        reset_modal(&ui);
+                        ui.set_modal_kind("connected-accounts".into());
+                        ui.set_modal_title(if is_en {
+                            "Connected Music Accounts (Google Cloud + Supabase)".into()
+                        } else {
+                            "Підключені музичні акаунти (Google Cloud + Supabase)".into()
+                        });
+                        ui.set_modal_description(if is_en {
+                            "SoundFlow checked your Google profile for music services. Confirm these accounts or connect separate accounts for each service:".into()
+                        } else {
+                            "SoundFlow перевірив прив'язку сервісів до вашого Google-профілю. Підтвердіть їх або підключіть окремі акаунти для кожного сервісу:".into()
+                        });
+                        ui.set_modal_open(true);
+                    }
                 }
                 "set_connected_account" => {
                     ui.set_modal_busy(false);
@@ -2318,6 +2374,9 @@ fn apply_response(
                         format!("Успішно імпортовано {total} треків у бібліотеку!")
                     };
                     ui.set_accounts_import_status(msg.clone().into());
+                    if ui.get_modal_kind() == "import-prompt" {
+                        close_modal(ui);
+                    }
                     ui.set_message(msg.into());
                     app.submit(ui, "_refresh", vec![], true);
                 }

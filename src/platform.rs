@@ -193,6 +193,15 @@ unsafe fn raise_window(pid: u32) {
     }
 }
 
+/// Best-effort повернення вікна SoundFlow на передній план — використовується
+/// після успішного входу через браузер, щоб одразу перекинути користувача в застосунок.
+pub fn focus_main_window() {
+    #[cfg(windows)]
+    unsafe {
+        raise_window(std::process::id());
+    }
+}
+
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
         if self.primary {

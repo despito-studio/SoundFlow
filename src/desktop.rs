@@ -128,6 +128,20 @@ impl Desktop {
                 let mut core = self.core.lock().map_err(lock_error)?;
                 let saved = core.local_rpc("get_connected_accounts", &[])?;
                 let mut merged = detected.clone();
+                // Позначаємо сервіси, які справді знайдені через Google-профіль
+                // (а не підключені вручну раніше): за цим прапорцем застосунок
+                // питає про імпорт бібліотеки одразу після входу.
+                if let Some(obj) = merged.as_object_mut() {
+                    for info in obj.values_mut() {
+                        let found = info["found"].as_bool() == Some(true);
+                        let identified = info["identifier"]
+                            .as_str()
+                            .is_some_and(|id| !id.trim().is_empty());
+                        if let Some(map) = info.as_object_mut() {
+                            map.insert("google_linked".into(), json!(found && identified));
+                        }
+                    }
+                }
                 if let Some(saved_obj) = saved.as_object() {
                     for (provider, val) in saved_obj {
                         if let Some(id_str) = val.as_str() {
@@ -194,13 +208,18 @@ impl Desktop {
                 };
                 let mut details = serde_json::Map::new();
                 let mut total = 0;
-                let target_provider = arg(args, 0).as_str().filter(|s| !s.is_empty());
+                // Можна передати один сервіс ("spotify") або список ("youtube,soundcloud").
+                let targets: Vec<&str> = arg(args, 0)
+                    .as_str()
+                    .unwrap_or("")
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 if let Some(accounts) = accounts.as_object() {
                     for (provider, identifier) in accounts {
-                        if let Some(target) = target_provider {
-                            if provider != target {
-                                continue;
-                            }
+                        if !targets.is_empty() && !targets.iter().any(|t| *t == provider.as_str()) {
+                            continue;
                         }
                         if identifier.as_str().is_none_or(str::is_empty) {
                             continue;

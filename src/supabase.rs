@@ -723,8 +723,14 @@ fn run_oauth_listener(
 }
 
 fn send_html_response(stream: &mut TcpStream, success: bool, msg: &str, email: Option<&str>) {
-    let title = if success { "✓ Авторизація Google успішна" } else { "Помилка авторизації" };
-    let color = if success { "#22c55e" } else { "#ef4444" };
+    // Успішний вхід не показує жодної сторінки: вкладка браузера закривається сама,
+    // тож користувач одразу повертається у SoundFlow.
+    if success {
+        send_oauth_done_page(stream);
+        return;
+    }
+    let title = "Помилка авторизації";
+    let color = "#ef4444";
     let email_badge = if let Some(e) = email {
         format!(r#"<div style="display:inline-block;padding:6px 14px;background:#1e293b;border:1px solid #334155;border-radius:20px;color:#38bdf8;font-size:14px;margin-bottom:16px;">📧 {}</div>"#, e)
     } else {
@@ -746,14 +752,48 @@ p {{ color: #94a3b8; font-size: 15px; margin: 0 0 20px; line-height: 1.6; }}
   <h1>{title}</h1>
   {email_badge}
   <p>{msg}</p>
-  <p style="font-size:13px;color:#64748b;">SoundFlow автоматично підключає ваші музичні сервіси. Це вікно зараз закриється.</p>
+  <p style="font-size:13px;color:#64748b;">Поверніться у SoundFlow і спробуйте ще раз. Цю вкладку можна закрити.</p>
 </div>
-<script>setTimeout(() => window.close(), 1600);</script>
 </body>
 </html>"#
     );
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+/// Мінімальна службова сторінка після успішного входу: вкладка браузера
+/// закривається одразу, без вікна "Авторизація успішна" та без зайвих кліків.
+fn send_oauth_done_page(stream: &mut TcpStream) {
+    let body = r#"<!DOCTYPE html>
+<html lang="uk">
+<head><meta charset="utf-8"><meta name="color-scheme" content="dark"><title>SoundFlow</title>
+<style>
+html, body { margin: 0; height: 100%; background: #090d16; color: #64748b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+body { display: flex; align-items: center; justify-content: center; }
+#hint { font-size: 14px; opacity: 0; transition: opacity .25s ease; }
+body[data-stay="1"] #hint { opacity: 1; }
+</style></head>
+<body><div id="hint">Готово. Цю вкладку можна закрити.</div>
+<script>
+(function () {
+  var tries = 0;
+  function closeTab() {
+    try { window.close(); } catch (e) {}
+    try { if (window.opener) { window.opener.focus(); } } catch (e) {}
+    if (++tries < 3) { setTimeout(closeTab, 120); }
+    else { setTimeout(function () { document.body.setAttribute('data-stay', '1'); }, 300); }
+  }
+  closeTab();
+})();
+</script>
+</body>
+</html>"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
@@ -801,10 +841,12 @@ p { color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.6; }
       }).then(r => r.json()).then(res => {
         document.getElementById('loader').style.display = 'none';
         if (res.success) {
-          document.getElementById('title').innerText = '✓ Успішний вхід!';
-          document.getElementById('title').style.color = '#22c55e';
-          document.getElementById('msg').innerText = 'Google-профіль ' + (res.email ? '(' + res.email + ') ' : '') + 'підключено. Поверніться до SoundFlow!';
-          setTimeout(() => window.close(), 1600);
+          document.getElementById('loader').style.display = 'none';
+          document.getElementById('title').innerText = 'Готово';
+          document.getElementById('msg').innerText = 'Цю вкладку можна закрити.';
+          window.close();
+          setTimeout(() => window.close(), 120);
+          setTimeout(() => window.close(), 400);
         } else {
           document.getElementById('title').innerText = 'Помилка валідації токена';
           document.getElementById('title').style.color = '#ef4444';
