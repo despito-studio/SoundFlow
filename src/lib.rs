@@ -12,6 +12,7 @@ mod media_keys;
 pub mod platform;
 pub mod playback;
 pub mod supabase;
+pub mod supabase_auth;
 pub mod update;
 pub mod verification;
 

@@ -812,6 +812,7 @@ impl Application {
         ui.on_sign_out(move || {
             if let Some(ui) = weak.upgrade() {
                 this.stop_for_account();
+                crate::supabase_auth::clear(&crate::platform::data_dir());
                 this.submit(&ui, "sign_out", vec![], false);
             }
         });
@@ -828,6 +829,8 @@ impl Application {
 
                 let data_dir = crate::platform::data_dir();
                 let supabase_client = crate::supabase::SupabaseClient::new(&data_dir);
+                let auth_config = supabase_client.config.clone();
+                let auth_dir = data_dir.clone();
                 let app = this.clone();
                 let weak_ui = ui.as_weak();
 
@@ -838,6 +841,16 @@ impl Application {
                         std::thread::spawn(move || {
                             match rx.recv_timeout(Duration::from_secs(120)) {
                                 Ok(Ok(session)) => {
+                                    // Google id_token міняємо на сесію Supabase Auth: далі
+                                    // запити до PostgREST ідуть з Bearer-токеном і RLS
+                                    // перевіряє auth.uid().
+                                    if let Some(id_token) = session.provider_token.as_deref() {
+                                        let _ = crate::supabase_auth::sign_in_with_id_token(
+                                            &auth_config,
+                                            &auth_dir,
+                                            id_token,
+                                        );
+                                    }
                                     let _ = slint::invoke_from_event_loop(move || {
                                         if let Some(ui) = weak_ui.upgrade() {
                                             crate::platform::focus_main_window();

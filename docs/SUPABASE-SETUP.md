@@ -84,3 +84,46 @@ powershell -ExecutionPolicy Bypass -File scripts\configure-supabase.ps1 `
 Поточна схема дозволяє anon-ключу читати та писати `connected_accounts` (так працює клієнт: він не має Supabase-сесії).
 Ключ не дає доступу до інших таблиць, але будь-хто з бінарника може прочитати цю таблицю.
 Для публічного релізу варто перейти на Supabase Auth (`signInWithIdToken`) і політики `auth.uid() = user_id` — це окремий етап.
+
+## Крок 6. Supabase Auth (сесії та RLS)
+
+Після базового підключення можна перейти на справжні сесії: тоді таблиця доступна лише власнику рядків.
+
+### 6.1. Увімкнути Google-провайдера
+
+Supabase → **Authentication → Providers → Google**:
+
+- **Client ID** і **Client Secret** — від твого Google OAuth client (Web application).
+- Redirect URL, який показує Supabase, не використовується: застосунок обмінює Google `id_token` напряму (`grant_type=id_token`).
+
+### 6.2. Створити Google OAuth client
+
+Google Cloud Console → APIs & Services → Credentials → Create credentials → OAuth client ID:
+
+- Type: **Web application**
+- Authorized redirect URIs: `http://127.0.0.1:43821/callback`
+- OAuth consent screen: scopes `openid`, `email`, `profile`
+
+Той самий Client ID/Secret прописати в застосунку:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\configure-supabase.ps1 `
+  -Url "https://<project>.supabase.co" `
+  -AnonKey "sb_publishable_..." `
+  -GoogleClientId "..." -GoogleClientSecret "..."
+```
+
+### 6.3. Виконати міграцію
+
+SQL Editor → вставити `supabase/migrations/001_auth_rls.sql` → Run.
+
+Міграція перестворює `connected_accounts` з `user_id uuid` і політиками `auth.uid() = user_id`.
+Доступ для `anon` прибирається повністю.
+
+### 6.4. Перевірка
+
+1. Увійти через Google у застосунку.
+2. У `%APPDATA%\app.soundflow.desktop\session.json` має з'явитися сесія (access/refresh токени, uuid).
+3. У таблиці — рядок із `user_id`, що дорівнює uuid з `session.json`.
+4. Спроба прочитати таблицю publishable-ключем без сесії має дати порожній результат або 401.
+

@@ -42,6 +42,12 @@ fn with_api_key(
     config: &SupabaseConfig,
 ) -> reqwest::blocking::RequestBuilder {
     let request = request.header("apikey", &config.supabase_anon_key);
+    // Пріоритет — сесія Supabase Auth: тоді RLS бачить auth.uid().
+    if let Some(session) = crate::supabase_auth::current() {
+        if !session.access_token.is_empty() {
+            return request.header("Authorization", format!("Bearer {}", session.access_token));
+        }
+    }
     if config.supabase_anon_key.trim_start().starts_with("ey") {
         request.header(
             "Authorization",
