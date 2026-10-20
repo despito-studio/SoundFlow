@@ -23,7 +23,8 @@ Project → **SQL Editor** → New query → вставити вміст [supaba
 Project Settings → **API**:
 
 - **Project URL** — `https://<project-ref>.supabase.co`
-- **anon public** ключ — довгий JWT, що починається з `eyJ...`
+- **anon public** ключ — або новий `sb_publishable_…`, або класичний JWT `eyJ...`
+  (обидва публічні; застосунок надсилає їх лише в заголовку `apikey`, без `Authorization`, якщо це не JWT)
 
 Ці два значення публічні: вони й так вшиваються в клієнтські застосунки. Їх можна передавати розробнику.
 

@@ -35,6 +35,23 @@ fn active_config() -> SupabaseConfig {
     ACTIVE.get().cloned().unwrap_or_default()
 }
 
+/// Додає заголовки доступу Supabase. Нові publishable-ключі (sb_publishable_…)
+/// не є JWT, тому їх не можна відправляти в Authorization — PostgREST відхилить.
+fn with_api_key(
+    request: reqwest::blocking::RequestBuilder,
+    config: &SupabaseConfig,
+) -> reqwest::blocking::RequestBuilder {
+    let request = request.header("apikey", &config.supabase_anon_key);
+    if config.supabase_anon_key.trim_start().starts_with("ey") {
+        request.header(
+            "Authorization",
+            format!("Bearer {}", config.supabase_anon_key),
+        )
+    } else {
+        request
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SupabaseConfig {
     pub supabase_url: String,
@@ -301,14 +318,14 @@ impl SupabaseClient {
             "updated_at": chrono::Utc::now().to_rfc3339()
         });
 
-        let _ = self
-            .client
-            .post(&url)
-            .header("apikey", &self.config.supabase_anon_key)
-            .header("Authorization", format!("Bearer {}", self.config.supabase_anon_key))
-            .header("Prefer", "resolution=merge-duplicates")
-            .json(&body)
-            .send();
+        let _ = with_api_key(
+            self.client
+                .post(&url)
+                .header("Prefer", "resolution=merge-duplicates")
+                .json(&body),
+            &self.config,
+        )
+        .send();
     }
 
     /// Fetches connected accounts from Supabase `connected_accounts` table
@@ -322,11 +339,7 @@ impl SupabaseClient {
             user_id
         );
 
-        let res = self
-            .client
-            .get(&url)
-            .header("apikey", &self.config.supabase_anon_key)
-            .header("Authorization", format!("Bearer {}", self.config.supabase_anon_key))
+        let res = with_api_key(self.client.get(&url), &self.config)
             .send()
             .map_err(|e| e.to_string())?;
 
@@ -527,13 +540,14 @@ pub fn sync_one_account(user_id: &str, provider: &str, identifier: &str) {
         "updated_at": chrono::Utc::now().to_rfc3339()
     });
 
-    let _ = client
-        .post(&url)
-        .header("apikey", &config.supabase_anon_key)
-        .header("Authorization", format!("Bearer {}", config.supabase_anon_key))
-        .header("Prefer", "resolution=merge-duplicates")
-        .json(&body)
-        .send();
+    let _ = with_api_key(
+        client
+            .post(&url)
+            .header("Prefer", "resolution=merge-duplicates")
+            .json(&body),
+        &config,
+    )
+    .send();
 }
 
 /// Global helper to fetch connected accounts from Supabase
@@ -546,10 +560,7 @@ pub fn fetch_connected_accounts(user_id: &str) -> CoreResult<Value> {
         user_id
     );
 
-    let res = client
-        .get(&url)
-        .header("apikey", &config.supabase_anon_key)
-        .header("Authorization", format!("Bearer {}", config.supabase_anon_key))
+    let res = with_api_key(client.get(&url), &config)
         .send()
         .map_err(|e| e.to_string())?;
 

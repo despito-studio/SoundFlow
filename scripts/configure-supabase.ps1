@@ -11,11 +11,11 @@ $ErrorActionPreference = 'Stop'
 if ($Url -notmatch '^https://[a-z0-9-]+\.supabase\.co/?$') {
     throw "Очікується https://<project>.supabase.co, отримано: $Url"
 }
-if ($AnonKey -notmatch '^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.') {
-    throw 'Це не схоже на anon-ключ Supabase (JWT).'
+if ($AnonKey -match '^sb_secret_' -or $AnonKey -match 'service_role') {
+    throw 'Це секретний ключ (service_role / sb_secret_) — його не можна використовувати в застосунку.'
 }
-if ($AnonKey -match 'service_role') {
-    throw 'Це service_role ключ — його не можна використовувати в застосунку.'
+if ($AnonKey -notmatch '^(sb_publishable_[A-Za-z0-9_-]+|ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.)') {
+    throw 'Очікується publishable-ключ (sb_publishable_…) або anon JWT (eyJ…).'
 }
 
 if (-not $DataDir) { $DataDir = Join-Path $env:APPDATA 'app.soundflow.desktop' }
