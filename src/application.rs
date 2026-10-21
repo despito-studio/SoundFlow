@@ -1850,6 +1850,10 @@ impl Application {
                                 let playing_track = state.track.unwrap_or(Value::Null);
                                 ui.set_player_accent(accent_for(&playing_track, &shared.cache));
                                 ui.set_current_track(track_row(&playing_track, &shared));
+                ui.invoke_track_changed(
+                    text(&playing_track, "title").into(),
+                    text(&playing_track, "artist").into(),
+                );
                                 ui.set_playing(state.playing);
                                 ui.set_loading(state.loading);
                                 ui.set_position(state.position as f32);
@@ -2319,6 +2323,7 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
         if let Some(value) = value {
             ui.set_player_accent(accent_for(&value, &shared.cache));
     ui.set_current_track(track_row(&value, shared));
+        ui.invoke_track_changed(text(&value, "title").into(), text(&value, "artist").into());
         }
     }
 }

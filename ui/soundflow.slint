@@ -45,6 +45,7 @@ export component AppWindow inherits Window {
     in-out property <string> accent: "mono";
     in-out property <string> scheme: "light";
     in-out property <string> desktop-icon: "default";
+    property <int> now-frame: 0;
     in-out property <color> player-accent: transparent;
     in-out property <bool> command-open: false;
     in-out property <string> command-query: "";
@@ -107,6 +108,7 @@ export component AppWindow inherits Window {
     callback seek(float);
     callback set-volume(float);
     callback action(string, string);
+    callback track-changed(string, string);
     callback modal-submit(string);
     callback modal-action(string, string);
     callback sign-in(string, string);
@@ -160,6 +162,12 @@ export component AppWindow inherits Window {
     changed message => {
         toast-timer.running = false;
         if root.message != "" { toast-timer.running = true; }
+    }
+
+    now-timer := Timer {
+        interval: 170ms;
+        running: root.playing && root.current-track.id != "";
+        triggered => { root.now-frame = Math.mod(root.now-frame + 1, 4); }
     }
 
     app-focus := FocusScope {
@@ -792,6 +800,33 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+
+        now-playing-pill := Rectangle {
+            visible: root.current-track.id != "" && root.player-options == false;
+            x: root.width - self.width - 22px;
+            y: root.height - 93px - 46px;
+            width: min(300px, root.width - 40px);
+            height: 38px;
+            border-radius: 19px;
+            background: Theme.raised;
+            border-width: 1px; border-color: Theme.line;
+            drop-shadow-blur: 16px; drop-shadow-offset-y: 2px; drop-shadow-color: #00000020;
+            horizontal-stretch: 0;
+            HorizontalLayout {
+                padding-left: 14px; padding-right: 16px; spacing: 8px; alignment: center;
+                HorizontalLayout { spacing: 2px; alignment: center; vertical-stretch: 0; height: 16px;
+                    Rectangle { width: 3px; border-radius: 1.5px; background: Theme.accent-color; height: 5px + 3px * Math.mod(root.now-frame, 4); }
+                    Rectangle { width: 3px; border-radius: 1.5px; background: Theme.accent-color; height: 5px + 3px * Math.mod(root.now-frame + 1, 4); }
+                    Rectangle { width: 3px; border-radius: 1.5px; background: Theme.accent-color; height: 5px + 3px * Math.mod(root.now-frame + 3, 4); }
+                }
+                VerticalLayout {
+                    spacing: 1px; alignment: center;
+                    SFText { text: root.current-track.title; font-size: 12px; font-weight: 600; overflow: elide; }
+                    SFMuted { text: root.current-track.artist; font-size: 10px; overflow: elide; }
+                }
+            }
+            TouchArea { clicked => { root.player-action("toggle"); } }
         }
 
         player := Rectangle {
