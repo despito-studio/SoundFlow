@@ -147,9 +147,24 @@ impl Desktop {
                 }
                 Ok(json!(results))
             }
+            "get_infinite_recommendations" => {
+                let result = self
+                    .provider
+                    .lock()
+                    .map_err(lock_error)?
+                    .call("get_infinite_recommendations", args);
+                match result {
+                    Ok(value) if value.as_array().is_some_and(|list| !list.is_empty()) => Ok(value),
+                    _ => {
+                        // Рушій часто не має рекомендацій; підбираємо схожі треки самі.
+                        let limit = arg(args, 1).as_u64().unwrap_or(15) as usize;
+                        let tracks = crate::soundcloud::related_tracks(arg(args, 0), limit);
+                        Ok(json!(tracks))
+                    }
+                }
+            }
             "resolve_direct_url"
             | "get_similar_tracks"
-            | "get_infinite_recommendations"
             | "match_spotify_track"
             | "download_track"
             | "get_downloads"

@@ -1,20 +1,60 @@
 // Shared native controls. All interactive elements expose keyboard and Windows
 // accessibility actions; the monochrome palette is independent of OS accents.
 export global Theme {
-    in-out property <bool> dark: false;
+    in-out property <string> scheme: "light";
+    in-out property <bool> dark: scheme != "light";
     in-out property <bool> reduced-motion: false;
     in-out property <bool> modal-open: false;
-    out property <color> canvas: dark ? #161616 : #fafaf9;
-    out property <color> sidebar: dark ? #1d1d1d : #f0f0ee;
-    out property <color> surface: dark ? #242424 : #ffffff;
-    out property <color> raised: dark ? #2d2d2d : #f4f4f2;
-    out property <color> hover: dark ? #363636 : #eaeae7;
-    out property <color> ink: dark ? #f7f7f5 : #191919;
-    out property <color> muted: dark ? #b8b8b3 : #62625d;
-    out property <color> line: dark ? #41413f : #deded9;
-    // Interactive boundaries need greater contrast than decorative separators.
-    out property <color> control-line: dark ? #8c8c86 : #8a8a84;
-    out property <color> inverse: dark ? #161616 : #ffffff;
+    out property <color> canvas:
+        scheme == "rose" ? #140a10 :
+        scheme == "violet" ? #0f0b16 :
+        scheme == "ocean" ? #08111a :
+        (dark ? #161616 : #fafaf9);
+    out property <color> sidebar:
+        scheme == "rose" ? #1b0e15 :
+        scheme == "violet" ? #151020 :
+        scheme == "ocean" ? #0c1722 :
+        (dark ? #1d1d1d : #f0f0ee);
+    out property <color> surface:
+        scheme == "rose" ? #241220e6 :
+        scheme == "violet" ? #1c1528e6 :
+        scheme == "ocean" ? #102030e6 :
+        (dark ? #242424 : #ffffff);
+    out property <color> raised:
+        scheme == "rose" ? #2e1728e6 :
+        scheme == "violet" ? #251c34e6 :
+        scheme == "ocean" ? #15293ce6 :
+        (dark ? #2d2d2d : #f4f4f2);
+    out property <color> hover:
+        scheme == "rose" ? #3a1e33e6 :
+        scheme == "violet" ? #2f2442e6 :
+        scheme == "ocean" ? #1b344ae6 :
+        (dark ? #363636 : #eaeae7);
+    out property <color> ink:
+        scheme == "rose" ? #f7e9f1 :
+        scheme == "violet" ? #efe9f7 :
+        scheme == "ocean" ? #e6f1f7 :
+        (dark ? #f7f7f5 : #191919);
+    out property <color> muted:
+        scheme == "rose" ? #b99aae :
+        scheme == "violet" ? #a99fbe :
+        scheme == "ocean" ? #94a9b8 :
+        (dark ? #b8b8b3 : #62625d);
+    out property <color> line:
+        scheme == "rose" ? #47263d :
+        scheme == "violet" ? #3a3050 :
+        scheme == "ocean" ? #26404f :
+        (dark ? #41413f : #deded9);
+    out property <color> control-line:
+        scheme == "rose" ? #8a5f7a :
+        scheme == "violet" ? #7c6f9a :
+        scheme == "ocean" ? #5f8496 :
+        (dark ? #8c8c86 : #8a8a84);
+    out property <color> inverse:
+        scheme == "rose" ? #140a10 :
+        scheme == "violet" ? #0f0b16 :
+        scheme == "ocean" ? #08111a :
+        (dark ? #161616 : #ffffff);
     out property <color> danger: dark ? #f4aaa2 : #9d2b21;
     // Акцент: "mono" зберігає початковий монохромний вигляд.
     in-out property <string> accent: "mono";

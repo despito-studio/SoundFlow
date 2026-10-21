@@ -109,6 +109,71 @@ fn playlist_track(raw: &Value) -> Option<Value> {
     }))
 }
 
+fn has_cyrillic(value: &str) -> bool {
+    value.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c))
+}
+
+fn search_tracks(client: &reqwest::blocking::Client, id: &str, query: &str, limit: u32) -> Vec<Value> {
+    let Ok(response) = client
+        .get("https://api-v2.soundcloud.com/search/tracks")
+        .query(&[("q", query), ("limit", &limit.to_string()), ("client_id", id)])
+        .send()
+    else {
+        return Vec::new();
+    };
+    let Ok(page) = response.json::<Value>() else {
+        return Vec::new();
+    };
+    page["collection"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(playlist_track)
+        .collect()
+}
+
+/// Схожі треки, коли вбудований рушій не дав рекомендацій.
+/// Орієнтуємось на виконавця й назву поточного треку та тримаємо ту саму мову.
+pub fn related_tracks(context: &Value, limit: usize) -> Vec<Value> {
+    let Ok(client) = http() else { return Vec::new() };
+    let Ok(id) = client_id() else { return Vec::new() };
+    let seed = context["current_track"].clone();
+    let title = seed["title"].as_str().unwrap_or("").to_string();
+    let artist = seed["artist"].as_str().unwrap_or("").to_string();
+    let seed_id = seed["id"].as_str().unwrap_or("").to_string();
+    let seed_cyrillic = has_cyrillic(&title) || has_cyrillic(&artist);
+
+    let mut candidates: Vec<Value> = Vec::new();
+    if !artist.is_empty() {
+        candidates.extend(search_tracks(&client, &id, &artist, 30));
+    }
+    if !title.is_empty() {
+        candidates.extend(search_tracks(&client, &id, &title, 15));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut matched: Vec<Value> = Vec::new();
+    let mut rest: Vec<Value> = Vec::new();
+    for track in candidates {
+        let track_id = track["id"].as_str().unwrap_or("").to_string();
+        if track_id.is_empty() || track_id == seed_id || !seen.insert(track_id) {
+            continue;
+        }
+        let same_script = (has_cyrillic(track["title"].as_str().unwrap_or(""))
+            || has_cyrillic(track["artist"].as_str().unwrap_or("")))
+            == seed_cyrillic;
+        if same_script {
+            matched.push(track);
+        } else {
+            rest.push(track);
+        }
+    }
+    matched.extend(rest);
+    matched.truncate(limit.max(1));
+    matched
+}
+
 /// Один публічний плейлист за посиланням: (назва, треки).
 pub fn playlist_tracks(url: &str) -> Result<(String, Vec<Value>), String> {
     let client = http()?;
@@ -220,6 +285,31 @@ mod tests {
             assert!(!name.is_empty());
             assert!(tracks.iter().all(|track| track["source"] == "soundcloud"));
         }
+    }
+
+    #[test]
+    #[ignore = "requires network access to soundcloud.com"]
+    fn related_tracks_keep_the_language() {
+        let seed = json!({
+            "id": "yt_seed",
+            "title": "Официантка",
+            "artist": "Папин Олимпос",
+            "source": "youtube"
+        });
+        let tracks = related_tracks(&json!({ "current_track": seed }), 10);
+        assert!(!tracks.is_empty(), "expected related tracks");
+        let cyrillic = tracks
+            .iter()
+            .filter(|track| {
+                has_cyrillic(track["title"].as_str().unwrap_or(""))
+                    || has_cyrillic(track["artist"].as_str().unwrap_or(""))
+            })
+            .count();
+        assert!(
+            cyrillic * 2 >= tracks.len(),
+            "expected mostly cyrillic tracks, got {cyrillic}/{}",
+            tracks.len()
+        );
     }
 
     #[test]

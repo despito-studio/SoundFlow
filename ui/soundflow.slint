@@ -43,6 +43,7 @@ export component AppWindow inherits Window {
     in-out property <bool> cloud-configured;
     in-out property <bool> supabase-linked: false;
     in-out property <string> accent: "mono";
+    in-out property <string> scheme: "light";
     in-out property <color> player-accent: transparent;
     in-out property <bool> command-open: false;
     in-out property <string> command-query: "";
@@ -134,15 +135,16 @@ export component AppWindow inherits Window {
     private property <bool> app-menu;
     private property <int> search-focus-request;
     init => {
-        Theme.dark = root.dark; Theme.reduced-motion = root.reduced-motion; Theme.modal-open = root.modal-open;
+        Theme.scheme = root.scheme; Theme.reduced-motion = root.reduced-motion; Theme.modal-open = root.modal-open;
         Theme.accent = root.accent;
         Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
         I18n.locale = root.language;
     }
     changed language => { I18n.locale = root.language; }
-    changed dark => { Theme.dark = root.dark; Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
+    changed dark => { Theme.scheme = root.scheme; Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
     changed reduced-motion => { Theme.reduced-motion = root.reduced-motion; }
     changed accent => { Theme.accent = root.accent; }
+    changed scheme => { Theme.scheme = root.scheme; Palette.color-scheme = root.scheme == "light" ? ColorScheme.light : ColorScheme.dark; }
     changed current-track => { if !Theme.reduced-motion { player.track-fading = true; } }
     changed modal-open => { Theme.modal-open = root.modal-open; if !root.modal-open { app-focus.focus(); } }
     forward-focus: app-focus;
@@ -608,8 +610,11 @@ export component AppWindow inherits Window {
                             }
                             HorizontalLayout {
                                 SFText { text: I18n.set-theme; vertical-alignment: center; }
-                                SFButton { text: I18n.set-theme-light; checkable: true; active: !root.dark; clicked => { root.action("set-theme", "light"); } }
-                                SFButton { text: I18n.set-theme-dark; checkable: true; active: root.dark; clicked => { root.action("set-theme", "dark"); } }
+                                SFButton { text: I18n.set-theme-light; checkable: true; active: root.scheme == "light"; clicked => { root.scheme = "light"; root.action("set-theme", "light"); } }
+                                SFButton { text: I18n.set-theme-dark; checkable: true; active: root.scheme == "dark"; clicked => { root.scheme = "dark"; root.action("set-theme", "dark"); } }
+                                SFButton { text: I18n.set-theme-rose; checkable: true; active: root.scheme == "rose"; clicked => { root.scheme = "rose"; root.action("set-theme", "rose"); } }
+                                SFButton { text: I18n.set-theme-violet; checkable: true; active: root.scheme == "violet"; clicked => { root.scheme = "violet"; root.action("set-theme", "violet"); } }
+                                SFButton { text: I18n.set-theme-ocean; checkable: true; active: root.scheme == "ocean"; clicked => { root.scheme = "ocean"; root.action("set-theme", "ocean"); } }
                             }
                             HorizontalLayout {
                                 spacing: 8px;

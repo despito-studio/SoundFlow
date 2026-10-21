@@ -301,7 +301,7 @@ impl LibraryStore {
                 "repeat" if ["off", "all", "one"].contains(&value.as_str().unwrap_or_default()) => {
                 }
                 "theme"
-                    if ["light", "dark", "system"]
+                    if ["light", "dark", "rose", "violet", "ocean", "system"]
                         .contains(&value.as_str().unwrap_or_default()) => {}
                 "language"
                     if ["uk", "en"].contains(&value.as_str().unwrap_or_default()) => {}

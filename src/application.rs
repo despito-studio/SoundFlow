@@ -1261,7 +1261,12 @@ impl Application {
                 self.submit(ui, "clear_history", vec![], false);
             }
             "theme" | "set-theme" => {
-                self.submit(ui, "update_settings", vec![json!({"theme":payload})], false)
+                let scheme = match payload {
+                    "dark" | "rose" | "violet" | "ocean" => payload,
+                    _ => "light",
+                };
+                ui.set_scheme(scheme.into());
+                self.submit(ui, "update_settings", vec![json!({"theme":scheme})], false)
             }
             "set-speed" => {
                 let speed = payload.parse::<f32>().unwrap_or(1.0).clamp(0.5, 2.0);
@@ -2262,6 +2267,8 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
     ui.set_close_to_tray(close);
     ui.set_media_hotkeys(hotkeys);
     ui.set_accent(settings["accent"].as_str().unwrap_or("mono").into());
+    let scheme = settings["theme"].as_str().unwrap_or("light");
+    ui.set_scheme(scheme.into());
     ui.set_speed(settings["playback_speed"].as_f64().unwrap_or(1.0) as f32);
     ui.set_volume_norm(settings["volume_norm_enabled"].as_bool().unwrap_or(true));
     ui.set_infinite_autoplay(settings["infinite_autoplay"].as_bool().unwrap_or(true));
