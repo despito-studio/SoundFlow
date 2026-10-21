@@ -227,6 +227,14 @@ export component AppWindow inherits Window {
                 flat: true;
                 clicked => { root.select-playlist(playlist.id); }
             }
+            if root.playlists.length > 3 : SFButton {
+                visible: root.height > 640px;
+                x: 10px; y: 423px + 3 * 40px;
+                width: parent.width - 20px; height: 32px;
+                left-align: true; flat: true;
+                text: I18n.side-more-playlists + "  (" + (root.playlists.length - 3) + ")";
+                clicked => { root.navigate("playlists"); }
+            }
             VerticalLayout {
                 x: 10px; y: parent.height - 150px; width: parent.width - 20px;
                 height: 86px; spacing: 6px;
