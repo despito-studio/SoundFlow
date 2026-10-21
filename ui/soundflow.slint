@@ -906,6 +906,10 @@ export component AppWindow inherits Window {
         x: 0px; y: 0px; width: root.width; height: root.height;
         focus-on-tab-navigation: false;
         capture-key-pressed(event) => {
+            if event.modifiers.control && (event.text == "v" || event.text == "V" || event.text == "м" || event.text == "М" || event.text == "в" || event.text == "В") {
+                root.action("paste-clipboard", "");
+                return accept;
+            }
             if event.text == Key.Escape { if !root.modal-busy { root.modal-action("close", ""); } return accept; }
             return reject;
         }
@@ -1269,6 +1273,10 @@ export component AppWindow inherits Window {
     if root.command-open : FocusScope {
         x: 0px; y: 0px; width: root.width; height: root.height;
         capture-key-pressed(event) => {
+            if event.modifiers.control && (event.text == "v" || event.text == "V" || event.text == "м" || event.text == "М" || event.text == "в" || event.text == "В") {
+                root.action("paste-clipboard", "");
+                return accept;
+            }
             if event.text == Key.Escape { root.command-open = false; return accept; }
             return reject;
         }
