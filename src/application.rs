@@ -2593,7 +2593,17 @@ fn apply_response(
                 }
                 "rename_playlist" | "import_external_profile" => {
                     close_modal(&ui);
-                    ui.set_message(crate::tr!(ui, "Бібліотеку оновлено", "Library updated"));
+                    if value["profile"].as_bool() == Some(true) {
+                        let playlists = value["playlists"].as_u64().unwrap_or(0);
+                        let tracks = value["count"].as_u64().unwrap_or(0);
+                        ui.set_message(crate::tr!(
+                            ui,
+                            &format!("Імпортовано {playlists} плейлистів ({tracks} треків)"),
+                            &format!("Imported {playlists} playlists ({tracks} tracks)")
+                        ));
+                    } else {
+                        ui.set_message(crate::tr!(ui, "Бібліотеку оновлено", "Library updated"));
+                    }
                 }
                 "detect_connected_accounts" => {
                     ui.set_modal_busy(false);

@@ -332,6 +332,19 @@ impl Core {
                 }
                 Ok(json!(found))
             }
+            "create_playlist_with_tracks" => {
+                let name = string_arg(args, 0)?.to_string();
+                let tracks = arg(args, 1).as_array().cloned().unwrap_or_default();
+                let playlist = self.library.create_playlist(&name)?;
+                let id = playlist["id"].as_str().unwrap_or("").to_string();
+                let mut added = 0u64;
+                for track in tracks {
+                    if self.library.add_to_playlist(&id, &track).unwrap_or(false) {
+                        added += 1;
+                    }
+                }
+                Ok(json!({"id": id, "added": added}))
+            }
             "smart_playlist" => {
                 let kind = string_arg(args, 0)?;
                 let data = &self.library.data;

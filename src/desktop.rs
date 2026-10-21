@@ -192,6 +192,48 @@ impl Desktop {
                 }
             }
             "import_external_profile" => {
+                // Для профілю SoundCloud забираємо всі публічні плейлисти профілю
+                // й зберігаємо кожен як окремий плейлист у бібліотеці.
+                let provider_name = string_arg(args, 0)?;
+                let identifier = string_arg(args, 1)?;
+                if provider_name == "soundcloud" && identifier.contains("/sets/") {
+                    if let Ok((name, tracks)) = crate::soundcloud::playlist_tracks(identifier) {
+                        let mut core = self.core.lock().map_err(lock_error)?;
+                        let result = core.local_rpc(
+                            "create_playlist_with_tracks",
+                            &[json!(name), json!(tracks)],
+                        )?;
+                        return Ok(json!({
+                            "ok": true,
+                            "profile": true,
+                            "playlists": 1,
+                            "count": result["added"].as_u64().unwrap_or(0),
+                        }));
+                    }
+                }
+                if provider_name == "soundcloud" && crate::soundcloud::is_profile_url(identifier) {
+                    if let Ok(playlists) = crate::soundcloud::profile_playlists(identifier) {
+                        if !playlists.is_empty() {
+                            let mut core = self.core.lock().map_err(lock_error)?;
+                            let mut created = 0usize;
+                            let mut total = 0u64;
+                            for (name, tracks) in &playlists {
+                                let result = core.local_rpc(
+                                    "create_playlist_with_tracks",
+                                    &[json!(name), json!(tracks)],
+                                )?;
+                                total += result["added"].as_u64().unwrap_or(0);
+                                created += 1;
+                            }
+                            return Ok(json!({
+                                "ok": true,
+                                "profile": true,
+                                "playlists": created,
+                                "count": total,
+                            }));
+                        }
+                    }
+                }
                 let user = self.core.lock().map_err(lock_error)?.user().to_owned();
                 let tracks = self
                     .provider
