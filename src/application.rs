@@ -1260,6 +1260,25 @@ impl Application {
                 self.stop_for_account();
                 self.submit(ui, "clear_history", vec![], false);
             }
+            "set-icon" => {
+                match crate::shortcut::set_desktop_icon(payload) {
+                    Ok(count) => {
+                        ui.set_desktop_icon(payload.into());
+                        self.submit(
+                            ui,
+                            "update_settings",
+                            vec![json!({"desktop_icon": payload})],
+                            false,
+                        );
+                        ui.set_message(crate::tr!(
+                            ui,
+                            &format!("Іконку оновлено ({count} ярлики)"),
+                            &format!("Icon updated ({count} shortcuts)")
+                        ));
+                    }
+                    Err(error) => ui.set_message(error.into()),
+                }
+            }
             "theme" | "set-theme" => {
                 let scheme = match payload {
                     "dark" | "rose" | "violet" | "ocean" => payload,
@@ -2269,6 +2288,7 @@ fn refresh_models(ui: &AppWindow, shared: &Shared) {
     ui.set_accent(settings["accent"].as_str().unwrap_or("mono").into());
     let scheme = settings["theme"].as_str().unwrap_or("light");
     ui.set_scheme(scheme.into());
+    ui.set_desktop_icon(settings["desktop_icon"].as_str().unwrap_or("default").into());
     ui.set_speed(settings["playback_speed"].as_f64().unwrap_or(1.0) as f32);
     ui.set_volume_norm(settings["volume_norm_enabled"].as_bool().unwrap_or(true));
     ui.set_infinite_autoplay(settings["infinite_autoplay"].as_bool().unwrap_or(true));

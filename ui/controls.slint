@@ -236,8 +236,8 @@ export component SFSlider inherits Rectangle {
     private property <float> fraction: maximum > 0 ? min(1, max(0, (touch.pressed ? drag-value : value) / maximum)) : 0;
     private property <float> drag-value: value;
     private property <bool> interactive: enabled && !Theme.modal-open && maximum > 0;
-    min-height: 24px;
-    preferred-height: 28px;
+    min-height: 28px;
+    preferred-height: 32px;
     min-width: 52px;
     forward-focus: focus;
     accessible-role: slider;
@@ -263,8 +263,8 @@ export component SFSlider inherits Rectangle {
     }
     Rectangle {
         x: 2px + (parent.width - 12px) * root.fraction;
-        y: (parent.height - 12px) / 2;
-        width: 12px; height: 12px;
+        y: (parent.height - 14px) / 2;
+        width: 14px; height: 14px;
         border-radius: 6px;
         background: Theme.surface;
         border-color: Theme.ink;
@@ -292,6 +292,11 @@ export component SFSlider inherits Rectangle {
             if event.kind == PointerEventKind.down {
                 focus.focus();
                 root.drag-value = min(root.maximum, max(0, (self.mouse-x - 6px) / (self.width - 12px) * root.maximum));
+                root.changed(root.drag-value);
+            }
+            if event.kind == PointerEventKind.move && self.pressed {
+                root.drag-value = min(root.maximum, max(0, (self.mouse-x - 6px) / (self.width - 12px) * root.maximum));
+                root.changed(root.drag-value);
             }
             if event.kind == PointerEventKind.up { root.released(root.drag-value); }
         }

@@ -300,6 +300,9 @@ impl LibraryStore {
                         .is_some_and(|v| v.is_finite() && (0.0..=1.0).contains(&v)) => {}
                 "repeat" if ["off", "all", "one"].contains(&value.as_str().unwrap_or_default()) => {
                 }
+                "desktop_icon"
+                    if ["default", "rose", "violet", "ocean"]
+                        .contains(&value.as_str().unwrap_or_default()) => {}
                 "theme"
                     if ["light", "dark", "rose", "violet", "ocean", "system"]
                         .contains(&value.as_str().unwrap_or_default()) => {}

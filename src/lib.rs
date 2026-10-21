@@ -11,6 +11,7 @@ mod media;
 mod media_keys;
 pub mod platform;
 pub mod playback;
+pub mod shortcut;
 pub mod soundcloud;
 pub mod supabase;
 pub mod supabase_auth;

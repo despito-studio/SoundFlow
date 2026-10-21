@@ -44,6 +44,7 @@ export component AppWindow inherits Window {
     in-out property <bool> supabase-linked: false;
     in-out property <string> accent: "mono";
     in-out property <string> scheme: "light";
+    in-out property <string> desktop-icon: "default";
     in-out property <color> player-accent: transparent;
     in-out property <bool> command-open: false;
     in-out property <string> command-query: "";
@@ -219,7 +220,8 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 x: 18px; y: 381px; width: parent.width - 30px; height: 34px;
                 SFMuted { text: I18n.side-your-playlists; font-size: 10px; font-weight: 600; vertical-alignment: center; }
-                SFButton { text: "+"; label: I18n.side-create-playlist; icon: true; flat: true; width: 34px; height: 34px; clicked => { root.action("create-playlist", ""); } }
+                if root.playlists.length > 3 : SFButton { text: "+" + (root.playlists.length - 3); label: I18n.side-more-playlists; flat: true; width: 48px; height: 34px; clicked => { root.navigate("playlists"); } }
+            SFButton { text: "+"; label: I18n.side-create-playlist; icon: true; flat: true; width: 34px; height: 34px; clicked => { root.action("create-playlist", ""); } }
             }
             for playlist[index] in root.playlists : SFButton {
                 visible: index < 3 && root.height > 640px;
@@ -228,14 +230,6 @@ export component AppWindow inherits Window {
                 text: playlist.name; label: (I18n.is-uk ? "Плейлист «" : "Playlist \"") + playlist.name + (I18n.is-uk ? "», " : "\", ") + playlist.count + " " + I18n.side-tracks-suffix;
                 flat: true;
                 clicked => { root.select-playlist(playlist.id); }
-            }
-            if root.playlists.length > 3 : SFButton {
-                visible: root.height > 640px;
-                x: 10px; y: 423px + 3 * 40px;
-                width: parent.width - 20px; height: 32px;
-                left-align: true; flat: true;
-                text: I18n.side-more-playlists + "  (" + (root.playlists.length - 3) + ")";
-                clicked => { root.navigate("playlists"); }
             }
             VerticalLayout {
                 x: 10px; y: parent.height - 150px; width: parent.width - 20px;
@@ -617,6 +611,14 @@ export component AppWindow inherits Window {
                                 SFButton { text: I18n.set-theme-ocean; checkable: true; active: root.scheme == "ocean"; clicked => { root.scheme = "ocean"; root.action("set-theme", "ocean"); } }
                             }
                             HorizontalLayout {
+                                spacing: 8px; alignment: start;
+                                SFMuted { text: I18n.set-icon-label; vertical-alignment: center; }
+                                SFButton { text: I18n.set-icon-default; checkable: true; active: root.desktop-icon == "default"; clicked => { root.action("set-icon", "default"); } }
+                                SFButton { text: I18n.set-theme-rose; checkable: true; active: root.desktop-icon == "rose"; clicked => { root.action("set-icon", "rose"); } }
+                                SFButton { text: I18n.set-theme-violet; checkable: true; active: root.desktop-icon == "violet"; clicked => { root.action("set-icon", "violet"); } }
+                                SFButton { text: I18n.set-theme-ocean; checkable: true; active: root.desktop-icon == "ocean"; clicked => { root.action("set-icon", "ocean"); } }
+                            }
+                            HorizontalLayout {
                                 spacing: 8px;
                                 SFText { text: I18n.set-accent; vertical-alignment: center; }
                                 SFAccentDot { dot-color: Theme.palette-mono; selected: root.accent == "mono"; label: I18n.set-accent + " mono"; picked => { root.action("set-accent", "mono"); } }
@@ -837,7 +839,7 @@ export component AppWindow inherits Window {
                 SFButton { text: "›"; label: I18n.player-next; icon: true; flat: true; enabled: root.current-track.id != ""; clicked => { root.player-action("next"); } }
                 VerticalLayout {
                     horizontal-stretch: 1; min-width: 60px; spacing: 0px; alignment: center;
-                    SFSlider { value: root.position; maximum: root.duration; step: 5; label: I18n.player-pos-label; enabled: root.current-track.id != ""; released(value) => { root.seek(value); } changed(value) => { if !self.enabled { return; } } }
+                    SFSlider { value: root.position; maximum: root.duration; step: 5; label: I18n.player-pos-label; enabled: root.current-track.id != ""; released(value) => { root.seek(value); } changed(value) => { if root.current-track.id != "" && root.duration > 0 { root.position = value; } } }
                     HorizontalLayout {
                         height: 16px;
                         SFMuted { text: Math.floor(root.position / 60) + ":" + (mod(Math.floor(root.position), 60) < 10 ? "0" : "") + mod(Math.floor(root.position), 60); font-size: 10px; }

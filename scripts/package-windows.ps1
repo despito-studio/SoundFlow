@@ -25,7 +25,7 @@ New-Item -ItemType Directory -Path $resourceFolder -Force | Out-Null
 foreach ($folder in @('runtime','covers')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot "resources/$folder") -Destination $resourceFolder -Recurse
 }
-foreach ($file in @('icon.png','icon.ico','curated.json')) {
+foreach ($file in @('icon.png','icon.ico','icon-rose.ico','icon-violet.ico','icon-ocean.ico','curated.json')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot "resources/$file") -Destination $resourceFolder
 }
 $workerFolder = Join-Path $destinationPath 'media-provider/dist'
