@@ -1,6 +1,6 @@
 [package]
 name = "soundflow"
-version = "3.5.0"
+version = "3.5.1"
 description = "SoundFlow native music application"
 authors = ["SoundFlow"]
 edition = "2021"
