@@ -168,6 +168,12 @@ export component AppWindow inherits Window {
                 root.player-options = false; root.app-menu = false;
                 return accept;
             }
+            // На українській/російській розкладці клавіша V дає "м", тому Slint
+            // не бачить Ctrl+V. Ловимо ці варіанти й вставляємо з буфера самі.
+            if event.modifiers.control && (event.text == "м" || event.text == "М" || event.text == "в" || event.text == "В") {
+                root.action("paste-clipboard", "");
+                return accept;
+            }
             if event.modifiers.control && (event.text == "k" || event.text == "K") && !root.modal-open && !root.command-open {
                 root.command-open = true;
                 root.command-query = "";
@@ -1243,6 +1249,13 @@ export component AppWindow inherits Window {
                         modal-control: true;
                         enabled: !root.modal-busy;
                         clicked => { root.import-all-accounts((root.yt-found ? "youtube," : "") + (root.sc-found ? "soundcloud," : "") + (root.sp-found ? "spotify," : "")); }
+                    }
+                    if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" && root.modal-kind != "confirm" && root.modal-kind != "connected-accounts" && root.modal-kind != "import-prompt" && root.modal-kind != "subscription-plans" && root.modal-kind != "promo-code" && root.modal-kind != "accounts-list" : SFButton {
+                        text: I18n.modal-paste;
+                        flat: true;
+                        modal-control: true;
+                        enabled: !root.modal-busy;
+                        clicked => { root.action("paste-clipboard", ""); }
                     }
                     dialog-cancel := SFButton { text: root.modal-kind == "import-prompt" ? I18n.acc-import-later : root.modal-kind == "connected-accounts" ? I18n.acc-confirm-btn : root.modal-kind == "about" || root.modal-kind == "subscription-plans" || root.modal-kind == "accounts-list" ? I18n.modal-done : I18n.modal-cancel; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-action("close", ""); } }
                     if root.modal-kind != "about" && root.modal-kind != "match" && root.modal-kind != "queue" && root.modal-kind != "add-to-playlist" && root.modal-kind != "connected-accounts" && root.modal-kind != "import-prompt" && root.modal-kind != "subscription-plans" && root.modal-kind != "promo-code" && root.modal-kind != "accounts-list" : SFButton { text: root.modal-busy ? I18n.modal-wait : root.modal-kind == "confirm" ? I18n.modal-confirm : I18n.modal-save; primary: true; modal-control: true; enabled: !root.modal-busy; clicked => { root.modal-submit(root.modal-value); } }

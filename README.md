@@ -13,9 +13,9 @@
 
 ## Завантажити для Windows x64
 
-[Інсталятор SoundFlow](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-Setup.exe) · [Portable ZIP (v3.4.1)](https://github.com/feodaI/SoundFlow/releases/download/v3.4.1/SoundFlow-3.4.1-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.4.1)
+[Portable ZIP (v3.5.0)](https://github.com/despito-studio/SoundFlow/releases/download/v3.5.0/SoundFlow-3.5.0-windows-x64.zip) · [SHA-256](https://github.com/despito-studio/SoundFlow/releases/download/v3.5.0/SHA256SUMS-3.5.0.txt) · [Нотатки релізу](https://github.com/despito-studio/SoundFlow/releases/tag/v3.5.0)
 
-Інсталятор встановлює застосунок для поточного користувача та створює ярлики. Для portable-версії розпакуй увесь архів і запусти `SoundFlow.exe`. Бібліотека залишається окремо від файлів програми.
+Розпакуй увесь архів і запусти `SoundFlow.exe` — `resources` та `media-provider` мають лежати поруч. Бібліотека й налаштування зберігаються окремо, у `%APPDATA%\app.soundflow.desktop`, тому оновлення їх не зачіпає. Готовий `Setup.exe` для 3.5.0 ще не зібраний — використовуй portable-архів.
 
 ![Попередній вигляд нативного інтерфейсу](docs/images/windows-light.png)
 
@@ -58,7 +58,7 @@ node scripts/build-provider.mjs
 
 ### Windows
 
-Готова portable-версія: `dist/windows-x64/SoundFlow.exe`. Інсталятор: `dist/SoundFlow-3.4.0-Setup.exe`. Python, Node.js і WebView2 встановлювати не потрібно.
+Готова portable-версія: `dist/SoundFlow-3.5.0-windows-x64.zip` (складається командою `scripts/package-windows.ps1`). Python, Node.js і WebView2 встановлювати не потрібно.
 
 Для розробки потрібні Rust 1.92+, MSVC Build Tools, Windows SDK і Node.js. SDK можна підготувати без адміністратора:
 

@@ -1468,6 +1468,24 @@ impl Application {
                 };
                 self.submit(ui, "get_listening_stats", args, false);
             }
+            "paste-clipboard" => {
+                if let Some(text) = crate::platform::clipboard_text() {
+                    let text = text.replace(['\r', '\n'], " ").trim().to_string();
+                    if !text.is_empty() {
+                        if ui.get_modal_open() {
+                            let current = ui.get_modal_value().to_string();
+                            ui.set_modal_value(format!("{current}{text}").into());
+                        } else if ui.get_command_open() {
+                            let next = format!("{}{}", ui.get_command_query(), text);
+                            ui.set_command_query(next.clone().into());
+                            self.action(ui, "command-query", &next);
+                        } else {
+                            let next = format!("{}{}", ui.get_search_query(), text);
+                            ui.set_search_query(next.into());
+                        }
+                    }
+                }
+            }
             "dismiss-message" => ui.set_message("".into()),
             "remove-search-query" => {
                 let _ = self.desktop.call("remove_search_query", &[json!(payload)]);

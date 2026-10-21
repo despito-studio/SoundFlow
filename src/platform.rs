@@ -153,6 +153,52 @@ pub fn initialize_process() -> Result<InstanceGuard, String> {
     }
 }
 
+/// Читає текст із системного буфера обміну (потрібно для вставки в полях,
+/// бо Slint реагує лише на латинську клавішу V).
+pub fn clipboard_text() -> Option<String> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::DataExchange::{
+            CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+        };
+        // CF_UNICODETEXT = 13 (windows-sys тримає константу в іншому модулі).
+        const CF_UNICODETEXT: u32 = 13;
+        use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+        unsafe {
+            if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
+                return None;
+            }
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return None;
+            }
+            let handle = GetClipboardData(CF_UNICODETEXT);
+            if handle.is_null() {
+                CloseClipboard();
+                return None;
+            }
+            let pointer = GlobalLock(handle);
+            let text = if pointer.is_null() {
+                None
+            } else {
+                let mut length = 0usize;
+                let units = pointer as *const u16;
+                while *units.add(length) != 0 && length < 1_048_576 {
+                    length += 1;
+                }
+                let slice = std::slice::from_raw_parts(units, length);
+                GlobalUnlock(handle);
+                Some(String::from_utf16_lossy(slice))
+            };
+            CloseClipboard();
+            text.filter(|value| !value.is_empty())
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 #[cfg(windows)]
 unsafe fn raise_window(pid: u32) {
     use windows_sys::Win32::{
