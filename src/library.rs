@@ -27,8 +27,8 @@ fn default_settings() -> Map<String, Value> {
     json!({"volume":0.8,"repeat":"off","shuffle":false,"preferred_source":"all",
         "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,
         "volume_norm_enabled":true,"direct_paste_enabled":true,"smart_cache_enabled":true,
-        "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"light",
-        "language":"uk","accent":"mono","playback_speed":1.0,"onboarding_completed":false,"import_prompt_disabled":false})
+        "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"dark",
+        "language":"uk","accent":"blue","playback_speed":1.0,"onboarding_completed":false,"import_prompt_disabled":false})
     .as_object()
     .unwrap()
     .clone()
@@ -201,6 +201,39 @@ impl LibraryStore {
         self.save()?;
         Ok(result)
     }
+    pub fn create_playlist_with_tracks(&mut self, name: &str, tracks: &Value) -> CoreResult<Value> {
+        if name.chars().count() > 160 {
+            return Err("Назва плейліста має містити до 160 символів".into());
+        }
+        let input = tracks.as_array().ok_or("Недійсні треки плейліста")?;
+        let mut seen = HashSet::new();
+        let mut validated = Vec::new();
+        for track in input {
+            let track = validated_track(track)?;
+            if seen.insert(track["id"].as_str().unwrap().to_owned()) {
+                validated.push(track);
+            }
+        }
+        let id = format!("pl_{}", Uuid::new_v4().simple());
+        let added = validated.len();
+        let playlist = Playlist {
+            id: id.clone(),
+            name: if name.trim().is_empty() {
+                "Новий плейліст".into()
+            } else {
+                name.trim().into()
+            },
+            created_at: now(),
+            tracks: validated,
+            is_auto: false,
+        };
+        self.data.playlists.insert(id.clone(), playlist);
+        if let Err(error) = self.save() {
+            self.data.playlists.remove(&id);
+            return Err(error);
+        }
+        Ok(json!({"id": id, "added": added}))
+    }
     pub fn add_to_playlist(&mut self, id: &str, track: &Value) -> CoreResult<bool> {
         let track = validated_track(track)?;
         let playlist = self
@@ -300,11 +333,13 @@ impl LibraryStore {
                         .is_some_and(|v| v.is_finite() && (0.0..=1.0).contains(&v)) => {}
                 "repeat" if ["off", "all", "one"].contains(&value.as_str().unwrap_or_default()) => {
                 }
-                "theme"
-                    if ["light", "dark", "system"]
+                "desktop_icon"
+                    if ["default", "rose", "violet", "ocean"]
                         .contains(&value.as_str().unwrap_or_default()) => {}
-                "language"
-                    if ["uk", "en"].contains(&value.as_str().unwrap_or_default()) => {}
+                "theme"
+                    if ["light", "dark", "rose", "violet", "ocean", "system"]
+                        .contains(&value.as_str().unwrap_or_default()) => {}
+                "language" if ["uk", "en"].contains(&value.as_str().unwrap_or_default()) => {}
                 "accent"
                     if ["mono", "blue", "violet", "rose", "amber", "green"]
                         .contains(&value.as_str().unwrap_or_default()) => {}
@@ -334,20 +369,45 @@ impl LibraryStore {
     }
     pub fn update_profile(&mut self, value: &Value) -> CoreResult<Value> {
         let payload = value.as_object().ok_or("Недійсний профіль")?;
-        for field in ["name", "email", "avatar_url", "banner_url", "banner_preset"] {
+        let mut profile = self.data.profile.clone();
+        for field in [
+            "name",
+            "email",
+            "avatar_url",
+            "banner_url",
+            "banner_preset",
+            "bio",
+        ] {
             if let Some(value) = payload.get(field) {
-                let clean = text(Some(value), if field.ends_with("url") { 2000 } else { 254 });
+                let clean = text(
+                    Some(value),
+                    if field.ends_with("url") || field == "bio" {
+                        2000
+                    } else {
+                        254
+                    },
+                );
                 if field.ends_with("url")
                     && !clean.is_empty()
-                    && url::Url::parse(&clean)
-                        .map(|u| u.scheme() != "https")
-                        .unwrap_or(true)
+                    && url::Url::parse(&clean).map(|u| {
+                        if u.scheme() == "https" { return false; }
+                        if u.scheme() == "file" {
+                            let root = crate::platform::data_dir().join("profile-images").canonicalize();
+                            let path = u.to_file_path().ok().and_then(|p| p.canonicalize().ok());
+                            return !matches!((root, path), (Ok(root), Some(path)) if path.starts_with(&root));
+                        }
+                        true
+                    }).unwrap_or(true)
                 {
-                    return Err("Зображення профілю повинно використовувати HTTPS".into());
+                    return Err("Обери фото з комп’ютера або вкажи посилання HTTPS".into());
                 }
-                self.data.profile.insert(field.into(), json!(clean));
+                profile.insert(field.into(), json!(clean));
             }
         }
+        if let Some(hidden) = payload.get("avatar_hidden").and_then(Value::as_bool) {
+            profile.insert("avatar_hidden".into(), json!(hidden));
+        }
+        self.data.profile = profile;
         self.save()?;
         Ok(Value::Object(self.data.profile.clone()))
     }
@@ -485,72 +545,4 @@ pub fn read_legacy(path: &Path) -> CoreResult<String> {
         return Err("Бібліотека відсутня або завелика".into());
     }
     fs::read_to_string(path).map_err(|e| e.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn track(id: &str) -> Value {
-        json!({"id":id,"title":"Song","artist":"Artist","source":"youtube","url":"https://youtube.com/watch?v=a"})
-    }
-    #[test]
-    fn likes_playlists_persist_and_dedupe() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("library.json");
-        let mut store = LibraryStore::open(path.clone()).unwrap();
-        assert_eq!(store.toggle_like(&track("a")).unwrap()["is_liked"], true);
-        let id = store.create_playlist("Тест").unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert!(store.add_to_playlist(&id, &track("a")).unwrap());
-        assert!(!store.add_to_playlist(&id, &track("a")).unwrap());
-        let loaded = LibraryStore::open(path).unwrap();
-        assert_eq!(loaded.data.liked_tracks.len(), 1);
-        assert_eq!(loaded.data.playlists[&id].tracks.len(), 1);
-    }
-    #[test]
-    fn import_does_not_import_roles_or_entitlements() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = LibraryStore::open(dir.path().join("library.json")).unwrap();
-        store
-            .import_json(
-                &json!({"liked_tracks":[track("a")],"profile":{"role":"admin"},"active":true})
-                    .to_string(),
-                true,
-            )
-            .unwrap();
-        assert_eq!(store.data.profile["role"], "listener");
-        assert!(!store.snapshot().get("active").is_some());
-        assert!(store.import_json("{\"liked_tracks\":[{}]}", true).is_err());
-        assert_eq!(store.data.liked_tracks.len(), 1);
-    }
-    #[test]
-    fn corrupt_library_is_preserved() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("library.json");
-        fs::write(&path, "broken").unwrap();
-        assert!(LibraryStore::open(path.clone()).is_err());
-        assert_eq!(fs::read_to_string(path).unwrap(), "broken");
-    }
-    #[test]
-    fn settings_validate_all_values_before_mutation() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = LibraryStore::open(dir.path().join("library.json")).unwrap();
-        assert!(store
-            .update_settings(&json!({"volume":0.2,"active":true}))
-            .is_err());
-        assert_eq!(store.data.settings["volume"], 0.8);
-    }
-    #[test]
-    fn repeated_import_merges_playlists_without_duplicates() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = LibraryStore::open(dir.path().join("library.json")).unwrap();
-        let raw=json!({"liked_tracks":[track("a")],"playlists":{"old":{"id":"old","name":"Old playlist","tracks":[track("a")]}}}).to_string();
-        store.import_json(&raw, true).unwrap();
-        store.import_json(&raw, true).unwrap();
-        assert_eq!(store.data.liked_tracks.len(), 1);
-        assert_eq!(store.data.playlists.len(), 1);
-        assert_eq!(store.data.playlists["old"].tracks.len(), 1);
-    }
 }

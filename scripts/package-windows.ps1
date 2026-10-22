@@ -1,8 +1,11 @@
 param([string]$Destination, [switch]$SkipInstaller, [switch]$SkipZip)
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$version = '3.5.0'
-$releaseExe = Join-Path $projectRoot 'target/release/soundflow.exe'
+$versionMatch = [regex]::Match((Get-Content -LiteralPath (Join-Path $projectRoot 'Cargo.toml') -Raw), '(?m)^version\s*=\s*"([^"]+)"\s*$')
+if (-not $versionMatch.Success) { throw 'The package version is missing from Cargo.toml.' }
+$version = $versionMatch.Groups[1].Value
+$releaseRoot = Join-Path $projectRoot 'output/flutter-preview'
+$releaseExe = Join-Path $releaseRoot 'SoundFlow.exe'
 if (-not $Destination) { $Destination = Join-Path $projectRoot 'dist/windows-x64' }
 $destinationPath = [IO.Path]::GetFullPath($Destination)
 $distributionRoot = Join-Path $projectRoot 'dist'
@@ -14,18 +17,21 @@ foreach ($required in @($releaseExe, (Join-Path $projectRoot 'resources/runtime/
 }
 $releaseIdentity = (Get-Item -LiteralPath $releaseExe).VersionInfo
 if ($releaseIdentity.ProductName -ne 'SoundFlow' -or $releaseIdentity.FileDescription -ne 'SoundFlow Music' -or
-    ($releaseIdentity.ProductVersion -notmatch '^3\.4\.' -and $releaseIdentity.ProductVersion -notmatch ('^' + [regex]::Escape($version) + '(?:\.0)?$'))) {
-    throw 'The release executable is not the current native SoundFlow build. Run scripts/build-windows.ps1 -Action Build first.'
+    $releaseIdentity.ProductVersion -notmatch ('^' + [regex]::Escape($version) + '(?:\.0|\+\d+)?$')) {
+    throw 'The release executable is not the current Flutter SoundFlow build. Run scripts/build-flutter-windows.ps1 first.'
+}
+foreach ($path in @($distributionRoot,$destinationPath)) {
+    if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Package paths must not be junctions.' }
 }
 if (Test-Path -LiteralPath $destinationPath) { Remove-Item -LiteralPath $destinationPath -Recurse -Force }
 New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
-Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $destinationPath 'SoundFlow.exe')
+Get-ChildItem -LiteralPath $releaseRoot | Where-Object Name -notin @('startup-stderr.txt','resources','media-provider','licenses') | Copy-Item -Destination $destinationPath -Recurse -Force
 $resourceFolder = Join-Path $destinationPath 'resources'
 New-Item -ItemType Directory -Path $resourceFolder -Force | Out-Null
-foreach ($folder in @('runtime','covers')) {
+foreach ($folder in @('runtime','covers','licenses')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot "resources/$folder") -Destination $resourceFolder -Recurse
 }
-foreach ($file in @('icon.png','icon.ico','curated.json')) {
+foreach ($file in @('icon.png','icon.ico','icon-rose.ico','icon-violet.ico','icon-ocean.ico','curated.json')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot "resources/$file") -Destination $resourceFolder
 }
 $workerFolder = Join-Path $destinationPath 'media-provider/dist'
@@ -33,20 +39,22 @@ New-Item -ItemType Directory -Path $workerFolder -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'media-provider/dist/worker.cjs') -Destination $workerFolder
 $licenses = Join-Path $destinationPath 'licenses'
 New-Item -ItemType Directory -Path $licenses -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $releaseRoot 'licenses/FLUTTER-LICENSE.txt') -Destination $licenses
 Copy-Item -LiteralPath (Join-Path $projectRoot 'resources/runtime/NODE-LICENSE.txt') -Destination $licenses
 Copy-Item -LiteralPath (Join-Path $projectRoot 'resources/ARTWORK.md') -Destination $licenses
-Copy-Item -LiteralPath (Join-Path $projectRoot 'resources/licenses/SLINT-LICENSE.md') -Destination $licenses
+Get-ChildItem -LiteralPath (Join-Path $projectRoot 'resources/licenses') -File | Copy-Item -Destination $licenses
+Copy-Item -LiteralPath (Join-Path $projectRoot 'resources/icons/flutter-sources.json') -Destination (Join-Path $licenses 'ANIMATEICONS-SOURCES.json')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'media-provider/dist/THIRD-PARTY-LICENSES.txt') -Destination (Join-Path $licenses 'MEDIA-LICENSES.txt')
 & (Join-Path $projectRoot 'scripts/collect-licenses.ps1') -OutputPath (Join-Path $licenses 'RUST-LICENSES.txt')
 if (Test-Path -LiteralPath (Join-Path $projectRoot 'media-provider/licenses')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'media-provider/licenses') -Destination (Join-Path $licenses 'media') -Recurse
 }
 $notes = @'
-SoundFlow 3.5.0 — native Windows x64
+SoundFlow — native Windows x64
 
-Run SoundFlow.exe. Keep resources and media-provider beside it.
+Run SoundFlow.exe. Keep its DLLs, data, resources and media-provider beside it.
 No Python, Node.js installation, browser, or WebView2 is required.
-The interface and audio output run in Rust. Online music starts at most
+The interface runs in Flutter and audio in Rust. Online music starts at most
 one bundled JavaScript media worker, which exits with SoundFlow.
 
 Library and settings: %APPDATA%\app.soundflow.desktop
@@ -64,7 +72,7 @@ if (-not $SkipInstaller) {
     if (-not $nsis) { $nsis = Join-Path $projectRoot 'output/toolchain/nsis/makensis.exe' }
     if (-not (Test-Path -LiteralPath $nsis)) { throw 'Install NSIS to build the native installer, or use -SkipInstaller for a portable package.' }
     $installerPath = Join-Path $distributionRoot "SoundFlow-$version-Setup.exe"
-    & $nsis '/WX' '/V2' "/DSTAGE=$destinationPath" "/DPROJECT=$projectRoot" "/DOUTPUT=$installerPath" (Join-Path $projectRoot 'resources/installer/windows.nsi')
+    & $nsis '/WX' '/V2' "/DSTAGE=$destinationPath" "/DPROJECT=$projectRoot" "/DOUTPUT=$installerPath" "/DVERSION=$version" (Join-Path $projectRoot 'resources/installer/windows.nsi')
     if ($LASTEXITCODE -ne 0) { throw 'Native NSIS installer creation failed.' }
 }
 Get-ChildItem -LiteralPath $distributionRoot -File | Select-Object Name, Length

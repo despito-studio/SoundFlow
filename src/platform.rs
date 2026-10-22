@@ -155,6 +155,9 @@ pub fn initialize_process() -> Result<InstanceGuard, String> {
 
 #[cfg(windows)]
 unsafe fn raise_window(pid: u32) {
+    if crate::desktop_shell::activate_existing(pid) {
+        return;
+    }
     use windows_sys::Win32::{
         Foundation::{HWND, LPARAM},
         UI::WindowsAndMessaging::{

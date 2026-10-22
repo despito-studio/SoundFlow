@@ -1,5 +1,4 @@
-//! Windows media keys are registered on their own message thread.
-//! Cached preferences keep system event handling independent of network requests.
+//! Hardware media keys use one registration thread and emit one action per press.
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -7,10 +6,16 @@ use std::sync::{
 
 pub(crate) struct MediaKeys {
     stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Drop for MediaKeys {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            if thread.thread().id() != std::thread::current().id() {
+                let _ = thread.join();
+            }
+        }
     }
 }
 pub(crate) fn start(
@@ -18,10 +23,11 @@ pub(crate) fn start(
     handler: impl Fn(&'static str) + Send + 'static,
 ) -> MediaKeys {
     let stop = Arc::new(AtomicBool::new(false));
+    let thread;
     #[cfg(windows)]
     {
         let finish = stop.clone();
-        std::thread::spawn(move || {
+        thread = Some(std::thread::spawn(move || {
             use windows_sys::Win32::UI::{
                 Input::KeyboardAndMouse::{
                     RegisterHotKey, UnregisterHotKey, MOD_NOREPEAT, VK_MEDIA_NEXT_TRACK,
@@ -72,15 +78,16 @@ pub(crate) fn start(
                 } != 0
                 {
                     if wanted {
-                        if let Some((_, _, action)) = keys
-                            .iter()
-                            .find(|(id, _, _)| *id as usize == message.wParam)
+                        if let Some((_, (_, _, action))) =
+                            keys.iter().enumerate().find(|(index, (id, _, _))| {
+                                registered[*index] && *id as usize == message.wParam
+                            })
                         {
                             handler(action);
                         }
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_millis(80));
+                std::thread::sleep(std::time::Duration::from_millis(40));
             }
             for (index, (id, _, _)) in keys.iter().enumerate() {
                 if registered[index] {
@@ -89,9 +96,12 @@ pub(crate) fn start(
                     }
                 }
             }
-        });
+        }));
     }
     #[cfg(not(windows))]
-    let _ = (enabled, handler);
-    MediaKeys { stop }
+    {
+        let _ = (enabled, handler);
+        thread = None;
+    }
+    MediaKeys { stop, thread }
 }

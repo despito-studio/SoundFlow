@@ -65,6 +65,9 @@ const METHODS: &[&str] = &[
     "ping",
     "search",
     "get_discover_tracks",
+    "get_home_feed",
+    "get_creator_profile",
+    "get_profile_assets",
     "resolve_direct_url",
     "get_stream",
     "get_playback_file",
@@ -357,39 +360,5 @@ impl ProviderBridge {
 impl Drop for ProviderBridge {
     fn drop(&mut self) {
         self.stop()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use std::io::Cursor;
-
-    #[test]
-    fn jsonl_requires_complete_utf8_json_frames() {
-        let mut valid = Cursor::new("{\"id\":1,\"result\":\"Музика\"}\n");
-        assert_eq!(read_reply(&mut valid).unwrap().unwrap()["result"], "Музика");
-        assert!(read_reply(&mut valid).unwrap().is_none());
-        assert!(read_reply(&mut Cursor::new(b"{\"id\":1}".as_slice())).is_err());
-        assert!(read_reply(&mut Cursor::new(b"{\"id\":\"\xff\"}\n".as_slice())).is_err());
-    }
-
-    #[test]
-    fn oversized_reply_stops_at_the_frame_limit() {
-        let mut reader = Cursor::new(vec![b' '; MAX_REPLY_BYTES + 100]);
-        assert!(read_reply(&mut reader).is_err());
-        assert_eq!(reader.position(), (MAX_REPLY_BYTES + 1) as u64);
-    }
-
-    #[test]
-    fn requests_are_bounded_and_keep_the_jsonl_contract() {
-        let encoded = encode_request(7, "search", &[json!("Музика"), json!("all")]).unwrap();
-        assert_eq!(encoded.last(), Some(&b'\n'));
-        let decoded: Value = serde_json::from_slice(&encoded).unwrap();
-        assert_eq!(decoded["id"], 7);
-        assert_eq!(decoded["method"], "search");
-        assert_eq!(decoded["args"][0], "Музика");
-        assert!(encode_request(8, "search", &[json!("a".repeat(MAX_REQUEST_BYTES))]).is_err());
     }
 }

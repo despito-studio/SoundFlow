@@ -1,105 +1,47 @@
 # SoundFlow
 
-Нативний музичний застосунок для **Linux** та **Windows**: **Rust + Slint**, аудіо через Rodio/Symphonia (PipeWire, PulseAudio або ALSA на Linux). Інтерфейс не використовує HTML, браузер, Electron, Tauri або WebView2. Python вилучений із застосунку та збірки.
+Поточна версія: **3.5.1 на Flutter для Windows**. [Перенесені зміни GitHub](docs/upstream/2026-10-22.md).
 
-Компактна світла й темна теми без синього акценту, плаваюча навігація та плеєр, адаптивні обкладинки, клавіатурне керування й нативна доступність.
+Музичний застосунок для Windows x64: інтерфейс Flutter, аудіо та медіатека Rust. Flutter викликає наявний NativeSession через локальну FFI-бібліотеку soundflow_lib.dll. WebView2 не потрібний.
 
-## Завантажити для Linux x64
+## Запуск
 
-[Графічний інсталятор (.run)](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-Linux-Installer.run) · [Portable TAR.GZ](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-linux-x64.tar.gz) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.4.0)
+Поточна збірка: output/flutter-preview/SoundFlow.exe. Поруч потрібні flutter_windows.dll, soundflow_lib.dll, data, resources та media-provider. Зберігай цю папку цілком.
 
-- **Графічний інсталятор (`.run`)**: універсальний саморозпаковуваний інсталятор із майстром GUI (Zenity / CLI), вибором каталогу встановлення, інтеграцією в системне меню, створенням ярлика на Робочому столі та деінсталятором `uninstall.sh`.
-- **Portable TAR.GZ**: розпакуй у будь-яке місце й запусти `./soundflow.sh` або `./soundflow`.
+Дані залишаються в %APPDATA%\app.soundflow.desktop. Перехід інтерфейсу не змінює формат бібліотеки.
 
-## Завантажити для Windows x64
+## Інтерфейс
 
-[Інсталятор SoundFlow](https://github.com/feodaI/SoundFlow/releases/download/v3.4.0/SoundFlow-3.4.0-Setup.exe) · [Portable ZIP (v3.4.1)](https://github.com/feodaI/SoundFlow/releases/download/v3.4.1/SoundFlow-3.4.1-windows-x64.zip) · [Нотатки релізу](https://github.com/feodaI/SoundFlow/releases/tag/v3.4.1)
+Discovery із добірками музики та авторами; медіатека зі створеними й імпортованими плейлістами та колекцією улюбленого; пошук за джерелами; профілі слухача й авторів; повний плеєр, черга та незалежний Dynamic Island. Імпорту локальних музичних файлів в інтерфейсі немає.
 
-Інсталятор встановлює застосунок для поточного користувача та створює ярлики. Для portable-версії розпакуй увесь архів і запусти `SoundFlow.exe`. Бібліотека залишається окремо від файлів програми.
+Плаваючий плеєр з’являється після вибору музики. Матовий Dock має ширину до 660px, центральний транспорт і попап гучності; широкого розмиття над контентом немає. Анімації враховують налаштування зменшення руху. Іконки й їхні траєкторії беруться з повного офіційного каталогу AnimateIcons через локальний Flutter-пакет `animate_icons`; Anicry задає токени руху поверхонь. Смуги прокручування приховано, прокрутка залишається доступною. Фото й обкладинку профілю можна вибрати із системного діалогу або додати HTTPS-посиланням.
 
-![Попередній вигляд нативного інтерфейсу](docs/images/windows-light.png)
+Ctrl+K відкриває пошук. Ctrl+Alt+M або Ctrl+Shift+Space перемикає компактний Island поверх інших програм без зміни фокусу; Ctrl+Alt+Shift+M відкриває розгорнуте керування з клавіатурою. Коли активний робочий стіл, компактна капсула видима постійно. Коли активна програма, вона прихована; поверх програми відкривається лише явним викликом. Наведення або натискання розгортає її; Esc повертає на стіл. Повернення до робочого столу не запускає анімацію появи. Island тримається по центру зверху й адаптується до розміру та DPI монітора. Контур має попіксельне альфа-згладжування, а форма й вміст використовують одну анімацію. Вкладені кути використовують Flutter-адаптацію [concentric](https://github.com/diip3sh/tailwindcss-concentric) під геометрію SoundFlow; компактна обкладинка кругла.
 
-## Можливості
+## Збірка Windows
 
-- Багатомовний інтерфейс (Українська 🇺🇦 та English 🇺🇸) із миттєвим перемиканням без перезапуску застосунку.
-- Пошук, відтворення та завантаження аудіо з YouTube і SoundCloud.
-- Метадані Spotify та явний вибір версії треку з YouTube/SoundCloud. Spotify не надає оригінальні аудіофайли для завантаження.
-- Локальна музика, улюблені треки, плейлисти, історія, імпорт і експорт бібліотеки.
-- Flow: уривки треків, пропуск, лайк і збереження в плейлист. Без спеціальної розмітки уривок вибирається поблизу середини треку; це не гарантує приспів.
-- Керування та відмова від підписки SoundFlow Plus (оформлення, зміна тарифу та скасування підписки на Linux і Windows).
-- Облік фактично прослуханого часу в SQLite та імпорт історії сервісів. Перегляд статистики потребує підтвердженого сервером SoundFlow Plus.
-- Один екземпляр вікна. Для онлайн-музики запускається максимум один дочірній JavaScript-процес; він завершується разом із застосунком.
+Flutter SDK 3.47.7 розміщений у output/toolchain/flutter. Потрібні Rust MSVC, C++ toolset, Windows SDK, CMake і Ninja. Локальний скрипт підтримує наявний portable MSVC без глобальної інсталяції Visual Studio.
 
-## Запуск і збірка
+    .\scripts\build-flutter-windows.ps1
 
-### Linux
+Результат: output/flutter-preview. Параметр -SkipCore повторно збирає лише Flutter та Windows host. Старі команди запуску Rust EXE і перевірки попереднього інтерфейсу більше не є способом запуску застосунку.
 
-- **Готові установщики**: графічний майстер `dist/SoundFlow-3.4.0-Linux-Installer.run`.
-- **Portable-версія**: розпакуй `dist/SoundFlow-3.4.0-linux-x64.tar.gz` і запусти `./soundflow.sh` або `./soundflow`.
+Пакування ZIP та інсталятора:
 
-Для розробки під Linux:
+    .\scripts\package-windows.ps1
 
-```bash
-# Встановлення залежностей та збірка медіа-провайдера
-(cd media-provider && npm ci)
-node scripts/build-provider.mjs
-
-# Збірка та тестування
-./scripts/build-linux.sh Build
-./scripts/build-linux.sh Test
-(cd media-provider && npm test)
-
-# Пакування дистрибутива та інсталяторів (.run, .rpm, .tar.gz)
-./scripts/package-linux.sh
-./scripts/verify-linux.sh
-```
-
-Докладніше: [Linux](docs/LINUX.md).
-
-### Windows
-
-Готова portable-версія: `dist/windows-x64/SoundFlow.exe`. Інсталятор: `dist/SoundFlow-3.4.0-Setup.exe`. Python, Node.js і WebView2 встановлювати не потрібно.
-
-Для розробки потрібні Rust 1.92+, MSVC Build Tools, Windows SDK і Node.js. SDK можна підготувати без адміністратора:
-
-```powershell
-.\scripts\setup-windows-sdk.ps1
-npm.cmd ci --prefix media-provider
-node scripts/build-provider.mjs
-.\scripts\build-windows.ps1 -Action Dev
-```
-
-Збірка й перевірка:
-
-```powershell
-.\scripts\build-windows.ps1 -Action Build
-.\scripts\build-windows.ps1 -Action Test
-.\scripts\package-windows.ps1
-npm.cmd test --prefix media-provider
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-windows.ps1 -Executable .\dist\windows-x64\SoundFlow.exe
-```
-
-Докладніше: [Windows](docs/WINDOWS.md), [архітектура](docs/ARCHITECTURE.md), [хмарний API](docs/CLOUD-API.md).
-
-Перевірки релізу 3.4.0: 25 Rust-тестів, 6 тестів медіарушія, запуск у Linux і Windows, UI Automation без безіменних кнопок, один екземпляр вікна, власні іконки, завершення дочірнього процесу, повне декодування AAC/MP3 та встановлення зі збереженням бібліотеки. [Історія змін](CHANGELOG.md).
+Готові файли зберігаються в `dist`. GitHub Actions збирає Flutter, Rust та
+медіапровайдер і публікує ZIP та Setup.exe як артефакт `soundflow-windows-x64`.
+Тестових кроків немає. Linux-скрипти, попередній UI, тестові набори та старі
+ручні скрипти публікації прибрано.
 
 ## Структура
 
-```text
-src/                 Rust: застосунок, бібліотека, статистика, аудіо, Linux та Windows
-ui/                  Slint: екрани, компоненти й тема
-media-provider/      JavaScript-адаптери музичних сервісів і тести
-resources/           іконки, обкладинки, ліцензії, runtime та інсталятори
-scripts/             відтворювана збірка, пакування й перевірка (Linux та Windows)
-docs/                документація Linux/Windows, архітектура та контракти
-```
+- flutter_app/lib: інтерфейс, дизайн, маршрути, Island та FFI-клієнт.
+- flutter_app/windows: Windows-вікна, caption, геометрія і керування Island.
+- src/flutter_ffi.rs: межа між Flutter та NativeSession.
+- src/native_session.rs: стан, черга, асинхронні команди й захист від застарілих результатів.
+- src/playback: Rodio/Symphonia, аудіо й облік слухання.
+- media-provider: наявний ізольований адаптер YouTube, SoundCloud і Spotify metadata.
 
-Дані користувача зберігаються в `~/.local/share/app.soundflow.desktop` на Linux та `%APPDATA%\app.soundflow.desktop` на Windows; встановлення та видалення програми не видаляють бібліотеку чи музику. Стару JSON-бібліотеку можна імпортувати в налаштуваннях.
-
-## Хмарні акаунти й Plus
-
-Клієнт містить авторизацію, синхронізацію та перевірку підписки через власний HTTPS-сервіс. **Сервер акаунтів і платежів у цьому репозиторії не розгорнутий**. Ціна $1/місяць задається платіжним сервісом; клієнт не може підтвердити оплату самостійно. Локальні налаштування чи імпортований JSON не розблоковують Plus.
-
-Аудіо та доступність каталогів залежать від джерела. Публічний профіль сервісу дозволяє імпортувати доступні треки; він не дає доступу до приватної історії прослуховувань або Spotify OAuth.
-
-Slint використовується за Royalty-free Desktop, Mobile, and Web Applications License 2.0. Атрибуція доступна в меню «Про SoundFlow». Ліцензії Node.js, музичного адаптера й обкладинок включені до Windows-пакета.
+Хмарна авторизація та Plus потребують налаштованого HTTPS-сервісу. Локальні параметри не надають платного доступу. Цей перехід стосується Windows; інші платформи Flutter не створювалися.

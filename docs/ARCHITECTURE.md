@@ -1,21 +1,13 @@
-# Native architecture
+# Flutter / Rust architecture
 
-The shipped Windows application has one Rust process and, only when online music is requested, one bundled JavaScript media worker. Slint renders native controls and exposes an AccessKit accessibility tree. Rodio/Symphonia decodes and plays audio in Rust. There is no DOM, frontend server, Python process or WebView runtime.
+The Windows executable hosts Flutter and loads soundflow_lib.dll through dart:ffi. Rust retains NativeSession, audio decoding, the library, account isolation, SQLite listening history, native dialogs and the provider worker. Flutter owns visual composition and route history.
 
-| Module | Responsibility |
-| --- | --- |
-| `application` | Typed UI bindings, queues, asynchronous commands and artwork |
-| `desktop` | Application commands, native dialogs and provider boundary |
-| `core`, `library` | Validated local data, account isolation and approved music folders |
-| `listening` | SQLite sessions and imported listening events |
-| `playback` | Audio actor, decoding, seeking, volume and audible time |
-| `cloud` | HTTPS accounts, credential vault, entitlement and synchronization |
-| `platform` | Windows identity, instance activation and native lifecycle |
-| `media` | Bounded JSON-lines protocol and child Job object |
-| `verification` | Explicit verification with isolated data and native snapshots |
+The C ABI accepts bounded UTF-8 JSON requests, catches Rust panics before they reach Dart, and provides explicit ownership through sf_free. sf_open creates the shared session, sf_poll returns state and shell events, sf_command dispatches actions, and sf_close shuts down audio and owned workers.
 
-The UI thread performs no extraction or blocking network calls. Audio loading uses generation counters so a stale load cannot replace a newer selection. Listening sessions retain the account they started under; pauses, muted output, buffering and seeks do not count as listening. Clearing history installs an account barrier against late audio reports.
+The primary Flutter engine owns the Rust session. The optional Island engine receives playback state through the Windows MethodChannel and sends commands back to the primary engine. It does not create a second audio player or library. A native alpha surface supplies its smooth outer contour. Desktop, foreground and minimize events control DWM cloaking of both surfaces. Quick mode does not activate the window; keyboard mode permits focus.
 
-The media worker uses `youtubei.js` and a narrow SoundCloud public API adapter. YouTube transfers use validated byte ranges and expected-size checks. Playback files and download jobs remain separate. Runtime source/build tools are separate from generated bundles and caches.
+Flutter renders icons from the full licensed AnimateIcons catalog. Artwork is decoded through Flutter image streams. Floating playback controls use matte surfaces. The header fades linearly from opaque #181818 to transparent. Main content has additional scroll space while playback controls are present.
 
-Cloud accounts and the $1 Plus payment service remain a separate deployment stage. No local preference or imported entitlement field can grant paid access. macOS, Android and iOS require their own platform adapters and validation before being offered as supported builds.
+Provider extraction and network work remain outside the UI thread. NativeSession preserves generation checks for stale playback requests, account boundaries, duplicate queue occurrences and bounded asynchronous command queues. The optional bundled Node worker is contained by the existing Windows Job object.
+
+The previous UI sources are archived locally under output/previous-slint-source-20261021 and are not compiled or linked. Cargo produces a library; the user-facing executable is built from flutter_app/windows.

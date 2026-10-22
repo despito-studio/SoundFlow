@@ -1,0 +1,10 @@
+SoundFlow concentric corners
+
+Reference: https://github.com/diip3sh/tailwindcss-concentric
+Copyright (c) 2026 diip3sh, MIT.
+
+SoundFlow implements the documented edge-distance rule in native Dart:
+flutter_app/lib/concentric.dart. This is a Flutter adaptation, not a Tailwind
+or CSS runtime dependency. The source palette, CSS selectors, generated styles,
+audit CLI, branding and agent skill are not bundled. SoundFlow's geometry tokens,
+explicit layout offsets and native Windows alpha contour are its own.

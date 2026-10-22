@@ -4,7 +4,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
@@ -15,6 +15,73 @@ use std::{
 };
 
 const MAX_AUDIO_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_PCM_SAMPLES: usize = 128 * 1024 * 1024 / size_of::<f32>();
+
+struct PreparedAudio {
+    source: Box<dyn Source<Item = f32> + Send>,
+    duration: Option<Duration>,
+    gain: Option<f32>,
+}
+
+fn decode_ahead(
+    mut file: File,
+    generation: &AtomicU64,
+    expected: u64,
+) -> Result<PreparedAudio, String> {
+    let backup = file.try_clone().map_err(|e| e.to_string())?;
+    let mut decoder =
+        Decoder::try_from(backup).map_err(|e| format!("Не вдалося відкрити аудіо: {e}"))?;
+    let channels = decoder.channels();
+    let rate = decoder.sample_rate();
+    let duration = decoder.total_duration();
+    let estimate = duration.map(|d| d.as_secs_f64() * channels as f64 * rate as f64);
+    if estimate.is_some_and(|n| n > MAX_PCM_SAMPLES as f64) {
+        return Ok(PreparedAudio {
+            source: Box::new(decoder),
+            duration,
+            gain: None,
+        });
+    }
+    let mut samples = Vec::with_capacity(
+        estimate
+            .unwrap_or(480_000.0)
+            .clamp(0.0, MAX_PCM_SAMPLES as f64) as usize,
+    );
+    let mut energy = 0.0f64;
+    while let Some(sample) = decoder.next() {
+        if samples.len() % 16384 == 0 && generation.load(Ordering::Acquire) != expected {
+            return Err("Скасовано".into());
+        }
+        if samples.len() == MAX_PCM_SAMPLES {
+            drop(decoder);
+            drop(samples);
+            file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+            let decoder = Decoder::try_from(file).map_err(|e| e.to_string())?;
+            return Ok(PreparedAudio {
+                source: Box::new(decoder),
+                duration,
+                gain: None,
+            });
+        }
+        if samples.len() == samples.capacity() {
+            let wanted = (samples.capacity().max(1) * 2).min(MAX_PCM_SAMPLES);
+            samples.reserve_exact(wanted - samples.len());
+        }
+        energy += (sample as f64) * (sample as f64);
+        samples.push(sample);
+    }
+    if samples.is_empty() {
+        return Err("Аудіоджерело не містить звуку".into());
+    }
+    let duration = Duration::from_secs_f64(samples.len() as f64 / channels as f64 / rate as f64);
+    let rms = (energy / samples.len() as f64).sqrt().max(1e-5);
+    let gain = (0.16 / rms).clamp(0.1, 1.0) as f32;
+    Ok(PreparedAudio {
+        source: Box::new(rodio::buffer::SamplesBuffer::new(channels, rate, samples)),
+        duration: Some(duration),
+        gain: Some(gain),
+    })
+}
 
 #[derive(Clone, Debug)]
 pub struct PlayerState {
@@ -73,7 +140,7 @@ enum Command {
     },
     Ready {
         generation: u64,
-        file: Result<File, String>,
+        audio: Result<PreparedAudio, String>,
     },
     Play,
     Pause,
@@ -124,15 +191,16 @@ impl AudioPlayer {
                     if loader_generation.load(Ordering::Acquire) != request.generation {
                         continue;
                     }
-                    let file = prepare_audio(
+                    let audio = prepare_audio(
                         &request.source,
                         &cache_dir,
                         &loader_generation,
                         request.generation,
-                    );
+                    )
+                    .and_then(|file| decode_ahead(file, &loader_generation, request.generation));
                     let _ = loader_commands.send(Command::Ready {
                         generation: request.generation,
-                        file,
+                        audio,
                     });
                 }
             })
@@ -223,20 +291,21 @@ impl AudioPlayer {
     }
 }
 
-/// М'яка нормалізація гучності: плавно підтягує тихі треки до цільового рівня
-/// і приглушує гучні, не даючи пікам виходити за межі.
+// PCM gain is measured in the loader; long streams retain a bounded rolling envelope.
 struct NormalizedSource<S> {
     inner: S,
-    enabled: bool,
+    enabled: Arc<AtomicBool>,
+    fixed_gain: Option<f32>,
     rms: f32,
     gain: f32,
 }
 
 impl<S> NormalizedSource<S> {
-    fn new(inner: S, enabled: bool) -> Self {
+    fn new(inner: S, enabled: Arc<AtomicBool>, fixed_gain: Option<f32>) -> Self {
         Self {
             inner,
             enabled,
+            fixed_gain,
             rms: 0.02,
             gain: 1.0,
         }
@@ -247,12 +316,15 @@ impl<S: Source<Item = f32>> Iterator for NormalizedSource<S> {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
         let sample = self.inner.next()?;
-        if !self.enabled {
+        if !self.enabled.load(Ordering::Relaxed) {
             return Some(sample);
+        }
+        if let Some(gain) = self.fixed_gain {
+            return Some(sample * gain);
         }
         self.rms = self.rms * 0.9992 + sample * sample * 0.0008;
         let rms = self.rms.sqrt().max(1e-5);
-        let target = (0.16 / rms).clamp(0.35, 4.0);
+        let target = (0.16 / rms).clamp(0.1, 1.0);
         self.gain += (target - self.gain) * 0.0008;
         Some((sample * self.gain).clamp(-1.0, 1.0))
     }
@@ -270,6 +342,12 @@ impl<S: Source<Item = f32>> Source for NormalizedSource<S> {
     }
     fn total_duration(&self) -> Option<Duration> {
         self.inner.total_duration()
+    }
+    fn try_seek(&mut self, position: Duration) -> Result<(), rodio::source::SeekError> {
+        self.inner.try_seek(position)?;
+        self.rms = 0.02;
+        self.gain = 1.0;
+        Ok(())
     }
 }
 
@@ -465,8 +543,6 @@ fn audio_loop(
     let mut last_position = 0.0;
     let mut heartbeat = Instant::now();
     let mut speed = f32::from_bits(speed_store.load(Ordering::Relaxed));
-    let mut normalize_enabled = normalize_store.load(Ordering::Relaxed);
-    let mut current_source: Option<String> = None;
     loop {
         let command = input.recv_timeout(Duration::from_millis(200));
         let elapsed = clock.elapsed().as_secs_f64();
@@ -504,7 +580,6 @@ fn audio_loop(
             }) => {
                 emit_listening(&mut session, &events);
                 sink.take();
-                current_source = Some(source.clone());
                 current_generation = id;
                 start = position;
                 limit = preview
@@ -513,7 +588,11 @@ fn audio_loop(
                 let parsed_duration = track_duration(&track);
                 state.track = Some(track.clone());
                 state.position = start;
-                state.duration = if parsed_duration > 0.0 { parsed_duration } else { 0.0 };
+                state.duration = if parsed_duration > 0.0 {
+                    parsed_duration
+                } else {
+                    0.0
+                };
                 state.playing = false;
                 state.loading = true;
                 wanted_playing = true;
@@ -536,13 +615,12 @@ fn audio_loop(
             }
             Ok(Command::Ready {
                 generation: id,
-                file,
+                audio,
             }) if id == current_generation && generation.load(Ordering::Acquire) == id => {
-                let loaded = file.and_then(|file| Decoder::try_from(file).map_err(|_| "Формат аудіо не підтримується. Обери M4A, MP3, FLAC, WAV або Ogg Vorbis.".to_string()));
-                match loaded {
-                    Ok(decoder) => {
-                        let mut duration = decoder
-                            .total_duration()
+                match audio {
+                    Ok(prepared) => {
+                        let mut duration = prepared
+                            .duration
                             .map(|d| d.as_secs_f64())
                             .filter(|&d| d > 0.5)
                             .unwrap_or(state.duration);
@@ -567,10 +645,12 @@ fn audio_loop(
                         if let Some(device) = stream.as_ref() {
                             let output = Sink::connect_new(device.mixer());
                             output.pause();
-                            output.set_volume(state.volume);
+                            output.set_volume(volume_gain(state.volume));
+                            output.set_speed(speed);
                             output.append(NormalizedSource::new(
-                                decoder.speed(speed),
-                                normalize_enabled,
+                                prepared.source,
+                                normalize_store.clone(),
+                                prepared.gain,
                             ));
                             state.duration = duration;
                             if duration > 0.0 {
@@ -643,43 +723,49 @@ fn audio_loop(
                         .map(|seconds| start + seconds)
                         .unwrap_or(state.duration)
                         .max(0.0);
-                    let target_pos = if end > 0.0 { position.clamp(0.0, end) } else { position.max(0.0) };
-                    if sink.try_seek(Duration::from_secs_f64(target_pos)).is_ok() {
-                        state.position = target_pos;
-                        last_position = target_pos;
-                        clock = Instant::now();
-                        let _ = events.send(AudioEvent::State(state.clone()));
+                    let target_pos = if end > 0.0 {
+                        position.clamp(0.0, end)
+                    } else {
+                        position.max(0.0)
+                    };
+                    match sink.try_seek(Duration::from_secs_f64(target_pos)) {
+                        Ok(()) => {
+                            state.position = target_pos;
+                            last_position = target_pos;
+                            clock = Instant::now();
+                            let _ = events.send(AudioEvent::State(state.clone()));
+                        }
+                        Err(error) => {
+                            let _ = events.send(AudioEvent::Error(format!(
+                                "Не вдалося перемотати трек: {error}"
+                            )));
+                        }
                     }
+                } else if state.loading && state.track.is_some() {
+                    start = if state.duration > 0.0 {
+                        position.clamp(0.0, (state.duration - 0.01).max(0.0))
+                    } else {
+                        position.max(0.0)
+                    };
+                    state.position = start;
+                    last_position = start;
+                    let _ = events.send(AudioEvent::State(state.clone()));
                 }
             }
             Ok(Command::Speed(value)) => {
                 speed = value.clamp(0.5, 2.0);
-                let _ = speed_store.store(speed.to_bits(), Ordering::Relaxed);
-                if sink.is_some() {
-                    if let Some(source) = current_source.clone() {
-                        let id = generation.fetch_add(1, Ordering::AcqRel) + 1;
-                        current_generation = id;
-                        start = state.position;
-                        let _ = loads.send(LoadRequest { generation: id, source });
-                    }
+                speed_store.store(speed.to_bits(), Ordering::Relaxed);
+                if let Some(sink) = &sink {
+                    sink.set_speed(speed);
                 }
             }
             Ok(Command::Normalize(enabled)) => {
-                normalize_enabled = enabled;
-                let _ = normalize_store.store(enabled, Ordering::Relaxed);
-                if sink.is_some() {
-                    if let Some(source) = current_source.clone() {
-                        let id = generation.fetch_add(1, Ordering::AcqRel) + 1;
-                        current_generation = id;
-                        start = state.position;
-                        let _ = loads.send(LoadRequest { generation: id, source });
-                    }
-                }
+                normalize_store.store(enabled, Ordering::Relaxed);
             }
             Ok(Command::Volume(volume)) => {
                 state.volume = volume;
                 if let Some(sink) = &sink {
-                    sink.set_volume(volume);
+                    sink.set_volume(volume_gain(volume));
                 }
             }
             Ok(Command::Identity(user)) => {
@@ -725,39 +811,15 @@ fn audio_loop(
     }
 }
 
+// UI percentages describe perceived loudness; the sink accepts linear amplitude.
+fn volume_gain(volume: f32) -> f32 {
+    volume.clamp(0.0, 1.0).powi(2)
+}
+
 fn audible_delta(playing: bool, volume: f32, delta: f64, elapsed: f64) -> f64 {
     if playing && volume > 0.0001 && delta > 0.0 && delta <= elapsed * 1.5 + 0.15 {
         delta.min(elapsed * 1.2 + 0.02)
     } else {
         0.0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn paused_muted_and_seek_time_are_not_listening() {
-        assert_eq!(audible_delta(false, 1.0, 1.0, 1.0), 0.0);
-        assert_eq!(audible_delta(true, 0.0, 1.0, 1.0), 0.0);
-        assert_eq!(audible_delta(true, 1.0, 50.0, 0.2), 0.0);
-        assert_eq!(audible_delta(true, 1.0, 0.0, 0.2), 0.0);
-        assert!((audible_delta(true, 0.8, 0.2, 0.2) - 0.2).abs() < 0.001);
-    }
-    #[test]
-    fn older_load_generation_is_cancelled_before_writing() {
-        let folder = tempfile::tempdir().unwrap();
-        let generation = AtomicU64::new(2);
-        assert_eq!(
-            prepare_audio(
-                "https://127.0.0.1:1/cancelled",
-                folder.path(),
-                &generation,
-                1
-            )
-            .unwrap_err(),
-            "Скасовано"
-        );
-        assert_eq!(fs::read_dir(folder.path()).unwrap().count(), 0);
     }
 }

@@ -1,0 +1,13 @@
+name: animate_icons
+description: Native Flutter adapter for the official AnimateIcons SVG and motion catalog.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.13.5
+dependencies:
+  flutter:
+    sdk: flutter
+  path_parsing: 1.1.0
+flutter:
+  assets:
+    - assets/catalog.json

@@ -1,5 +1,16 @@
 # Changelog
 
+## Flutter Windows migration, 2026-10-22
+
+- Flutter interface with Discovery, Library, profiles, Dock and Dynamic Island.
+- Desktop-only Island residency, alpha-smoothed contour and compact sizing.
+- Linear header fade, #181818 canvas and complete AnimateIcons catalog.
+- Rust seek forwarding, perceptual volume and bounded decode-ahead.
+- Windows ZIP and installer builds in GitHub Actions, without test steps.
+- Removed former UI sources, test suites, Linux scripts and obsolete helpers.
+
+The entries below describe earlier versions, including the former frontend.
+
 ## 3.5.0 — 2026-10-21
 
 Велике оновлення: акаунти Supabase, синхронізація бібліотеки, новий інтерфейс із акцентами та палітрою команд, розумні добірки й покращений звук.

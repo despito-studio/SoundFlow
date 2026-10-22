@@ -7,11 +7,14 @@ InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sound
 RequestExecutionLevel user
 ManifestDPIAware true
 SetCompressor /SOLID lzma
-VIProductVersion "3.2.0.0"
+!ifndef VERSION
+!error "Pass the package version with /DVERSION."
+!endif
+VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "SoundFlow"
 VIAddVersionKey "FileDescription" "SoundFlow native music application installer"
-VIAddVersionKey "FileVersion" "3.2.0"
-VIAddVersionKey "ProductVersion" "3.2.0"
+VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "SoundFlow"
 !define MUI_ICON "${PROJECT}\resources\icon.ico"
 !define MUI_UNICON "${PROJECT}\resources\icon.ico"
@@ -37,7 +40,7 @@ Section "SoundFlow" SEC_MAIN
     CreateShortcut "$SMPROGRAMS\SoundFlow\SoundFlow.lnk" "$INSTDIR\SoundFlow.exe" "" "$INSTDIR\SoundFlow.exe" 0
     CreateShortcut "$DESKTOP\SoundFlow.lnk" "$INSTDIR\SoundFlow.exe" "" "$INSTDIR\SoundFlow.exe" 0
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "DisplayName" "SoundFlow"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "DisplayVersion" "3.2.0"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "DisplayVersion" "${VERSION}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "Publisher" "SoundFlow"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "InstallLocation" "$INSTDIR"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "DisplayIcon" "$INSTDIR\SoundFlow.exe,0"
@@ -49,11 +52,14 @@ SectionEnd
 Section "Uninstall"
     SetShellVarContext current
     Delete "$INSTDIR\SoundFlow.exe"
+    Delete "$INSTDIR\flutter_windows.dll"
+    Delete "$INSTDIR\soundflow_lib.dll"
     Delete "$INSTDIR\READ-ME.txt"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir /r "$INSTDIR\resources"
     RMDir /r "$INSTDIR\media-provider"
     RMDir /r "$INSTDIR\licenses"
+    RMDir /r "$INSTDIR\data"
     RMDir "$INSTDIR"
     Delete "$DESKTOP\SoundFlow.lnk"
     Delete "$SMPROGRAMS\SoundFlow\SoundFlow.lnk"

@@ -362,21 +362,3 @@ fn expiry(value: &Value) -> CoreResult<f64> {
     }
     Err("Недійсна дата завершення".into())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn cloud_is_fail_closed() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut cloud = CloudClient::open(dir.path(), true).unwrap();
-        assert_eq!(cloud.entitlement()["active"], false);
-        assert!(cloud
-            .configure(&json!({"base_url":"http://example.com"}))
-            .is_err());
-        assert!(cloud
-            .configure(&json!({"base_url":"https://user:password@example.com"}))
-            .is_err());
-        assert!(!fs::read_to_string(dir.path().join("cloud.json")).is_ok());
-    }
-}

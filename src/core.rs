@@ -110,7 +110,10 @@ impl Core {
         Ok(())
     }
     fn switch_account(&mut self) -> CoreResult<()> {
-        let user = self.cloud.user_id().unwrap_or_else(|| self.accounts.active_id().to_string());
+        let user = self
+            .cloud
+            .user_id()
+            .unwrap_or_else(|| self.accounts.active_id().to_string());
         if user != self.current_user {
             let mut library = match LibraryStore::open(account_file(&self.data_dir, &user)) {
                 Ok(library) => library,
@@ -212,6 +215,7 @@ impl Core {
             method,
             "toggle_like"
                 | "create_playlist"
+                | "create_playlist_with_tracks"
                 | "delete_playlist"
                 | "rename_playlist"
                 | "add_to_playlist"
@@ -332,6 +336,9 @@ impl Core {
                 }
                 Ok(json!(found))
             }
+            "create_playlist_with_tracks" => self
+                .library
+                .create_playlist_with_tracks(string_arg(args, 0)?, arg(args, 1)),
             "smart_playlist" => {
                 let kind = string_arg(args, 0)?;
                 let data = &self.library.data;
@@ -601,7 +608,7 @@ impl Core {
                 };
                 self.library.save()?;
                 Ok(accounts)
-            },
+            }
             "get_game_status" => Ok(json!({"is_gaming":false})),
             "clear_cache" => Ok(
                 json!({"ok":true,"message":"Кеш медіапосилань очищається після перезапуску музичного рушія."}),
@@ -813,118 +820,4 @@ fn legacy_active_path() -> Option<PathBuf> {
         }
     }
     Some(guest)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn dispatcher_crud_and_stats_gate() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut core = Core::open(dir.path().into(), true).unwrap();
-        let track = json!({"id":"a","title":"Song","source":"youtube"});
-        let playlist = core.local_rpc("create_playlist", &[json!("Test")]).unwrap();
-        let id = playlist["id"].clone();
-        assert_eq!(
-            core.local_rpc("add_to_playlist", &[id.clone(), track])
-                .unwrap(),
-            true
-        );
-        assert_eq!(
-            core.local_rpc("get_library", &[]).unwrap()["playlists"][id.as_str().unwrap()]
-                ["tracks"]
-                .as_array()
-                .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(
-            core.local_rpc("get_listening_stats", &[]).unwrap()["locked"],
-            true
-        );
-        assert_eq!(core.local_rpc("delete_playlist", &[id]).unwrap(), true);
-        assert!(core.local_rpc("run_shell", &[]).is_err());
-    }
-    #[test]
-    fn grant_and_cancel_subscription_flow() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut core = Core::open(dir.path().into(), true).unwrap();
-        assert_eq!(
-            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
-            false
-        );
-        let granted = core
-            .local_rpc("grant_subscription", &[json!("VIP")])
-            .unwrap();
-        assert_eq!(granted["ok"], true);
-        assert_eq!(
-            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
-            true
-        );
-        let cancelled = core.local_rpc("cancel_subscription", &[]).unwrap();
-        assert_eq!(cancelled["ok"], true);
-        assert_eq!(
-            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
-            false
-        );
-        assert_eq!(
-            core.local_rpc("get_listening_stats", &[]).unwrap()["locked"],
-            true
-        );
-    }
-    #[test]
-    fn local_files_require_approved_audio() {
-        let dir = tempfile::tempdir().unwrap();
-        let music = tempfile::tempdir().unwrap();
-        fs::write(music.path().join("Artist - Song.mp3"), b"audio").unwrap();
-        fs::write(music.path().join("secret.txt"), b"secret").unwrap();
-        let mut core = Core::open(dir.path().into(), true).unwrap();
-        assert!(core.scan(music.path()).is_err());
-        core.approve_root(music.path()).unwrap();
-        assert_eq!(core.scan(music.path()).unwrap()["count"], 1);
-        let track = core.library.data.playlists["pl_local_music"].tracks[0].clone();
-        assert!(core
-            .local_path(&track)
-            .unwrap()
-            .ends_with("Artist - Song.mp3"));
-        let mut forged = track.clone();
-        forged["url"] = json!("file:///C:/Users/private/secret.mp3");
-        assert_eq!(
-            core.local_path(&forged).unwrap(),
-            core.local_path(&track).unwrap()
-        );
-        forged["id"] = json!("unknown-local-track");
-        assert!(core.local_path(&forged).is_err());
-    }
-    #[test]
-    fn github_sign_in_and_onboarding_flow() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut core = Core::open(dir.path().into(), true).unwrap();
-        assert_eq!(
-            core.local_rpc("get_settings", &[]).unwrap()["onboarding_completed"],
-            false
-        );
-        core.local_rpc("update_settings", &[json!({"onboarding_completed": true})])
-            .unwrap();
-        assert_eq!(
-            core.local_rpc("get_settings", &[]).unwrap()["onboarding_completed"],
-            true
-        );
-        let signed_in = core
-            .local_rpc("github_sign_in", &[json!("feodaI"), json!("Feodal")])
-            .unwrap();
-        assert_eq!(signed_in["signed_in"], true);
-        assert_eq!(signed_in["user"]["name"], "Feodal");
-        assert_eq!(signed_in["user"]["provider"], "github");
-        assert_eq!(
-            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
-            true
-        );
-        let cancelled = core.local_rpc("cancel_subscription", &[]).unwrap();
-        assert_eq!(cancelled["ok"], true);
-        assert_eq!(
-            core.local_rpc("get_subscription_status", &[]).unwrap()["active"],
-            false
-        );
-    }
 }

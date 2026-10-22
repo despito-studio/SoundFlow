@@ -105,7 +105,7 @@ function ytTrack(video,artistFallback='YouTube') {
   if(!/^[\w-]{11}$/.test(id||''))return null;
   const badge=video.content_image?.overlays?.flatMap(v=>v.badges||[]).find(b=>/^(\d+:)+\d+$/.test(b.text||''))?.text;
   const badgeDuration=badge?.split(':').reduce((value,part)=>value*60+Number(part),0);
-  return trackBase('youtube',id,video.title?.toString?.()||video.metadata?.title?.toString?.()||video.title,video.author?.name||video.channel?.name||video.author||(typeof artistFallback==='string'?artistFallback:'YouTube'),video.duration?.seconds||video.duration||badgeDuration,video.thumbnails?.at(-1)?.url||video.content_image?.image?.at(0)?.url||`https://i.ytimg.com/vi/${id}/hqdefault.jpg`,`https://www.youtube.com/watch?v=${id}`);
+  return {...trackBase('youtube',id,video.title?.toString?.()||video.metadata?.title?.toString?.()||video.title,video.author?.name||video.channel?.name||video.author||(typeof artistFallback==='string'?artistFallback:'YouTube'),video.duration?.seconds||video.duration||badgeDuration,video.thumbnails?.at(-1)?.url||video.content_image?.image?.at(0)?.url||`https://i.ytimg.com/vi/${id}/hqdefault.jpg`,`https://www.youtube.com/watch?v=${id}`),artist_id:video.author?.id||video.channel?.id||'',artist_url:video.author?.url||video.channel?.url||'',artist_avatar:video.author?.thumbnails?.at(-1)?.url||''};
 }
 function patchMp4Duration(buf, durationSec) {
   if (!Buffer.isBuffer(buf) || !durationSec || durationSec <= 0) return;
@@ -203,6 +203,7 @@ function scTrack(track) {
     }
   }
   const result=trackBase('soundcloud',track.id,track.title,track.user?.username,dur,(track.artwork_url||track.user?.avatar_url||'').replace('-large.','-t500x500.'),canonicalURL(track.permalink_url).url);
+  result.artist_id=String(track.user?.id||'');result.artist_url=track.user?.permalink_url||'';result.artist_avatar=(track.user?.avatar_url||'').replace('-large.','-t500x500.');
   result.downloadable=track.policy==='ALLOW' && track.media?.transcodings?.length>0;result.genre=text(track.genre,100);return result;
 }
 
@@ -297,6 +298,84 @@ export class MediaProvider {
     return getJSON(url,{headers:SC_HEADERS,signal});
   }
   rememberSC(raw) { if(raw?.id) { if(this.scRaw.size>=256)this.scRaw.delete(this.scRaw.keys().next().value);this.scRaw.set(raw.permalink_url,raw); }return scTrack(raw); }
+  async homeFeed(seeds=[],refresh=false) {
+    const artists=[...new Set(seeds.map(t=>text(t.artist,100)).filter(Boolean))].slice(0,2);
+    const key=JSON.stringify(artists);
+    if(!refresh && this.homeCache?.key===key && Date.now()-this.homeCache.time<1800000)return this.homeCache.feed;
+    const query=artists[0]||'українська музика';
+    const feed={loaded:false,personalized:artists.length>0,seed_artist:artists[0]||'',youtube:[],soundcloud:[],recommendations:[],errors:[]};
+    this.homeCache={key,time:Date.now(),feed};
+    const tasks=[
+      this.search(query,'youtube',12),
+      this.search(artists[1]||query,'soundcloud',12),
+      artists.length ? this.search(`${artists.join(' ')} music`,'all',16) : this.search('new music official audio','youtube',12)
+    ];
+    const names=['youtube','soundcloud','recommendations'];
+    let settled=0;
+    tasks.forEach((task,i)=>Promise.resolve(task).then(value=>{feed[names[i]]=value;},()=>{feed.errors.push(names[i]);}).finally(()=>{settled++;feed.loaded=settled===tasks.length;}));
+    return feed;
+  }
+  async profileAssets(input={}) {
+    const tracks=(input.artists||[]).slice(0,16);
+    const connections=input.connections||{};
+    const key=JSON.stringify([tracks.map(t=>`${t.source}:${t.artist}`).sort(),connections]);
+    if(this.profileAssetCache?.key===key)return this.profileAssetCache.data;
+    const data={loaded:false,artists:[],connections:{}};
+    this.profileAssetCache={key,data};
+    const jobs=tracks.map(track=>async()=>{
+      const key=`${track.source}:${track.artist}`;
+      let name=text(track.artist,200),avatar=track.artist_avatar||'',url=track.artist_url||'';
+      if(!avatar && track.source==='soundcloud') {
+        const ref=canonicalURL(track.url||track.source_url);
+        const raw=this.scRaw.get(ref.url)||await this.scAPI('resolve',{url:ref.url});
+        avatar=(raw.user?.avatar_url||'').replace('-large.','-t500x500.');url=raw.user?.permalink_url||url;
+      } else if(!avatar && track.source==='youtube') {
+        const ref=canonicalURL(track.url||track.source_url);
+        const yt=await this.youtube(),info=await yt.getBasicInfo(ref.id,{client:'IOS'});
+        if(info.basic_info.channel_id) {
+          const channel=await yt.getChannel(info.basic_info.channel_id);
+          avatar=channel.metadata?.avatar?.at(-1)?.url||channel.metadata?.thumbnail?.at(-1)?.url||'';
+          url=channel.metadata?.url||`https://www.youtube.com/channel/${info.basic_info.channel_id}`;
+        }
+      }
+      data.artists.push({key,name,avatar,url,source:track.source});
+    });
+    for(const [source,value] of Object.entries(connections)) {
+      const url=typeof value==='string'?value:value?.identifier;
+      if(!url || source!=='soundcloud')continue;
+      jobs.unshift(async()=>{
+        const ref=canonicalURL(url,true);if(ref.kind!=='profile')return;
+        const user=await this.scAPI('resolve',{url:ref.url});
+        if(user.kind==='user')data.connections[source]={name:user.username,avatar:(user.avatar_url||'').replace('-large.','-t500x500.'),description:text(user.description,5000),url:user.permalink_url,followers:user.followers_count,location:[user.city,user.country_code].filter(Boolean).join(', ')};
+      });
+    }
+    (async()=>{for(let i=0;i<jobs.length;i+=3)await Promise.allSettled(jobs.slice(i,i+3).map(job=>job()));data.loaded=true;})().catch(()=>{data.loaded=true;});
+    return data;
+  }
+  async creatorProfile(track) {
+    if(!track || typeof track!=='object')invalid('Некоректний автор.');
+    const ref=canonicalURL(track.url||track.source_url);
+    const key=`${track.source}:${track.id}`;
+    if(ref.source==='soundcloud') {
+      const raw=this.scRaw.get(ref.url)||await this.scAPI('resolve',{url:ref.url});
+      if(!raw.user?.id)throw new ProviderError('SoundCloud не повернув профіль автора.');
+      const user=await this.scAPI(`users/${raw.user.id}`);
+      const uploads=await this.scAPI(`users/${user.id}/tracks`,{limit:30});
+      return {track_key:key,source:'soundcloud',id:String(user.id),name:user.username,avatar:(user.avatar_url||'').replace('-large.','-t500x500.'),banner:user.visuals?.visuals?.[0]?.visual_url||'',description:text(user.description,5000),location:[user.city,user.country_code].filter(Boolean).join(', '),followers:user.followers_count,url:user.permalink_url,tracks:(uploads.collection||[]).map(t=>this.rememberSC(t)).filter(Boolean)};
+    }
+    if(ref.source==='youtube') {
+      const yt=await this.youtube();
+      const info=await yt.getBasicInfo(ref.id,{client:'IOS'});
+      const id=info.basic_info?.channel_id||track.artist_id;
+      if(!id)throw new ProviderError('YouTube не повернув канал автора.');
+      const channel=await yt.getChannel(id);
+      const metadata=channel.metadata||{};
+      let videos=[];
+      try { videos=[...(await channel.getVideos()).videos].map(v=>ytTrack(v,metadata.title)).filter(Boolean); } catch {}
+      return {track_key:key,source:'youtube',id,name:metadata.title||info.basic_info.author,avatar:metadata.avatar?.at(-1)?.url||metadata.thumbnail?.at(-1)?.url||'',description:text(metadata.description,5000),url:metadata.url||metadata.vanity_channel_url||`https://www.youtube.com/channel/${id}`,tracks:videos};
+    }
+    throw new ProviderError('Для профілю цього автора потрібне підключення Spotify. Відкрий відповідний трек на YouTube або SoundCloud.');
+  }
   async search(query,source='all',count=16) {
     query=text(query,300);count=limit(count);if(!query)return [];
     if(/^https?:\/\/|^spotify:/.test(query))return [await this.resolve(query)];
@@ -739,12 +818,15 @@ export class MediaProvider {
     return candidates.slice(0, count);
   }
   async dispatch(method,args=[]) {
-    const arity={ping:0,search:3,get_discover_tracks:1,resolve_direct_url:1,get_stream:2,get_playback_file:1,get_similar_tracks:3,get_infinite_recommendations:2,match_spotify_track:3,import_external_profile:2,download_track:1,get_downloads:0,get_download_job:1,cancel_download:1,detect_connected_accounts:2};
+    const arity={ping:0,search:3,get_home_feed:2,get_creator_profile:1,get_profile_assets:1,get_discover_tracks:1,resolve_direct_url:1,get_stream:2,get_playback_file:1,get_similar_tracks:3,get_infinite_recommendations:2,match_spotify_track:3,import_external_profile:2,download_track:1,get_downloads:0,get_download_job:1,cancel_download:1,detect_connected_accounts:2};
     if(!Object.hasOwn(arity,method))throw new ProviderError(`Unsupported provider method: ${text(method,100)}`,'unsupported_method');
     if(args.length>arity[method])invalid('Забагато аргументів методу.');
     switch(method) {
       case 'ping':return {protocol:1,engine:'youtubei.js',engine_version:'18.1.0',runtime:'node',runtime_version:process.version,runtime_available:true,runtime_bundled:['soundflow-node.exe','soundflow-node'].includes(path.basename(process.execPath).toLowerCase()),worker:'soundflow-media-provider'};
       case 'search':return this.search(args[0],args[1]||'all',args[2]??16);
+      case 'get_home_feed':return this.homeFeed(args[0],args[1]===true);
+      case 'get_creator_profile':return this.creatorProfile(args[0]);
+      case 'get_profile_assets':return this.profileAssets(args[0]);
       case 'get_discover_tracks':return this.search(GENRES[text(args[0],100)||'lofi']||text(args[0],100),'all',20);
       case 'resolve_direct_url':return this.resolve(args[0]);
       case 'get_stream':{ const media=await this.stream(args[0],!!args[1]);if(media.hls)throw new ProviderError('Ця пісня SoundCloud має лише сегментований потік. Завантажте її для відтворення.','hls_download_required');return media.url; }

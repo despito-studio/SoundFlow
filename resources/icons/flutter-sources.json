@@ -1,0 +1,11 @@
+{
+  "package": "@animateicons/vanilla",
+  "version": "0.1.0",
+  "source": "https://registry.npmjs.org/@animateicons/vanilla/-/vanilla-0.1.0.tgz",
+  "integrity": "sha512-o556Pw+B4OGShwhCBNiAs58e0yUXwb4cSipfy803Mf+UVmkSa+NV8Wmv8ZhdkDF7B6A7cl7E9jVbnHGBhRC59w==",
+  "repository": "https://github.com/Avijit07x/animateicons",
+  "iconCount": 1170,
+  "catalogSha256": "fa21b25717ce99d63d8a1236d148138088184bf65d9a85578595212e9e749ba5",
+  "adapter": "flutter_app/packages/animate_icons/lib/animate_icons.dart",
+  "refresh": "scripts/update-animateicons.py"
+}

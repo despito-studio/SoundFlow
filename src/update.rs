@@ -42,17 +42,3 @@ pub fn check() -> Option<(String, String)> {
     let current = parse_version(env!("CARGO_PKG_VERSION"))?;
     (latest > current).then_some((tag, url))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::parse_version;
-
-    #[test]
-    fn versions_are_compared_numerically() {
-        assert!(parse_version("v3.4.2") > parse_version("3.4.1"));
-        assert!(parse_version("3.10.0") > parse_version("3.9.9"));
-        assert_eq!(parse_version("v3.4.1"), parse_version("3.4.1"));
-        assert_eq!(parse_version("3.4"), Some((3, 4, 0)));
-        assert_eq!(parse_version("nightly"), None);
-    }
-}

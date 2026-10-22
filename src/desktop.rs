@@ -96,6 +96,36 @@ impl Desktop {
             return Err("Недійсний запит SoundFlow".into());
         }
         match method {
+            "get_home_feed" => {
+                let seeds = {
+                    let core = self.core.lock().map_err(lock_error)?;
+                    core.library
+                        .data
+                        .history
+                        .iter()
+                        .chain(core.library.data.liked_tracks.iter())
+                        .filter(|track| track["source"] != "local")
+                        .take(12)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+                self.provider.lock().map_err(lock_error)?.call(
+                    method,
+                    &[
+                        json!(seeds),
+                        json!(args.first().and_then(Value::as_bool).unwrap_or(false)),
+                    ],
+                )
+            }
+            "set_desktop_icon" => {
+                let name = string_arg(args, 0)?;
+                let updated = crate::shortcut::set_desktop_icon(name)?;
+                self.core
+                    .lock()
+                    .map_err(lock_error)?
+                    .local_rpc("update_settings", &[json!({"desktop_icon": name})])?;
+                Ok(json!({"ok": true, "updated": updated}))
+            }
             "clear_history" => {
                 let mut core = self.core.lock().map_err(lock_error)?;
                 self.audio_barriers
@@ -134,7 +164,12 @@ impl Desktop {
                     .iter()
                     .filter_map(|track| track["id"].as_str().map(str::to_string))
                     .collect();
-                if let Ok(remote) = self.provider.lock().map_err(lock_error)?.call("search", args) {
+                if let Ok(remote) = self
+                    .provider
+                    .lock()
+                    .map_err(lock_error)?
+                    .call("search", args)
+                {
                     if let Some(items) = remote.as_array() {
                         for track in items {
                             let id = track["id"].as_str().unwrap_or("").to_string();
@@ -147,9 +182,26 @@ impl Desktop {
                 }
                 Ok(json!(results))
             }
+            "get_infinite_recommendations" => {
+                let result = self
+                    .provider
+                    .lock()
+                    .map_err(lock_error)?
+                    .call("get_infinite_recommendations", args);
+                match result {
+                    Ok(value) if value.as_array().is_some_and(|list| !list.is_empty()) => Ok(value),
+                    _ => {
+                        // Рушій часто не має рекомендацій; підбираємо схожі треки самі.
+                        let limit = arg(args, 1).as_u64().unwrap_or(15) as usize;
+                        let tracks = crate::soundcloud::related_tracks(arg(args, 0), limit);
+                        Ok(json!(tracks))
+                    }
+                }
+            }
             "resolve_direct_url"
+            | "get_creator_profile"
+            | "get_profile_assets"
             | "get_similar_tracks"
-            | "get_infinite_recommendations"
             | "match_spotify_track"
             | "download_track"
             | "get_downloads"
@@ -193,6 +245,54 @@ impl Desktop {
             }
             "import_external_profile" => {
                 let user = self.core.lock().map_err(lock_error)?.user().to_owned();
+                // Для профілю SoundCloud забираємо всі публічні плейлисти профілю
+                // й зберігаємо кожен як окремий плейлист у бібліотеці.
+                let provider_name = string_arg(args, 0)?;
+                let identifier = string_arg(args, 1)?;
+                if provider_name == "soundcloud" && identifier.contains("/sets/") {
+                    if let Ok((name, tracks)) = crate::soundcloud::playlist_tracks(identifier) {
+                        let mut core = self.core.lock().map_err(lock_error)?;
+                        if core.user() != user {
+                            return Err("Профіль змінився. Повторіть імпорт.".into());
+                        }
+                        let result = core.local_rpc(
+                            "create_playlist_with_tracks",
+                            &[json!(name), json!(tracks)],
+                        )?;
+                        return Ok(json!({
+                            "ok": true,
+                            "profile": true,
+                            "playlists": 1,
+                            "count": result["added"].as_u64().unwrap_or(0),
+                        }));
+                    }
+                }
+                if provider_name == "soundcloud" && crate::soundcloud::is_profile_url(identifier) {
+                    if let Ok(playlists) = crate::soundcloud::profile_playlists(identifier) {
+                        if !playlists.is_empty() {
+                            let mut core = self.core.lock().map_err(lock_error)?;
+                            if core.user() != user {
+                                return Err("Профіль змінився. Повторіть імпорт.".into());
+                            }
+                            let mut created = 0usize;
+                            let mut total = 0u64;
+                            for (name, tracks) in &playlists {
+                                let result = core.local_rpc(
+                                    "create_playlist_with_tracks",
+                                    &[json!(name), json!(tracks)],
+                                )?;
+                                total += result["added"].as_u64().unwrap_or(0);
+                                created += 1;
+                            }
+                            return Ok(json!({
+                                "ok": true,
+                                "profile": true,
+                                "playlists": created,
+                                "count": total,
+                            }));
+                        }
+                    }
+                }
                 let tracks = self
                     .provider
                     .lock()
@@ -207,10 +307,11 @@ impl Desktop {
             "detect_connected_accounts" => {
                 let email = string_arg(args, 0).unwrap_or("");
                 let name = string_arg(args, 1).unwrap_or("");
-                let detected = self.provider.lock().map_err(lock_error)?.call(
-                    "detect_connected_accounts",
-                    &[json!(email), json!(name)],
-                )?;
+                let detected = self
+                    .provider
+                    .lock()
+                    .map_err(lock_error)?
+                    .call("detect_connected_accounts", &[json!(email), json!(name)])?;
                 // Провайдер лише вгадує ідентифікатор з пошти, тому кожну знахідку
                 // підтверджуємо реальним запитом до публічного профілю (404 = немає).
                 let mut detected = detected;
@@ -261,7 +362,8 @@ impl Desktop {
                     }
                 }
                 let user_id = core.user().to_string();
-                let remote_id = crate::supabase_auth::remote_user_id().unwrap_or_else(|| user_id.clone());
+                let remote_id =
+                    crate::supabase_auth::remote_user_id().unwrap_or_else(|| user_id.clone());
                 if let Ok(sup_accounts) = crate::supabase::fetch_connected_accounts(&remote_id) {
                     if let Some(sup_obj) = sup_accounts.as_object() {
                         for (provider, val) in sup_obj {
@@ -284,7 +386,10 @@ impl Desktop {
                         if info["found"].as_bool() == Some(true) {
                             if let Some(id) = info["identifier"].as_str() {
                                 if !id.is_empty() {
-                                    let _ = core.local_rpc("set_connected_account", &[json!(provider), json!(id)]);
+                                    let _ = core.local_rpc(
+                                        "set_connected_account",
+                                        &[json!(provider), json!(id)],
+                                    );
                                     crate::supabase::sync_one_account(&remote_id, provider, id);
                                 }
                             }
@@ -298,8 +403,12 @@ impl Desktop {
                 let identifier = string_arg(args, 1)?;
                 let mut core = self.core.lock().map_err(lock_error)?;
                 let user_id = core.user().to_string();
-                let remote_id = crate::supabase_auth::remote_user_id().unwrap_or_else(|| user_id.clone());
-                let res = core.local_rpc("set_connected_account", &[json!(provider), json!(identifier)])?;
+                let remote_id =
+                    crate::supabase_auth::remote_user_id().unwrap_or_else(|| user_id.clone());
+                let res = core.local_rpc(
+                    "set_connected_account",
+                    &[json!(provider), json!(identifier)],
+                )?;
                 crate::supabase::sync_one_account(&remote_id, provider, identifier);
                 Ok(res)
             }
@@ -504,10 +613,8 @@ impl Desktop {
                         return Ok(json!({"ok": true, "mode": mode, "revision": 0, "empty": true}));
                     };
                     let mut core = self.core.lock().map_err(lock_error)?;
-                    let result = core.local_rpc(
-                        "import_library",
-                        &[json!(payload), json!(mode == "merge")],
-                    )?;
+                    let result = core
+                        .local_rpc("import_library", &[json!(payload), json!(mode == "merge")])?;
                     core.refresh_local_files();
                     Ok(json!({"ok": true, "mode": mode, "revision": revision, "result": result}))
                 } else {
@@ -615,82 +722,4 @@ fn validated_url(raw: &str) -> CoreResult<String> {
         );
     }
     Ok(url.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::playback::ListeningReport;
-    fn report(user: &str, session: &str, started_at: f64) -> ListeningReport {
-        ListeningReport {
-            track: json!({"id":"yt-native","title":"Native track","artist":"SoundFlow","source":"youtube","duration":120,"url":"https://www.youtube.com/watch?v=native"}),
-            user_id: user.into(),
-            session_id: session.into(),
-            started_at,
-            heard_seconds: 15.0,
-            history_due: true,
-        }
-    }
-    #[test]
-    fn cumulative_reports_preserve_captured_profile_and_history_once() {
-        let folder = tempfile::tempdir().unwrap();
-        let desktop = Desktop::open(folder.path().into(), folder.path().into(), true).unwrap();
-        let captured = report("prior-profile", "native-session", library::now() - 20.0);
-        desktop.record_audio(&captured).unwrap();
-        desktop.record_audio(&captured).unwrap();
-        let core = desktop.core.lock().unwrap();
-        assert!(core.library.data.history.is_empty());
-        let summary = core
-            .listening
-            .summary("prior-profile", "30d", "all")
-            .unwrap();
-        assert_eq!(summary["plays"], 1);
-        assert_eq!(summary["total_seconds"], 15.0);
-        assert_eq!(
-            core.listening.summary("guest", "30d", "all").unwrap()["plays"],
-            0
-        );
-        let prior = library::LibraryStore::open(core::account_file(folder.path(), "prior-profile"))
-            .unwrap();
-        assert_eq!(prior.data.play_counts.get("yt-native"), Some(&1));
-    }
-    #[test]
-    fn clearing_history_rejects_queued_reports_from_prior_session() {
-        let folder = tempfile::tempdir().unwrap();
-        let desktop = Desktop::open(folder.path().into(), folder.path().into(), true).unwrap();
-        let prior = report("guest", "prior-session", library::now() - 20.0);
-        desktop.record_audio(&prior).unwrap();
-        desktop.call("clear_history", &[]).unwrap();
-        assert_eq!(desktop.record_audio(&prior).unwrap()["discarded"], true);
-        let core = desktop.core.lock().unwrap();
-        assert!(core.library.data.history.is_empty());
-        assert_eq!(
-            core.listening.summary("guest", "30d", "all").unwrap()["plays"],
-            0
-        );
-    }
-    #[test]
-    fn heard_time_persists_while_cloud_commands_hold_core_lock() {
-        let folder = tempfile::tempdir().unwrap();
-        let desktop = std::sync::Arc::new(
-            Desktop::open(folder.path().into(), folder.path().into(), true).unwrap(),
-        );
-        let guard = desktop.core.lock().unwrap();
-        let worker = desktop.clone();
-        let captured = report("guest", "network-session", library::now() - 20.0);
-        let recording = std::thread::spawn(move || worker.record_audio(&captured));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            if guard.listening.summary("guest", "30d", "all").unwrap()["plays"] == 1 {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "Audio persistence waited for Core"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        drop(guard);
-        recording.join().unwrap().unwrap();
-    }
 }

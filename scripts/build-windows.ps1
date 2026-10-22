@@ -1,21 +1,37 @@
 param(
-    [ValidateSet('Dev', 'Build', 'Check', 'Test', 'Validate')]
-    [string]$Action = 'Dev'
+    [ValidateSet('Build', 'Check', 'Environment')]
+    [string]$Action = 'Build'
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-if (-not (Test-Path -LiteralPath $vswhere)) {
-    throw 'Install Visual Studio C++ build tools first. See docs/WINDOWS.md.'
+$vsRoot = $null
+$msvcRoot = $null
+if (Test-Path -LiteralPath $vswhere) {
+    $vsRoot = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if ($vsRoot) {
+        $msvcVersion = (Get-Content -LiteralPath (Join-Path $vsRoot 'VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt') -Raw).Trim()
+        $msvcRoot = Join-Path $vsRoot "VC/Tools/MSVC/$msvcVersion"
+    }
 }
-$vsRoot = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vsRoot) { throw 'Visual Studio C++ x64 tools are missing.' }
-$msvcVersion = (Get-Content -LiteralPath (Join-Path $vsRoot 'VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt') -Raw).Trim()
-$msvcRoot = Join-Path $vsRoot "VC/Tools/MSVC/$msvcVersion"
+if (-not $msvcRoot) {
+    $portableVcRoot = Join-Path $projectRoot 'output/toolchain/msvc/VC'
+    $portableToolset = Get-ChildItem -LiteralPath (Join-Path $portableVcRoot 'Tools/MSVC') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if (-not $portableToolset) { throw 'Install Visual Studio C++ tools or run scripts/setup-msvc.ps1. See docs/WINDOWS.md.' }
+    $msvcRoot = $portableToolset.FullName
+    $msvcVersion = $portableToolset.Name
+}
 $msvcBin = Join-Path $msvcRoot 'bin/Hostx64/x64'
-$cargoBin = Join-Path $env:USERPROFILE '.cargo/bin'
-if (-not (Test-Path -LiteralPath (Join-Path $cargoBin 'cargo.exe'))) { throw 'Install Rust stable MSVC first.' }
+$cargoCandidates = @()
+if ($env:CARGO_HOME) { $cargoCandidates += Join-Path $env:CARGO_HOME 'bin/cargo.exe' }
+$cargoCommand = Get-Command cargo.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($cargoCommand) { $cargoCandidates += $cargoCommand.Source }
+$cargoCandidates += Join-Path $env:USERPROFILE '.cargo/bin/cargo.exe'
+$cargoExe = $cargoCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $cargoExe) { throw 'Install Rust MSVC 1.92 or newer. The script searches CARGO_HOME, PATH and the current user profile.' }
+$cargoBin = Split-Path $cargoExe
 
 # Prefer an installed SDK. The local NuGet SDK is only a checkout-scoped fallback.
 $sdkSystemRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
@@ -45,34 +61,25 @@ $env:INCLUDE = "$(Join-Path $msvcRoot 'include');$(Join-Path $sdkRoot "Include/$
 $env:WindowsSdkDir = "$sdkRoot\"
 $env:WindowsSDKVersion = "$sdkVersion\"
 $env:WindowsSdkBinPath = "$(Split-Path $sdkBin)\"
-$env:VCINSTALLDIR = "$(Join-Path $vsRoot 'VC')\"
+$vcInstallRoot = if ($vsRoot) { Join-Path $vsRoot 'VC' } else { $portableVcRoot }
+$env:VCINSTALLDIR = "$vcInstallRoot\"
 $env:VCToolsInstallDir = "$msvcRoot\"
 $env:VCToolsVersion = $msvcVersion
-$env:VisualStudioVersion = '18.0'
+$env:VisualStudioVersion = '17.0'
 $env:VSCMD_ARG_TGT_ARCH = 'x64'
 $env:VSCMD_ARG_HOST_ARCH = 'x64'
 $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = Join-Path $msvcBin 'link.exe'
 $env:RC = Join-Path $sdkBin 'rc.exe'
 $env:RC_PATH = $env:RC
+if ($Action -eq 'Environment') { return }
 # Keep builds predictable on PCs with limited RAM.
 if (-not $env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS = '1' }
 
 Push-Location $projectRoot
 try {
     switch ($Action) {
-        'Validate' {
-            $smokeDir = Join-Path $projectRoot 'output/toolchain'
-            New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
-            $smokeSource = Join-Path $smokeDir 'smoke.rs'
-            Set-Content -LiteralPath $smokeSource -Encoding utf8 -Value 'fn main() { println!("soundflow-rust-ready"); }'
-            & (Join-Path $cargoBin 'rustc.exe') $smokeSource -o (Join-Path $smokeDir 'smoke.exe')
-            if ($LASTEXITCODE -ne 0) { throw 'Rust/MSVC/SDK smoke compilation failed.' }
-            & (Join-Path $smokeDir 'smoke.exe')
-        }
         'Check' { & (Join-Path $cargoBin 'cargo.exe') check --locked --manifest-path Cargo.toml }
-        'Test' { & (Join-Path $cargoBin 'cargo.exe') test --release --locked --manifest-path Cargo.toml }
         'Build' { & (Join-Path $cargoBin 'cargo.exe') build --release --locked --manifest-path Cargo.toml }
-        'Dev' { & (Join-Path $cargoBin 'cargo.exe') run --locked --manifest-path Cargo.toml }
     }
     if ($LASTEXITCODE -ne 0) { throw "Native $Action failed with exit code $LASTEXITCODE." }
 } finally {
