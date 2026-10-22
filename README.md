@@ -1,6 +1,6 @@
 # SoundFlow
 
-Поточна версія: **3.5.1+1 на Flutter для Windows**. [Завантажити реліз](https://github.com/despito-studio/SoundFlow/releases/tag/v3.5.1%2B1). [Перенесені зміни GitHub](docs/upstream/2026-10-22.md).
+Поточна версія: **3.5.2 на Flutter для Windows**. [Завантажити реліз](https://github.com/despito-studio/SoundFlow/releases/tag/v3.5.2). [Перенесені зміни GitHub](docs/upstream/2026-10-22.md).
 
 Музичний застосунок для Windows x64: інтерфейс Flutter, аудіо та медіатека Rust. Flutter викликає наявний NativeSession через локальну FFI-бібліотеку soundflow_lib.dll. WebView2 не потрібний.
 

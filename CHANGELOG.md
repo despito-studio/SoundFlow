@@ -1,6 +1,6 @@
 # Changelog
 
-## Flutter Windows migration, 2026-10-22
+## 3.5.2 (2026-10-22)
 
 - Flutter interface with Discovery, Library, profiles, Dock and Dynamic Island.
 - Desktop-only Island residency, alpha-smoothed contour and compact sizing.
