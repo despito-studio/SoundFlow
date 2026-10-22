@@ -1278,7 +1278,7 @@ class _WorkspaceState extends State<Workspace> {
           onTap: () => showAboutDialog(
             context: context,
             applicationName: 'SoundFlow',
-            applicationVersion: '3.5.1',
+            applicationVersion: '3.5.2',
             children: [
               const Text('Музика, медіатека й швидкий мініплеєр для Windows.'),
             ],
