@@ -1,6 +1,6 @@
 # SoundFlow
 
-Поточна версія: **3.5.1 на Flutter для Windows**. [Перенесені зміни GitHub](docs/upstream/2026-10-22.md).
+Поточна версія: **3.5.1+1 на Flutter для Windows**. [Завантажити реліз](https://github.com/despito-studio/SoundFlow/releases/tag/v3.5.1%2B1). [Перенесені зміни GitHub](docs/upstream/2026-10-22.md).
 
 Музичний застосунок для Windows x64: інтерфейс Flutter, аудіо та медіатека Rust. Flutter викликає наявний NativeSession через локальну FFI-бібліотеку soundflow_lib.dll. WebView2 не потрібний.
 
@@ -30,10 +30,10 @@ Flutter SDK 3.47.7 розміщений у output/toolchain/flutter. Потрі�
 
     .\scripts\package-windows.ps1
 
-Готові файли зберігаються в `dist`. GitHub Actions збирає Flutter, Rust та
-медіапровайдер і публікує ZIP та Setup.exe як артефакт `soundflow-windows-x64`.
-Тестових кроків немає. Linux-скрипти, попередній UI, тестові набори та старі
-ручні скрипти публікації прибрано.
+Готові файли зберігаються в `dist`. Збірка й пакування виконуються локально
+на Windows-ПК. У GitHub Releases завантажуються готові ZIP, Setup.exe та
+SHA256SUMS. Workflow збірки на GitHub відсутній. Linux-скрипти, попередній UI,
+тестові набори та старі ручні скрипти публікації прибрано.
 
 ## Структура
 
