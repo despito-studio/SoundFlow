@@ -124,7 +124,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          if gh api "repos/$GH_REPO/releases/tags/v$VERSION" > release.json; then
+          find_release() {
+            gh api --paginate "repos/$GH_REPO/releases" |
+              jq -s --arg tag "v$VERSION" 'add | map(select(.tag_name == $tag)) | if length > 1 then error("Duplicate version releases") else .[0] // empty end' > release.json
+          }
+          find_release
+          if test -s release.json; then
             if jq -e '.draft == false' release.json > /dev/null; then
               # An uncertain final publish can be retried, but public bytes are immutable.
               for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip"; do
@@ -136,10 +141,12 @@ jobs:
             fi
           else
             gh release create "v$VERSION" --verify-tag --draft --title "SoundFlow $VERSION" --generate-notes
+            find_release
           fi
+          release_id="$(jq -er '.id' release.json)"
           gh release upload "v$VERSION" --clobber \
             "release/SoundFlow-$VERSION-Setup.exe" \
             "release/SoundFlow-$VERSION-windows-x64.zip"
-          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > release.json
+          gh api "repos/$GH_REPO/releases/$release_id" > release.json
           test "$(jq '.assets | length' release.json)" = 2
-          gh release edit "v$VERSION" --draft=false --latest
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true
