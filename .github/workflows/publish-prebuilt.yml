@@ -7,6 +7,9 @@ on:
         description: Version of the verified draft release
         required: true
         default: '1.0.0'
+      release_id:
+        description: Numeric ID of the private draft release
+        required: true
       channel_sha256:
         description: SHA-256 of the private update-channel archive
         required: true
@@ -23,6 +26,7 @@ concurrency:
 
 env:
   VERSION: ${{ inputs.version }}
+  RELEASE_ID: ${{ inputs.release_id }}
   CHANNEL_SHA256: ${{ inputs.channel_sha256 }}
   GH_REPO: ${{ github.repository }}
 
@@ -39,12 +43,13 @@ jobs:
           import os, re, tomllib
           version = os.environ['VERSION']
           assert re.fullmatch(r'\d+\.\d+\.\d+', version)
+          assert re.fullmatch(r'\d+', os.environ['RELEASE_ID'])
           assert re.fullmatch(r'[a-fA-F0-9]{64}', os.environ['CHANNEL_SHA256'])
           assert tomllib.load(open('Cargo.toml', 'rb'))['package']['version'] == version
           assert re.search(r'^version: ' + re.escape(version) + r'\s*$', open('flutter_app/pubspec.yaml').read(), re.M)
           PY
-          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > draft.json
-          jq -e --arg sha "$GITHUB_SHA" '.draft == true and .target_commitish == $sha' draft.json
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > draft.json
+          jq -e --arg sha "$GITHUB_SHA" --arg tag "v$VERSION" '.draft == true and .target_commitish == $sha and .tag_name == $tag' draft.json
           channel="SoundFlow-$VERSION-update-channel.tar"
           jq -e --arg name "$channel" --arg digest "sha256:${CHANNEL_SHA256,,}" '.assets[] | select(.name == $name and .digest == $digest)' draft.json
           for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip" "$channel"; do
@@ -52,7 +57,8 @@ jobs:
           done
           test "$(jq '.assets | length' draft.json)" = 3
           mkdir incoming
-          gh release download "v$VERSION" --pattern "$channel" --dir incoming
+          asset_id="$(jq -er --arg name "$channel" '.assets[] | select(.name == $name) | .id' draft.json)"
+          gh api "repos/$GH_REPO/releases/assets/$asset_id" -H 'Accept: application/octet-stream' > "incoming/$channel"
           echo "$CHANNEL_SHA256  incoming/$channel" | sha256sum --check -
       - name: Validate the complete update channel
         run: |
@@ -139,7 +145,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PREVIOUS_TAG_SHA: ${{ inputs.previous_tag_sha }}
         run: |
-          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > draft.json
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > draft.json
           jq -e --arg sha "$GITHUB_SHA" '.target_commitish == $sha' draft.json
           if jq -e '.draft == false' draft.json > /dev/null; then
             test "$(jq '.assets | length' draft.json)" = 2
@@ -163,7 +169,7 @@ jobs:
           if test -n "$asset_id"; then
             gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
           fi
-          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > draft.json
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > draft.json
           test "$(jq '.assets | length' draft.json)" = 2
           for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip"; do
             jq -e --arg name "$file" '.assets[] | select(.name == $name and .state == "uploaded")' draft.json
