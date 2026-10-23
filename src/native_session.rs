@@ -39,6 +39,8 @@ pub struct SessionSnapshot {
     pub selected_playlist: String,
     pub search_query: String,
     pub search_source: String,
+    pub search_loading: bool,
+    pub search_error: String,
     pub player: PlayerState,
     pub message: String,
     pub message_error: bool,
@@ -73,6 +75,8 @@ impl Default for SessionSnapshot {
             selected_playlist: String::new(),
             search_query: String::new(),
             search_source: "all".into(),
+            search_loading: false,
+            search_error: String::new(),
             player: PlayerState::default(),
             message: String::new(),
             message_error: false,
@@ -183,6 +187,7 @@ pub struct NativeSession {
     playback: SyncSender<PlayRequest>,
     reports: SyncSender<ListeningReport>,
     discord: DiscordRpc,
+    updater: Arc<crate::update::Updater>,
 }
 
 impl NativeSession {
@@ -221,6 +226,7 @@ impl NativeSession {
             playback,
             reports,
             discord: DiscordRpc::new(true),
+            updater: crate::update::Updater::new(&data_dir, offline),
         };
         for (name, receiver) in [
             ("soundflow-local", local_rx),
@@ -311,8 +317,10 @@ impl NativeSession {
             "selected_playlist": state.selected_playlist, "message": state.message,
             "message_error": state.message_error, "pending": state.pending,
             "search_query": state.search_query, "search_source": state.search_source,
+            "search_loading": state.search_loading, "search_error": state.search_error,
             "last_method": state.last_method, "last_result": state.last_result,
             "revision": state.revision,
+            "update": self.updater.snapshot(),
             "player": {
                 "track": state.player.track, "playing": state.player.playing,
                 "loading": state.player.loading, "position": state.player.position,
@@ -358,19 +366,26 @@ impl NativeSession {
             state.view = "search".into();
             state.search_query = query.clone();
             state.search_source = source.into();
+            state.search_loading = !query.is_empty();
+            state.search_error.clear();
             state.search.clear();
             state.message.clear();
+            state.message_error = false;
             state.revision += 1;
         }
         if query.is_empty() {
             return;
         }
         self.call("add_search_query", vec![json!(query)]);
-        self.enqueue(
+        if !self.enqueue(
             "search",
             vec![json!(query), json!(source), json!(40)],
             Relevance::Search(generation),
-        );
+        ) {
+            let mut state = self.state();
+            state.search_loading = false;
+            state.search_error = state.message.clone();
+        }
     }
 
     pub fn play(&self, track: Value, mut queue: Vec<Value>) {
@@ -756,6 +771,11 @@ impl NativeSession {
                     state.revision += 1;
                 }
             }
+            "update-check" => self.updater.check(payload["download"].as_bool().unwrap_or(false)),
+            "update-download" => self.updater.download(),
+            "update-cancel" => self.updater.cancel(),
+            "update-apply" => self.updater.apply_async(),
+            "update-install" => self.updater.install_async(),
             "refresh" => self.call("_refresh", vec![]),
             "scan-local" => self.call("scan_local_music", vec![Value::Null]),
             "set-settings" | "update-settings" => self.update_settings(payload),
@@ -782,6 +802,7 @@ impl NativeSession {
     }
 
     pub fn shutdown(&self) {
+        self.updater.cancel();
         if self.shared.stopped.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -1138,6 +1159,9 @@ impl NativeSession {
             state.accounts = snapshot.4;
             if changed {
                 state.search.clear();
+                state.search_query.clear();
+                state.search_loading = false;
+                state.search_error.clear();
                 state.home.clear();
                 state.feed = json!({});
                 state.creator = json!({});
@@ -1201,7 +1225,26 @@ impl NativeSession {
             return;
         }
         let mut state = self.state();
+        // A newer query can arrive while refresh_snapshot runs. Check again
+        // under the same lock used to replace the search results and status.
+        if let Relevance::Search(generation) = job.relevance {
+            if generation != self.shared.search_generation.load(Ordering::Acquire)
+                || job.profile != self.shared.profile_generation.load(Ordering::Acquire)
+            {
+                return;
+            }
+        }
         state.last_method = job.method.clone();
+        if job.method == "search" {
+            state.search_loading = false;
+            state.search_error = match &result {
+                Err(error) => error.clone(),
+                Ok(value) if value["ok"] == false || value["success"] == false => {
+                    value["error"].as_str().unwrap_or("Не вдалося виконати пошук").into()
+                }
+                _ => String::new(),
+            };
+        }
         match result {
             Err(error) => {
                 state.message = error.clone();

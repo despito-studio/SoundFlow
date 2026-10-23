@@ -25,7 +25,7 @@ pub fn text(value: Option<&Value>, max: usize) -> String {
 
 fn default_settings() -> Map<String, Value> {
     json!({"volume":0.8,"repeat":"off","shuffle":false,"preferred_source":"all",
-        "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,
+        "hotkeys_enabled":true,"tray_enabled":true,"local_music_enabled":true,"auto_update_enabled":true,
         "volume_norm_enabled":true,"direct_paste_enabled":true,"smart_cache_enabled":true,
         "offline_download_enabled":true,"infinite_autoplay":true,"discord_rpc_enabled":true,"theme":"dark",
         "language":"uk","accent":"blue","playback_speed":1.0,"onboarding_completed":false,"import_prompt_disabled":false})
@@ -350,6 +350,7 @@ impl LibraryStore {
                 | "reduced_motion"
                 | "hotkeys_enabled"
                 | "tray_enabled"
+                | "auto_update_enabled"
                 | "local_music_enabled"
                 | "volume_norm_enabled"
                 | "direct_paste_enabled"

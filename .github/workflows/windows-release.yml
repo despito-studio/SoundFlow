@@ -1,0 +1,145 @@
+name: Windows release and update channel
+
+on:
+  push:
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the version in Cargo.toml (leave off for build verification)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soundflow-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate release version
+        id: version
+        env:
+          SHOULD_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          $version = [regex]::Match((Get-Content Cargo.toml -Raw),'(?m)^version = "(\d+\.\d+\.\d+)"\s*$').Groups[1].Value
+          if (-not $version -or (Get-Content flutter_app/pubspec.yaml -Raw) -notmatch "(?m)^version: $([regex]::Escape($version))\s*$") { throw 'Cargo and Flutter versions must agree.' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag and application versions must agree.' }
+          if ($env:SHOULD_PUBLISH -eq 'true' -and $env:GITHUB_REF_TYPE -ne 'tag') { throw 'Select the matching version tag when publishing.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: media-provider/package-lock.json
+      - name: Prepare native build tools and media
+        run: |
+          python -m pip install cmake ninja
+          npm ci --prefix media-provider
+          node scripts/build-provider.mjs
+      - name: Test and build
+        run: |
+          . ./scripts/build-windows.ps1 -Action Environment
+          cargo test --locked --release update::tests
+          if ($LASTEXITCODE -ne 0) { throw 'Updater tests failed.' }
+          Push-Location flutter_app
+          try {
+            flutter pub get
+            flutter test
+            if ($LASTEXITCODE -ne 0) { throw 'Flutter tests failed.' }
+          } finally { Pop-Location }
+          ./scripts/build-flutter-windows.ps1
+          ./scripts/test-velopack.ps1
+      - name: Package installer, managed portable, and Pages channel
+        env:
+          SHOULD_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          $options = @{}
+          if ($env:SHOULD_PUBLISH -eq 'true') { $options.PreviousFeed = 'https://despito-studio.github.io/SoundFlow/updates/win-x64/' }
+          ./scripts/package-windows.ps1 @options
+          $setup = Resolve-Path "dist/release/${{ steps.version.outputs.version }}/SoundFlow-${{ steps.version.outputs.version }}-Setup.exe"
+          foreach ($check in @('--self-test','--verify-ui')) {
+            $process = Start-Process -FilePath $setup -ArgumentList $check -WindowStyle Hidden -PassThru -Wait
+            if ($process.ExitCode -ne 0) { throw "Installer $check failed." }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: dist/release/${{ steps.version.outputs.version }}/*
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/pages
+
+  deploy-updates:
+    if: github.event_name == 'push' || inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Publish service packages atomically
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  publish-downloads:
+    if: github.event_name == 'push' || inputs.publish
+    needs: [build, deploy-updates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release
+      - name: Publish exactly two user downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if gh api "repos/$GH_REPO/releases/tags/v$VERSION" > release.json; then
+            if jq -e '.draft == false' release.json > /dev/null; then
+              # An uncertain final publish can be retried, but public bytes are immutable.
+              for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip"; do
+                digest="sha256:$(sha256sum "release/$file" | cut -d' ' -f1)"
+                jq -e --arg name "$file" --arg digest "$digest" '.assets[] | select(.name == $name and .digest == $digest)' release.json > /dev/null
+              done
+              test "$(jq '.assets | length' release.json)" = 2
+              exit 0
+            fi
+          else
+            gh release create "v$VERSION" --verify-tag --draft --title "SoundFlow $VERSION" --generate-notes
+          fi
+          gh release upload "v$VERSION" --clobber \
+            "release/SoundFlow-$VERSION-Setup.exe" \
+            "release/SoundFlow-$VERSION-windows-x64.zip"
+          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > release.json
+          test "$(jq '.assets | length' release.json)" = 2
+          gh release edit "v$VERSION" --draft=false --latest

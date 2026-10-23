@@ -7,6 +7,8 @@ Windows frontend for the Rust audio core. Build from the repository root:
 ./scripts/package-windows.ps1
 ```
 
-The runnable bundle is `output/flutter-preview`; distributable ZIP and Setup.exe
-are written to `dist`. Keep the executable, DLLs, resources and data together.
+The development bundle is `output/flutter-preview`; the installer and managed
+portable ZIP are written to `dist/release/<version>`. Keep each bundle intact.
 See [Windows setup](../docs/WINDOWS.md) and [architecture](../docs/ARCHITECTURE.md).
+
+For contribution guidelines, see [CONTRIBUTING.md](../CONTRIBUTING.md).

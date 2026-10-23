@@ -224,7 +224,7 @@ class Control extends StatelessWidget {
             onTap: onTap,
             icon: icon,
             circle: true,
-            focusColor: p.accent.withValues(alpha: .28),
+            focusColor: p.accent,
             hoverColor: primary ? p.muted : p.hover,
             child: SizedBox(
               width: size,
@@ -688,11 +688,13 @@ class TrackRow extends StatefulWidget {
     required this.onPlay,
     required this.onAddPlaylist,
     this.queueIndex,
+    this.quiet = false,
   });
   final Json track;
   final Core core;
   final VoidCallback onPlay, onAddPlaylist;
   final int? queueIndex;
+  final bool quiet;
   @override
   State<TrackRow> createState() => _TrackRowState();
 }
@@ -705,6 +707,14 @@ class _TrackRowState extends State<TrackRow> {
       context: context,
       position: RelativeRect.fromLTRB(offset.dx, offset.dy, 0, 0),
       items: [
+        PopupMenuItem(
+          value: 'like',
+          child: Text(
+            c.isLiked(widget.track)
+                ? 'Прибрати з улюбленого'
+                : 'Додати в улюблене',
+          ),
+        ),
         const PopupMenuItem(
           value: 'add_next',
           child: Text('Відтворити наступним'),
@@ -769,7 +779,11 @@ class _TrackRowState extends State<TrackRow> {
   @override
   Widget build(BuildContext context) {
     final c = widget.core, p = context.paints, t = widget.track;
-    final current = c.hasTrack && trackKey(t) == trackKey(c.current),
+    final current =
+            c.hasTrack &&
+            (widget.queueIndex != null
+                ? widget.queueIndex == c.queueIndex
+                : trackKey(t) == trackKey(c.current)),
         active = current && c.playing;
     return MouseRegion(
       onEnter: (_) => setState(() => hover = true),
@@ -837,24 +851,26 @@ class _TrackRowState extends State<TrackRow> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Control(
-                        'heart',
-                        c.isLiked(t)
-                            ? 'Прибрати з улюбленого'
-                            : 'Додати в улюблене',
-                        active: c.isLiked(t),
-                        color: c.isLiked(t)
-                            ? p.accent
-                            : hover
-                            ? p.ink
-                            : p.muted,
-                        onTap: () => c.action('like', t),
-                      ),
-                      Control(
-                        active ? 'pause' : 'play',
-                        active ? 'Пауза' : 'Відтворити',
-                        onTap: widget.onPlay,
-                      ),
+                      if (!widget.quiet)
+                        Control(
+                          'heart',
+                          c.isLiked(t)
+                              ? 'Прибрати з улюбленого'
+                              : 'Додати в улюблене',
+                          active: c.isLiked(t),
+                          color: c.isLiked(t)
+                              ? p.accent
+                              : hover
+                              ? p.ink
+                              : p.muted,
+                          onTap: () => c.action('like', t),
+                        ),
+                      if (!widget.quiet)
+                        Control(
+                          active ? 'pause' : 'play',
+                          active ? 'Пауза' : 'Відтворити',
+                          onTap: widget.onPlay,
+                        ),
                       Control(
                         'more',
                         'Дії з треком',
@@ -947,189 +963,6 @@ Future<void> showVolume(BuildContext anchor, Core core) async {
       opacity: CurvedAnimation(parent: animation, curve: Anicry.easeOut),
       child: child,
     ),
-  );
-}
-
-class FloatingPlayer extends StatelessWidget {
-  const FloatingPlayer(this.core, {super.key});
-  final Core core;
-  @override
-  Widget build(BuildContext context) => ValueListenableBuilder<Json>(
-    valueListenable: core.playback,
-    builder: (context, pb, _) {
-      final p = context.paints, track = object(pb['track']);
-      final playing = pb['playing'] == true;
-      final duration = (pb['duration'] as num?)?.toDouble() ?? 0;
-      final position = (pb['position'] as num?)?.toDouble() ?? 0;
-      final volume = (pb['volume'] as num?)?.toDouble() ?? .8;
-      return RepaintBoundary(
-        child: Material(
-          color: core.dark ? const Color(0xff0b0b0b) : p.surface,
-          borderRadius: BorderRadius.circular(SoundFlowCorners.panel),
-          clipBehavior: Clip.antiAlias,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 12, 7),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LayoutBuilder(
-                  builder: (context, box) => SizedBox(
-                    height: 44,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: SizedBox(
-                            width: box.maxWidth * .36,
-                            child: AnicryTap(
-                              onTap: () => core.nav('now'),
-                              radius: 10,
-                              child: Row(
-                                children: [
-                                  AnimatedSwitcher(
-                                    duration: core.reduced
-                                        ? Duration.zero
-                                        : Anicry.reveal,
-                                    child: Artwork(
-                                      trackCover(track),
-                                      size: 44,
-                                      corners: SoundFlowCorners.inset(
-                                        BorderRadius.circular(
-                                          SoundFlowCorners.panel,
-                                        ),
-                                        const EdgeInsets.only(
-                                          left: 16,
-                                          top: 12,
-                                          right: 16,
-                                          bottom: 12,
-                                        ),
-                                        elliptical: true,
-                                      ),
-                                      key: ValueKey(trackKey(track)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          trackTitle(track),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            height: 1.3,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          pb['loading'] == true
-                                              ? 'Завантажуємо…'
-                                              : trackArtist(track),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            height: 1.3,
-                                            color: p.muted,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Control(
-                              'skip-back',
-                              'Попередній трек',
-                              size: 34,
-                              glyphSize: 20,
-                              onTap: () => core.player('previous'),
-                            ),
-                            const SizedBox(width: 9),
-                            Control(
-                              playing ? 'pause' : 'play',
-                              playing ? 'Пауза' : 'Відтворити',
-                              primary: true,
-                              size: 40,
-                              glyphSize: 21,
-                              onTap: () => core.player('toggle'),
-                            ),
-                            const SizedBox(width: 9),
-                            Control(
-                              'skip-forward',
-                              'Наступний трек',
-                              size: 34,
-                              glyphSize: 20,
-                              onTap: () => core.player('next'),
-                            ),
-                          ],
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Builder(
-                                builder: (anchor) => Control(
-                                  volume == 0 ? 'volume-x' : 'volume-2',
-                                  'Гучність · ${(volume * 100).round()}%',
-                                  size: 32,
-                                  glyphSize: 18,
-                                  onTap: () => showVolume(anchor, core),
-                                ),
-                              ),
-                              Control(
-                                'list',
-                                'Черга',
-                                size: 32,
-                                glyphSize: 18,
-                                active: core.route == 'queue',
-                                onTap: () => core.nav('queue'),
-                              ),
-                              Control(
-                                'expand',
-                                'Dynamic Island · Ctrl+Alt+M / Ctrl+Shift+Space',
-                                size: 32,
-                                glyphSize: 18,
-                                onTap: core.island,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 5),
-                PlaybackTimeline(
-                  key: ValueKey(trackKey(track)),
-                  position: position,
-                  duration: duration,
-                  inline: true,
-                  fontSize: 10,
-                  onSeek: duration > 0
-                      ? (v) => core.command({'type': 'seek', 'value': v})
-                      : null,
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
   );
 }
 

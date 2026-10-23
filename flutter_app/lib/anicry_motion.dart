@@ -10,15 +10,20 @@ abstract final class Anicry {
   static const reveal = Duration(milliseconds: 220);
   static const layout = Duration(milliseconds: 360);
   static const dialog = Duration(milliseconds: 280);
+  // Anicry motion.ts: continuity uses layout/easeInOut; only new labels reveal.
+  static const contentDelay = Duration(milliseconds: 50);
+  static const contentOpacity = Duration(milliseconds: 80);
+  static const contentExit = Duration(milliseconds: 160);
   static Future<void> load() => AnimateIcons.load();
 }
 
 Future<T?> showAnicryDialog<T>({
   required BuildContext context,
   required WidgetBuilder builder,
+  bool barrierDismissible = true,
 }) => showGeneralDialog<T>(
   context: context,
-  barrierDismissible: true,
+  barrierDismissible: barrierDismissible,
   barrierLabel: 'Закрити',
   barrierColor: Colors.black.withValues(alpha: .56),
   transitionDuration: MediaQuery.disableAnimationsOf(context)
@@ -58,6 +63,8 @@ class AnicryTap extends StatefulWidget {
     this.radius = 10,
     this.hoverColor,
     this.focusColor,
+    this.autofocus = false,
+    this.focusNode,
   });
   final Widget child;
   final VoidCallback? onTap;
@@ -65,6 +72,8 @@ class AnicryTap extends StatefulWidget {
   final bool circle;
   final double radius;
   final Color? hoverColor, focusColor;
+  final bool autofocus;
+  final FocusNode? focusNode;
   @override
   State<AnicryTap> createState() => _AnicryTapState();
 }
@@ -101,6 +110,8 @@ class _AnicryTapState extends State<AnicryTap>
           : Anicry.press,
       curve: Anicry.easeOut,
       child: FocusableActionDetector(
+        autofocus: widget.autofocus,
+        focusNode: widget.focusNode,
         enabled: widget.onTap != null,
         mouseCursor: widget.onTap == null
             ? SystemMouseCursors.basic
@@ -157,9 +168,9 @@ class _AnicryTapState extends State<AnicryTap>
                   ? null
                   : BorderRadius.circular(widget.radius),
               color: hovered || pressed
-                  ? (widget.hoverColor ?? Colors.white).withValues(
-                      alpha: pressed ? .10 : .05,
-                    )
+                  ? (widget.hoverColor ??
+                            Theme.of(context).colorScheme.onSurface)
+                        .withValues(alpha: pressed ? .10 : .05)
                   : Colors.transparent,
             ),
             foregroundDecoration: BoxDecoration(
@@ -169,7 +180,8 @@ class _AnicryTapState extends State<AnicryTap>
                   : BorderRadius.circular(widget.radius),
               border: Border.all(
                 color: focused
-                    ? (widget.focusColor ?? Colors.white.withValues(alpha: .65))
+                    ? (widget.focusColor ??
+                          Theme.of(context).colorScheme.primary)
                     : Colors.transparent,
               ),
             ),

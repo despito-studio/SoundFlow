@@ -6,6 +6,9 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:animate_icons/animate_icons.dart';
+
+import 'anicry_motion.dart';
 
 typedef Json = Map<String, dynamic>;
 typedef _RequestNative = Pointer<Utf8> Function(Pointer<Uint8>, IntPtr);
@@ -57,7 +60,7 @@ class Core extends ChangeNotifier {
   late final _Poll _poll;
   late final _Free _free;
   late final void Function() _close;
-  Timer? _timer, _volumeCommit;
+  Timer? _timer, _volumeCommit, _updateExit;
   double? _volumeIntent;
   VoidCallback? openConnections;
   String _assetsKey = "";
@@ -73,6 +76,42 @@ class Core extends ChangeNotifier {
   DateTime _feedPoll = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _trayEnabled, _islandShortcuts;
   Json creatorTrack = {};
+  DateTime _updatePoll = DateTime.now();
+  bool _updateQuitting = false;
+  bool _startupUpdateChecked = false;
+  Json get update => object(state['update']);
+  bool updatePromptOpen = false;
+  void closeUpdatePrompt() {
+    updatePromptOpen = false;
+    notifyListeners();
+  }
+
+  void checkForStartupUpdate({DateTime? now}) {
+    if (arguments.contains('--offline') ||
+        settings.isEmpty ||
+        update['installed'] != true ||
+        settings['auto_update_enabled'] == false) {
+      return;
+    }
+    final time = now ?? DateTime.now();
+    if (_startupUpdateChecked &&
+        time.difference(_updatePoll) < const Duration(hours: 12)) {
+      return;
+    }
+    _startupUpdateChecked = true;
+    _updatePoll = time;
+    if ([
+      'available',
+      'ready',
+      'downloading',
+      'verifying',
+      'installing',
+      'restarting',
+    ].contains(update['status'])) {
+      return;
+    }
+    action('update-check', {'download': false});
+  }
 
   Json get library => object(state['library']);
   Json get current => object(playback.value['track']);
@@ -195,7 +234,7 @@ class Core extends ChangeNotifier {
       });
       _tick();
       final initialView = argument('--view', 'home');
-      if (['library', 'profile', 'settings'].contains(initialView)) {
+      if (['library', 'profile', 'settings', 'search'].contains(initialView)) {
         nav(initialView);
       }
       _timer = Timer.periodic(
@@ -258,6 +297,24 @@ class Core extends ChangeNotifier {
     final signature = jsonEncode(stable);
     state = next;
     settings = object(next['settings']);
+    if (update['status'] == 'restarting' && !_updateQuitting) {
+      _updateQuitting = true;
+      _timer?.cancel();
+      _volumeCommit?.cancel();
+      notifyListeners();
+      _updateExit = Timer(
+        reduced
+            ? Duration.zero
+            : Anicry.layout + AnimateIcons.duration('circle-check'),
+        () {
+          _close();
+          ready = false;
+          window.invokeMethod('quit');
+        },
+      );
+      return;
+    }
+    checkForStartupUpdate();
     final nextRoute = next['view']?.toString() ?? route;
     final routeChanged = route != nextRoute;
     route = nextRoute;
@@ -412,10 +469,14 @@ class Core extends ChangeNotifier {
       command({'type': 'action', 'action': action, 'payload': payload});
   void call(String method, [List<dynamic> args = const []]) =>
       command({'type': 'call', 'method': method, 'args': args});
-  void setting(String key, dynamic value) => command({
-    'type': 'settings',
-    'patch': {key: value},
-  });
+  void setting(String key, dynamic value) {
+    command({
+      'type': 'settings',
+      'patch': {key: value},
+    });
+    if (key == 'auto_update_enabled' && value == false) action('update-cancel');
+  }
+
   void search(String query, String source) =>
       command({'type': 'search', 'query': query.trim(), 'source': source});
   void createPlaylist(String name, [Json? track]) {
@@ -481,6 +542,7 @@ class Core extends ChangeNotifier {
   void dispose() {
     _timer?.cancel();
     _volumeCommit?.cancel();
+    _updateExit?.cancel();
     if (ready) {
       if (_volumeIntent != null) {
         command({"type": "volume-commit", "value": _volumeIntent});

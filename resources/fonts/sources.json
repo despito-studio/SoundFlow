@@ -1,0 +1,12 @@
+{
+  "family": "Onest",
+  "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/onest/Onest%5Bwght%5D.ttf",
+  "gitBlobSha1": "477cb31027450d80e486a53119641bf87dde3d4c",
+  "sourceSha256": "966c5c29b4755da84b6854d5c21dd4eaa2420225d0e9874de602de176d4a9f31",
+  "license": "../licenses/ONEST-OFL.txt",
+  "instances": {
+    "Onest-Regular.ttf": 400,
+    "Onest-SemiBold.ttf": 600
+  },
+  "generator": "scripts/prepare-onest.py (fonttools 4.60.1)"
+}

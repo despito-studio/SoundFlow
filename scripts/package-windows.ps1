@@ -1,4 +1,4 @@
-param([string]$Destination, [switch]$SkipInstaller, [switch]$SkipZip)
+param([string]$Destination, [switch]$SkipInstaller, [switch]$SkipZip, [string]$TermsUrl, [switch]$RequireTermsUrl, [string]$PreviousFeed)
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $versionMatch = [regex]::Match((Get-Content -LiteralPath (Join-Path $projectRoot 'Cargo.toml') -Raw), '(?m)^version\s*=\s*"([^"]+)"\s*$')
@@ -63,16 +63,4 @@ Cloud accounts, synchronization and Plus need a configured HTTPS service.
 This package does not deploy an account or payment server.
 '@
 Set-Content -LiteralPath (Join-Path $destinationPath 'READ-ME.txt') -Value $notes -Encoding utf8
-if (-not $SkipZip) {
-    $zipPath = Join-Path $distributionRoot "SoundFlow-$version-windows-x64.zip"
-    Compress-Archive -Path (Join-Path $destinationPath '*') -DestinationPath $zipPath -Force
-}
-if (-not $SkipInstaller) {
-    $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
-    if (-not $nsis) { $nsis = Join-Path $projectRoot 'output/toolchain/nsis/makensis.exe' }
-    if (-not (Test-Path -LiteralPath $nsis)) { throw 'Install NSIS to build the native installer, or use -SkipInstaller for a portable package.' }
-    $installerPath = Join-Path $distributionRoot "SoundFlow-$version-Setup.exe"
-    & $nsis '/WX' '/V2' "/DSTAGE=$destinationPath" "/DPROJECT=$projectRoot" "/DOUTPUT=$installerPath" "/DVERSION=$version" (Join-Path $projectRoot 'resources/installer/windows.nsi')
-    if ($LASTEXITCODE -ne 0) { throw 'Native NSIS installer creation failed.' }
-}
-Get-ChildItem -LiteralPath $distributionRoot -File | Select-Object Name, Length
+& (Join-Path $projectRoot 'scripts/package-velopack.ps1') -Stage $destinationPath -Version $version -PreviousFeed $PreviousFeed -SkipInstaller:$SkipInstaller -SkipZip:$SkipZip -TermsUrl $TermsUrl -RequireTermsUrl:$RequireTermsUrl

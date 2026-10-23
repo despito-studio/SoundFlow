@@ -1,0 +1,22 @@
+name: Пропозиція
+description: Запропонувати покращення SoundFlow
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Яку потребу має вирішити зміна?
+      description: Опиши конкретну ситуацію під час користування SoundFlow.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Пропоноване рішення
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативи та приклади
+      description: За бажанням додай приклади, референси чи інші способи вирішення.

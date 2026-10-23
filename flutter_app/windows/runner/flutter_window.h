@@ -39,6 +39,7 @@ class FlutterWindow : public Win32Window {
   bool keyboard_ = false;
   bool close_to_tray_ = false;
   bool quitting_ = false;
+  bool destroying_ = false;
   HWND previous_foreground_ = nullptr;
   HICON app_icon_ = nullptr;
   HMONITOR island_monitor_ = nullptr;

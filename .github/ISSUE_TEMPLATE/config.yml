@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Безпека
+    url: https://github.com/despito-studio/SoundFlow/blob/main/SECURITY.md
+    about: Як приватно повідомити про вразливість
+  - name: Підтримка
+    url: https://github.com/despito-studio/SoundFlow/blob/main/SUPPORT.md
+    about: Що додати до звернення

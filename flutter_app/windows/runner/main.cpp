@@ -6,8 +6,28 @@
 #include "flutter_window.h"
 #include "utils.h"
 
+// Velopack fast hooks must finish before Flutter, COM or the single-instance lock.
+// Keep the module loaded: Flutter's FFI uses the same native library later.
+static bool RunUpdateStartup() {
+  wchar_t executable[32768]{};
+  const DWORD count = GetModuleFileNameW(nullptr, executable, 32768);
+  if (!count || count >= 32768) return false;
+  std::wstring path(executable, count);
+  path.resize(path.find_last_of(L"\\/") + 1);
+  path += L"soundflow_lib.dll";
+  HMODULE library = LoadLibraryExW(path.c_str(), nullptr,
+      LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+  if (!library) return false;
+  auto startup = reinterpret_cast<void (*)()>(
+      GetProcAddress(library, "sf_velopack_startup"));
+  if (!startup) return false;
+  startup();
+  return true;
+}
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  if (!RunUpdateStartup()) return EXIT_FAILURE;
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {

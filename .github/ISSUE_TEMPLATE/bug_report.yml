@@ -1,0 +1,56 @@
+name: Помилка
+description: Повідомити про проблему в SoundFlow
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: Перевір наявні Issues. Для вразливостей використовуй SECURITY.md. Не публікуй токени та особисті дані.
+  - type: input
+    id: version
+    attributes:
+      label: Версія SoundFlow
+      placeholder: Наприклад, 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Версія Windows
+      placeholder: Версія та номер збірки
+    validations:
+      required: true
+  - type: dropdown
+    id: distribution
+    attributes:
+      label: Тип збірки
+      options:
+        - Інсталятор
+        - Portable ZIP
+        - Самостійна збірка
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Кроки відтворення
+      description: Що потрібно зробити, щоб побачити проблему?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Очікуваний результат
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактичний результат
+      description: Додай текст помилки або знімок екрана, якщо можливо.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Додатковий контекст
+      description: Для проблем інтерфейсу вкажи масштаб Windows і розмір вікна. Для треків — джерело та публічне посилання.

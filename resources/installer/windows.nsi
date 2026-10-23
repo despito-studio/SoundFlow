@@ -1,52 +1,69 @@
+; Private extraction backend. The public entry point is the native frontend.
 Unicode true
 !include "MUI2.nsh"
+!include "FileFunc.nsh"
 Name "SoundFlow"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\SoundFlow"
-InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "InstallLocation"
 RequestExecutionLevel user
 ManifestDPIAware true
+SilentInstall silent
+AutoCloseWindow true
 SetCompressor /SOLID lzma
-!ifndef VERSION
-!error "Pass the package version with /DVERSION."
-!endif
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "SoundFlow"
-VIAddVersionKey "FileDescription" "SoundFlow native music application installer"
+VIAddVersionKey "FileDescription" "SoundFlow installation payload"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "SoundFlow"
 !define MUI_ICON "${PROJECT}\resources\icon.ico"
 !define MUI_UNICON "${PROJECT}\resources\icon.ico"
-!define MUI_ABORTWARNING
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_DIRECTORY
-!insertmacro MUI_PAGE_INSTFILES
-!insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "Ukrainian"
 !insertmacro MUI_LANGUAGE "English"
 
-Section "SoundFlow" SEC_MAIN
-    SetShellVarContext current
+Function .onInit
+    ${GetParameters} $0
+    ClearErrors
+    ${GetOptions} $0 "/EXTRACT" $1
+    IfErrors 0 +3
+        SetErrorLevel 10
+        Quit
+    ${GetFileName} "$INSTDIR" $0
+    StrCpy $1 $0 17
+    StrCmp $1 ".SoundFlow-stage-" +3
+        SetErrorLevel 11
+        Quit
+FunctionEnd
+
+Section "Extract"
+    ; Caller supplies a fresh staging directory. Never register or launch from staging.
+    FindFirst $0 $1 "$INSTDIR\*"
+    empty_check:
+        StrCmp $1 "" empty_done
+        StrCmp $1 "." empty_next
+        StrCmp $1 ".." empty_next
+        FindClose $0
+        SetErrorLevel 12
+        Quit
+    empty_next:
+        FindNext $0 $1
+        Goto empty_check
+    empty_done:
+    FindClose $0
     SetOutPath "$INSTDIR"
-    SetOverwrite on
+    SetOverwrite off
+    ClearErrors
     File /r "${STAGE}\*"
-    Delete "$INSTDIR\soundflow-provider.exe"
-    Delete "$INSTDIR\provider-build.json"
+    IfErrors 0 +3
+        SetErrorLevel 13
+        Quit
     WriteUninstaller "$INSTDIR\Uninstall.exe"
-    CreateDirectory "$SMPROGRAMS\SoundFlow"
-    CreateShortcut "$SMPROGRAMS\SoundFlow\SoundFlow.lnk" "$INSTDIR\SoundFlow.exe" "" "$INSTDIR\SoundFlow.exe" 0
-    CreateShortcut "$DESKTOP\SoundFlow.lnk" "$INSTDIR\SoundFlow.exe" "" "$INSTDIR\SoundFlow.exe" 0
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "DisplayName" "SoundFlow"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "DisplayVersion" "${VERSION}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "Publisher" "SoundFlow"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "InstallLocation" "$INSTDIR"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "DisplayIcon" "$INSTDIR\SoundFlow.exe,0"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "NoModify" 1
-    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "NoRepair" 1
+    IfErrors 0 +3
+        SetErrorLevel 14
+        Quit
+    SetErrorLevel 0
 SectionEnd
 
 Section "Uninstall"
@@ -55,14 +72,19 @@ Section "Uninstall"
     Delete "$INSTDIR\flutter_windows.dll"
     Delete "$INSTDIR\soundflow_lib.dll"
     Delete "$INSTDIR\READ-ME.txt"
+    Delete "$INSTDIR\soundflow-install.json"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir /r "$INSTDIR\resources"
     RMDir /r "$INSTDIR\media-provider"
     RMDir /r "$INSTDIR\licenses"
     RMDir /r "$INSTDIR\data"
     RMDir "$INSTDIR"
+    ; A superseded/custom installation must not unregister a different installation.
+    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow" "InstallLocation"
+    StrCmp $0 "$INSTDIR" 0 done
     Delete "$DESKTOP\SoundFlow.lnk"
     Delete "$SMPROGRAMS\SoundFlow\SoundFlow.lnk"
     RMDir "$SMPROGRAMS\SoundFlow"
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SoundFlow"
+    done:
 SectionEnd

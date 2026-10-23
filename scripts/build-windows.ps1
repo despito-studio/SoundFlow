@@ -28,10 +28,16 @@ $cargoCandidates = @()
 if ($env:CARGO_HOME) { $cargoCandidates += Join-Path $env:CARGO_HOME 'bin/cargo.exe' }
 $cargoCommand = Get-Command cargo.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($cargoCommand) { $cargoCandidates += $cargoCommand.Source }
+$checkoutCargoRoot = Join-Path $projectRoot 'output/toolchain/cargo'
+$cargoCandidates += Join-Path $checkoutCargoRoot 'bin/cargo.exe'
 $cargoCandidates += Join-Path $env:USERPROFILE '.cargo/bin/cargo.exe'
 $cargoExe = $cargoCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 if (-not $cargoExe) { throw 'Install Rust MSVC 1.92 or newer. The script searches CARGO_HOME, PATH and the current user profile.' }
 $cargoBin = Split-Path $cargoExe
+if ($cargoExe -eq (Join-Path $checkoutCargoRoot 'bin/cargo.exe')) {
+    $env:CARGO_HOME = $checkoutCargoRoot
+    $env:RUSTUP_HOME = Join-Path $projectRoot 'output/toolchain/rustup'
+}
 
 # Prefer an installed SDK. The local NuGet SDK is only a checkout-scoped fallback.
 $sdkSystemRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'

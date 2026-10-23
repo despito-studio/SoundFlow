@@ -1,6 +1,11 @@
 param([Parameter(Mandatory=$true)][string]$OutputPath)
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$checkoutCargoRoot = Join-Path $projectRoot 'output/toolchain/cargo'
+if (-not $env:CARGO_HOME -and (Test-Path -LiteralPath (Join-Path $checkoutCargoRoot 'bin/cargo.exe'))) {
+    $env:CARGO_HOME = $checkoutCargoRoot
+    $env:RUSTUP_HOME = Join-Path $projectRoot 'output/toolchain/rustup'
+}
 $cargoPath = if ($env:CARGO_HOME) { Join-Path $env:CARGO_HOME 'bin/cargo.exe' } else { Join-Path $env:USERPROFILE '.cargo/bin/cargo.exe' }
 if (-not (Test-Path -LiteralPath $cargoPath)) {
     $cargoCommand = Get-Command cargo.exe -ErrorAction SilentlyContinue | Select-Object -First 1

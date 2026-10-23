@@ -72,9 +72,14 @@ FlutterWindow::FlutterWindow(const flutter::DartProject& project, bool island)
     : project_(project), is_island_(island) {
   if (!island) main_window = this;
 }
-FlutterWindow::~FlutterWindow() { if (main_window == this) main_window = nullptr; }
+FlutterWindow::~FlutterWindow() {
+  if (main_window == this) main_window = nullptr;
+  // Tear down while virtual dispatch and controller members still belong to this class.
+  Destroy();
+}
 
 bool FlutterWindow::OnCreate() {
+  destroying_ = false;
   if (!Win32Window::OnCreate()) return false;
   if (!is_island_) {
     foreground_hook_ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND,
@@ -408,6 +413,9 @@ void CALLBACK FlutterWindow::ForegroundEvent(HWINEVENTHOOK, DWORD event, HWND wi
 }
 
 void FlutterWindow::OnDestroy() {
+  if (destroying_) return;
+  destroying_ = true;
+  if (channel_) channel_->SetMethodCallHandler(nullptr);
   if (!is_island_) {
     if (foreground_hook_) { UnhookWinEvent(foreground_hook_); foreground_hook_ = nullptr; }
     if (minimize_hook_) { UnhookWinEvent(minimize_hook_); minimize_hook_ = nullptr; }
@@ -424,6 +432,13 @@ void FlutterWindow::OnDestroy() {
 }
 
 LRESULT FlutterWindow::MessageHandler(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
+  if (destroying_) return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+  static const UINT updater_quit = RegisterWindowMessageW(L"SoundFlow.Updater.Quit.v1");
+  if (!is_island_ && message == updater_quit) {
+    quitting_ = true;
+    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    return 1;
+  }
   if (!is_island_ && message == WM_HOTKEY && (wparam == 3101 || wparam == 3102 || wparam == 3103)) {
     if (wparam == 3102) ShowIsland(true);
     else if (island_ && island_requested_) {

@@ -1,6 +1,16 @@
 # Project-level configuration.
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.15)
+cmake_policy(SET CMP0091 NEW)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 project(soundflow LANGUAGES CXX)
+
+# Older checkout caches carry /MD in their flags. Let the runtime setting own it.
+foreach(CONFIG DEBUG RELEASE RELWITHDEBINFO MINSIZEREL PROFILE)
+  foreach(LANG C CXX)
+    string(REGEX REPLACE "/MDd?" "" CLEAN_FLAGS "${CMAKE_${LANG}_FLAGS_${CONFIG}}")
+    set(CMAKE_${LANG}_FLAGS_${CONFIG} "${CLEAN_FLAGS}" CACHE STRING "Compiler flags" FORCE)
+  endforeach()
+endforeach()
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.

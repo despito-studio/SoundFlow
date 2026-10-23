@@ -5,6 +5,9 @@ $appRoot = Join-Path $projectRoot 'flutter_app'
 $flutter = Join-Path $projectRoot 'output/toolchain/flutter/bin/flutter.bat'
 $cmake = Join-Path $projectRoot 'output/toolchain/python-build/cmake/data/bin/cmake.exe'
 $ninja = Join-Path $projectRoot 'output/toolchain/python-build/bin/ninja.exe'
+if (-not (Test-Path -LiteralPath $flutter)) { $flutter = (Get-Command flutter.bat -ErrorAction Stop).Source }
+if (-not (Test-Path -LiteralPath $cmake)) { $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source }
+if (-not (Test-Path -LiteralPath $ninja)) { $ninja = (Get-Command ninja.exe -ErrorAction Stop).Source }
 $buildDir = Join-Path $appRoot 'build/windows-ninja'
 $bundle = [IO.Path]::GetFullPath((Join-Path $projectRoot 'output/flutter-preview'))
 if (-not $bundle.StartsWith($projectRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Bundle must stay within the checkout.' }
@@ -37,7 +40,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows bundle could not be assembled.' }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'target/release/soundflow_lib.dll') -Destination $bundle -Force
     New-Item -ItemType Directory -Path (Join-Path $bundle 'licenses') -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'output/toolchain/flutter/LICENSE') -Destination (Join-Path $bundle 'licenses/FLUTTER-LICENSE.txt') -Force
+    Copy-Item -LiteralPath (Join-Path (Split-Path (Split-Path $flutter)) 'LICENSE') -Destination (Join-Path $bundle 'licenses/FLUTTER-LICENSE.txt') -Force
     New-Item -ItemType Directory -Path (Join-Path $bundle 'resources') -Force | Out-Null
     foreach ($name in @('covers','runtime','licenses')) {
         $source = Join-Path $projectRoot "resources/$name"

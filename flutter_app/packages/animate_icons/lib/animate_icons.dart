@@ -32,6 +32,38 @@ abstract final class AnimateIcons {
   );
   static Duration duration(String name) =>
       Duration(milliseconds: (_icon(name).duration * 1000).ceil());
+
+  /// Build-time native export uses this same painter, timing and path trimming.
+  static List<AnimateVectorStroke> vectorFrame(String name, double progress) {
+    final strokes = <AnimateVectorStroke>[];
+    final recorder = ui.PictureRecorder();
+    _IconPainter(
+      _icon(name),
+      AlwaysStoppedAnimation(progress),
+      Colors.white,
+      false,
+      vector: strokes,
+    ).paint(Canvas(recorder), const Size(24, 24));
+    recorder.endRecording().dispose();
+    return strokes;
+  }
+}
+
+class AnimateVectorStroke {
+  const AnimateVectorStroke(
+    this.points,
+    this.width,
+    this.opacity,
+    this.closed,
+    this.filled,
+    this.cap,
+    this.join,
+  );
+  final List<Offset> points;
+  final double width, opacity;
+  final bool closed, filled;
+  final StrokeCap cap;
+  final StrokeJoin join;
 }
 
 /// Accepts `heart`, `lucide/heart` or `huge/heart`, including upstream motion.
@@ -140,7 +172,15 @@ class _Node {
     final transition = timing(key);
     final length = math.max(.001, _number(transition['duration'], .3));
     final delay = _number(transition['delay']);
-    if (elapsed < delay) return rest is List ? rest.last : rest;
+    // A delayed keyframe sequence holds its first keyframe. Holding the settled
+    // normal state here made entry animations flash visible before disappearing.
+    if (elapsed < delay) {
+      return target is List && target.isNotEmpty
+          ? target.first
+          : rest is List
+          ? rest.last
+          : rest;
+    }
     final cycles = _number(transition['repeat']).clamp(0, 2).toInt() + 1;
     final raw = ((elapsed - delay) / length).clamp(0.0, cycles.toDouble());
     final cycle = math.min(raw.floor(), cycles - 1);
@@ -256,12 +296,18 @@ class _Path extends PathProxy {
 }
 
 class _IconPainter extends CustomPainter {
-  _IconPainter(this.icon, this.animation, this.color, this.filled)
-    : super(repaint: animation);
+  _IconPainter(
+    this.icon,
+    this.animation,
+    this.color,
+    this.filled, {
+    this.vector,
+  }) : super(repaint: animation);
   final _Node icon;
   final Animation<double> animation;
   final Color color;
   final bool filled;
+  final List<AnimateVectorStroke>? vector;
   final clips = <String, Path>{};
   @override
   void paint(Canvas canvas, Size size) {
@@ -362,12 +408,52 @@ class _IconPainter extends CustomPainter {
     final clipId = RegExp(r'url\(#([^)]*)\)')
         .firstMatch(node.attrs['clip-path']?.toString() ?? '')?[1];
     if (clips[clipId] != null) canvas.clipPath(clips[clipId]!);
+    void draw(Path path, Paint paint) {
+      canvas.drawPath(path, paint);
+      if (vector == null) return;
+      if (clips[clipId] != null) {
+        throw UnsupportedError(
+          'Native vector export requires an unclipped icon.',
+        );
+      }
+      final matrix = canvas.getTransform();
+      final sx = math.sqrt(matrix[0] * matrix[0] + matrix[1] * matrix[1]);
+      final sy = math.sqrt(matrix[4] * matrix[4] + matrix[5] * matrix[5]);
+      if ((sx - sy).abs() > .0001 ||
+          (matrix[0] * matrix[4] + matrix[1] * matrix[5]).abs() > .0001) {
+        throw UnsupportedError(
+          'Native vector export requires uniform stroke transforms.',
+        );
+      }
+      for (final metric in path.transform(matrix).computeMetrics()) {
+        final count = math.max(1, (metric.length / .10).ceil());
+        final points = <Offset>[];
+        for (var i = 0; i <= count; i++) {
+          final tangent = metric.getTangentForOffset(metric.length * i / count);
+          if (tangent != null) points.add(tangent.position);
+        }
+        if (points.length > 1) {
+          vector!.add(
+            AnimateVectorStroke(
+              points,
+              paint.strokeWidth * sx,
+              paint.color.a,
+              metric.isClosed,
+              paint.style == PaintingStyle.fill,
+              paint.strokeCap,
+              paint.strokeJoin,
+            ),
+          );
+        }
+      }
+    }
+
     if (node.tag != 'g' && node.tag != 'svg') {
       final paint = Paint()
         ..isAntiAlias = true
         ..color = color.withValues(alpha: color.a * opacity.clamp(0, 1));
       if (filled || (attrs['fill'] != null && attrs['fill'] != 'none')) {
-        canvas.drawPath(node.path, paint);
+        draw(node.path, paint);
       }
       if (attrs['stroke'] != null && attrs['stroke'] != 'none') {
         paint
@@ -393,7 +479,7 @@ class _IconPainter extends CustomPainter {
         if (length < 1 || offset != 0 || dash != null) {
           for (final metric in node.metrics) {
             if (length < 1 || offset != 0) {
-              canvas.drawPath(
+              draw(
                 metric.extractPath(
                   metric.length * offset,
                   metric.length * (offset + length).clamp(0, 1),
@@ -407,7 +493,7 @@ class _IconPainter extends CustomPainter {
                   .where((n) => n > 0)
                   .toList();
               if (pattern.isEmpty) {
-                canvas.drawPath(node.path, paint);
+                draw(node.path, paint);
                 break;
               }
               if (pattern.length.isOdd) pattern.addAll(List.of(pattern));
@@ -424,7 +510,7 @@ class _IconPainter extends CustomPainter {
               while (start < metric.length) {
                 final end = start + pattern[i % pattern.length] * scale;
                 if (i.isEven && end > 0) {
-                  canvas.drawPath(
+                  draw(
                     metric.extractPath(
                       math.max(0, start),
                       math.min(metric.length, end),
@@ -438,7 +524,7 @@ class _IconPainter extends CustomPainter {
             }
           }
         } else {
-          canvas.drawPath(node.path, paint);
+          draw(node.path, paint);
         }
       }
     }

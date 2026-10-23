@@ -14,6 +14,10 @@ import 'profiles.dart';
 import 'design.dart';
 import 'island.dart';
 import 'media_slider.dart';
+import 'player_dock.dart';
+import 'search_page.dart';
+import 'settings_page.dart';
+import 'update_prompt.dart';
 
 final designBoundary = GlobalKey();
 
@@ -75,7 +79,7 @@ class SoundFlow extends StatelessWidget {
         ),
         child: child!,
       ),
-      home: Workspace(core),
+      home: UpdatePromptHost(core: core, child: Workspace(core)),
     ),
   );
 }
@@ -90,7 +94,7 @@ class Workspace extends StatefulWidget {
 class _WorkspaceState extends State<Workspace> {
   final query = TextEditingController(), searchFocus = FocusNode();
   final scroll = ScrollController();
-  String source = 'all', _route = 'home';
+  String _route = 'home';
   bool _matchShown = false;
   Core get c => widget.core;
   bool _connectionsShown = false;
@@ -111,7 +115,7 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   void showConnections() {
-    if (_connectionsShown || !mounted) return;
+    if (_connectionsShown || c.updatePromptOpen || !mounted) return;
     _connectionsShown = true;
     c.call('list_accounts');
     showAnicryDialog<void>(
@@ -121,10 +125,16 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   void showMatchPicker() {
-    if (_matchShown || c.state['pending_track'] == null) return;
+    if (_matchShown || c.updatePromptOpen || c.state['pending_track'] == null) {
+      return;
+    }
     _matchShown = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      if (c.updatePromptOpen) {
+        _matchShown = false;
+        return;
+      }
       var selected = false;
       await showDialog<void>(
         context: context,
@@ -477,7 +487,9 @@ class _WorkspaceState extends State<Workspace> {
       _route = c.route;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (scroll.hasClients) scroll.jumpTo(0);
-        if (c.route == 'search') searchFocus.requestFocus();
+        if (c.route == 'search' && !c.updatePromptOpen) {
+          searchFocus.requestFocus();
+        }
       });
     }
     return CallbackShortcuts(
@@ -557,7 +569,7 @@ class _WorkspaceState extends State<Workspace> {
                           24,
                           68,
                           24,
-                          c.route == 'now' || !c.hasTrack ? 32 : 122,
+                          c.route == 'now' || !c.hasTrack ? 32 : 152,
                         ),
                         children: [
                           AnimatedSwitcher(
@@ -589,10 +601,7 @@ class _WorkspaceState extends State<Workspace> {
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: [
-                                p.canvas,
-                                p.canvas.withValues(alpha: 0),
-                              ],
+                              colors: [p.canvas, p.canvas.withValues(alpha: 0)],
                             ),
                           ),
                         ),
@@ -668,44 +677,17 @@ class _WorkspaceState extends State<Workspace> {
                         ),
                       ),
                     ),
-                    if (c.route != 'now' && c.hasTrack) ...[
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        height: 96,
-                        child: IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  p.canvas.withValues(alpha: 0),
-                                  p.canvas,
-                                ],
-                                stops: const [0, 1],
-                              ),
-                            ),
-                          ),
-                        ),
+                    if (c.route != 'now' && c.hasTrack)
+                      Positioned.fill(
+                        child: PlayerDock(c, onAddPlaylist: addPlaylist),
                       ),
+                    if (c.error.isNotEmpty ||
+                        (c.state['message_error'] == true &&
+                            !(c.route == 'search' &&
+                                c.state['search_error'] == c.state['message'])))
                       Positioned(
                         left: 24,
-                        right: 24,
-                        bottom: 16,
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 660),
-                            child: FloatingPlayer(c),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (c.error.isNotEmpty || c.state['message_error'] == true)
-                      Positioned(
-                        left: 24,
-                        bottom: c.hasTrack && c.route != 'now' ? 112 : 24,
+                        bottom: c.hasTrack && c.route != 'now' ? 144 : 24,
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 480),
                           child: ErrorNotice(
@@ -748,80 +730,16 @@ class _WorkspaceState extends State<Workspace> {
       case 'creator':
         return CreatorProfile(c, trackRows: (ts) => rows(ts));
       case 'search':
-        final tracks = c.tracks;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: query,
-                    focusNode: searchFocus,
-                    decoration: const InputDecoration(
-                      hintText: 'Назва треку, артист або посилання',
-                      prefixIcon: Padding(
-                        padding: EdgeInsets.all(13),
-                        child: Glyph('search', size: 18),
-                      ),
-                    ),
-                    onSubmitted: (value) => c.search(value, source),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                ActionButton(
-                  'Шукати',
-                  primary: true,
-                  onTap: () => c.search(query.text, source),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final s in [
-                  ('all', 'Усюди'),
-                  ('youtube', 'YouTube'),
-                  ('soundcloud', 'SoundCloud'),
-                  ('spotify', 'Spotify'),
-                ])
-                  _tab(s.$2, source == s.$1, () {
-                    setState(() => source = s.$1);
-                    if (query.text.trim().isNotEmpty) {
-                      c.search(query.text, source);
-                    }
-                  }),
-              ],
-            ),
-            const SizedBox(height: 24),
-            if (c.pending > 0) const LinearProgressIndicator(minHeight: 2),
-            if (tracks.isNotEmpty) rows(tracks),
-            if (tracks.isEmpty &&
-                c.pending == 0 &&
-                query.text.isEmpty &&
-                c.recent.isNotEmpty) ...[
-              const Heading('Нещодавно слухали'),
-              const SizedBox(height: 16),
-              rows(c.recent.take(6).toList()),
-            ],
-            if (tracks.isEmpty &&
-                c.pending == 0 &&
-                (query.text.isNotEmpty || c.recent.isEmpty))
-              EmptyState(
-                query.text.isEmpty
-                    ? 'Що хочеш послухати?'
-                    : 'Нічого не знайшли',
-                query.text.isEmpty
-                    ? 'Введи назву або встав посилання на трек.'
-                    : 'Спробуй іншу назву або джерело.',
-              ),
-          ],
+        return SearchPage(
+          c,
+          controller: query,
+          focusNode: searchFocus,
+          onAddPlaylist: addPlaylist,
         );
       case 'now':
         return nowPlaying(width);
       case 'settings':
-        return settings(width);
+        return SettingsPage(c);
       case 'downloads':
         return downloads();
       case 'stats':
@@ -830,34 +748,6 @@ class _WorkspaceState extends State<Workspace> {
         return collectionPage(width);
     }
   }
-
-  Widget _tab(String label, bool selected, VoidCallback onTap) => Material(
-    color: Colors.transparent,
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(7),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: selected ? context.paints.accent : Colors.transparent,
-              width: 2,
-            ),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 9, 14, 11),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? context.paints.ink : context.paints.muted,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 
   Widget collectionPage(double width) {
     final ts = c.tracks;
@@ -1179,322 +1069,6 @@ class _WorkspaceState extends State<Workspace> {
       );
     },
   );
-
-  Widget settings(double width) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Heading('Вигляд'),
-      const SizedBox(height: 18),
-      Wrap(
-        spacing: 16,
-        runSpacing: 16,
-        children: [
-          for (final scheme in ['dark', 'light', 'rose', 'violet', 'ocean'])
-            themeChoice(scheme),
-        ],
-      ),
-      const SizedBox(height: 28),
-      const Heading('Іконка застосунку'),
-      const SizedBox(height: 16),
-      Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        children: [
-          for (final option in [
-            ('default', 'Стандартна'),
-            ('rose', 'Рожева'),
-            ('violet', 'Фіолетова'),
-            ('ocean', 'Океан'),
-          ])
-            desktopIconChoice(option.$1, option.$2),
-        ],
-      ),
-      const SizedBox(height: 28),
-      const Heading('Відтворення'),
-      const SizedBox(height: 10),
-      settingRow(
-        'Нормалізація гучності',
-        'Рівніший звук між треками.',
-        'volume_norm_enabled',
-        true,
-      ),
-      settingRow(
-        'Продовжувати музику',
-        'Схожі треки після завершення черги.',
-        'infinite_autoplay',
-        true,
-      ),
-      settingRow(
-        'Статус у Discord',
-        'Показувати музику, яку ти слухаєш.',
-        'discord_rpc_enabled',
-        true,
-      ),
-      const SizedBox(height: 24),
-      const Heading('Керування та рух'),
-      const SizedBox(height: 10),
-      settingRow(
-        'Менше руху',
-        'Короткі зміни стану без переміщення елементів.',
-        'reduced_motion',
-        false,
-      ),
-      settingRow(
-        'Медіаклавіші',
-        'Відтворення, пауза, попередній і наступний трек.',
-        'hotkeys_enabled',
-        true,
-      ),
-      settingRow(
-        'Згортати у трей',
-        'Продовжувати слухати після закриття вікна.',
-        'tray_enabled',
-        true,
-      ),
-      const SizedBox(height: 12),
-      Text(
-        'Ctrl + Alt + M   ·   швидкий мініплеєр\nCtrl + Alt + Shift + M   ·   мініплеєр із керуванням клавіатурою',
-        style: TextStyle(
-          color: context.paints.muted,
-          fontSize: 13,
-          height: 1.8,
-        ),
-      ),
-      const SizedBox(height: 28),
-      const Heading('Медіатека'),
-      const SizedBox(height: 16),
-      actions([
-        ActionButton(
-          'Імпорт JSON',
-          onTap: () => c.call('import_library_file', [true]),
-        ),
-        ActionButton(
-          'Експорт JSON',
-          onTap: () => c.call('export_library_file'),
-        ),
-        ActionButton(
-          'Про програму',
-          flat: true,
-          onTap: () => showAboutDialog(
-            context: context,
-            applicationName: 'SoundFlow',
-            applicationVersion: '3.5.2',
-            children: [
-              const Text('Музика, медіатека й швидкий мініплеєр для Windows.'),
-            ],
-          ),
-        ),
-      ]),
-    ],
-  );
-  Widget settingRow(
-    String title,
-    String description,
-    String key,
-    bool fallback,
-  ) => ConstrainedBox(
-    constraints: const BoxConstraints(maxWidth: 840),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 15)),
-                const SizedBox(height: 5),
-                Text(
-                  description,
-                  style: TextStyle(fontSize: 13, color: context.paints.muted),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 20),
-          Switch.adaptive(
-            value: (c.settings[key] as bool?) ?? fallback,
-            onChanged: (v) => c.setting(key, v),
-            activeTrackColor: context.paints.accent,
-            activeThumbColor: context.paints.canvas,
-          ),
-        ],
-      ),
-    ),
-  );
-  Widget themeChoice(String scheme) {
-    const labels = {
-      "dark": "Темна",
-      "light": "Світла",
-      "rose": "Рожева",
-      "violet": "Фіолетова",
-      "ocean": "Океан",
-    };
-    final label = labels[scheme]!;
-    final p = Paints.forScheme(scheme), selected = c.scheme == scheme;
-    final covers = c.homeTracks.take(3).toList();
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: '$label тема',
-      child: InkWell(
-        onTap: () => c.setting('theme', scheme),
-        borderRadius: BorderRadius.circular(16),
-        child: SizedBox(
-          width: 180,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                height: 112,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: p.canvas,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: selected
-                        ? context.paints.accent
-                        : context.paints.muted.withValues(alpha: .3),
-                    width: selected ? 2 : 1,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        for (final icon in ['house', 'search', 'book-open'])
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Glyph(icon, size: 11, color: p.muted),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 58,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: p.ink,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Expanded(
-                            child: Row(
-                              children: [
-                                for (var i = 0; i < 3; i++) ...[
-                                  if (i > 0) const SizedBox(width: 6),
-                                  Expanded(
-                                    child: covers.length > i
-                                        ? SizedBox.expand(
-                                            child: Artwork(
-                                              trackCover(covers[i]),
-                                              radius: 6,
-                                            ),
-                                          )
-                                        : DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              color: p.surface,
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                            ),
-                                          ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Center(
-                            child: Container(
-                              width: 100,
-                              height: 14,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: p.surface,
-                                borderRadius: BorderRadius.circular(7),
-                              ),
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Container(
-                                  width: 28,
-                                  height: 2,
-                                  color: p.ink,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (selected)
-                    Glyph('check', size: 18, color: context.paints.accent),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget desktopIconChoice(String name, String label) {
-    final p = context.paints,
-        selected = (c.settings['desktop_icon'] ?? 'default') == name;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: Material(
-        color: selected ? p.hover : p.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: selected ? p.accent : Colors.transparent),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => c.call('set_desktop_icon', [name]),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset(
-                  'assets/app-icons/$name.png',
-                  width: 32,
-                  height: 32,
-                ),
-                const SizedBox(width: 10),
-                Text(label, style: const TextStyle(fontSize: 13)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget downloads() {
     final jobs = objects(c.state['downloads']);

@@ -14,7 +14,8 @@ The React/JavaScript runtime is not embedded in the Windows UI.
 
 Anicry remains the source of SoundFlow surface-motion tokens: 120ms press,
 220ms reveal, 280ms dialog, 360ms layout and easeOut (.16, 1, .3, 1).
-Source: D:/Projects/Anicry/src/features/anicry/motion.ts.
+Upstream source: Anicry, `src/features/anicry/motion.ts`.
+The SoundFlow adaptation lives in `flutter_app/lib/anicry_motion.dart`.
 Controls provide accessible action names, focus, press and hover triggers.
 Reduced-motion preferences disable icon travel and surface transitions.
 
