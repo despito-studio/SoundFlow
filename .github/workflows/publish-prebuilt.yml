@@ -1,0 +1,172 @@
+name: Publish verified Windows artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of the verified draft release
+        required: true
+        default: '1.0.0'
+      channel_sha256:
+        description: SHA-256 of the private update-channel archive
+        required: true
+      previous_tag_sha:
+        description: Expected old tag object SHA (empty for a new tag)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soundflow-release
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ inputs.version }}
+  CHANNEL_SHA256: ${{ inputs.channel_sha256 }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate and download the verified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os, re, tomllib
+          version = os.environ['VERSION']
+          assert re.fullmatch(r'\d+\.\d+\.\d+', version)
+          assert re.fullmatch(r'[a-fA-F0-9]{64}', os.environ['CHANNEL_SHA256'])
+          assert tomllib.load(open('Cargo.toml', 'rb'))['package']['version'] == version
+          assert re.search(r'^version: ' + re.escape(version) + r'\s*$', open('flutter_app/pubspec.yaml').read(), re.M)
+          PY
+          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > draft.json
+          jq -e --arg sha "$GITHUB_SHA" '.draft == true and .target_commitish == $sha' draft.json
+          channel="SoundFlow-$VERSION-update-channel.tar"
+          jq -e --arg name "$channel" --arg digest "sha256:${CHANNEL_SHA256,,}" '.assets[] | select(.name == $name and .digest == $digest)' draft.json
+          for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip" "$channel"; do
+            jq -e --arg name "$file" '.assets[] | select(.name == $name and .state == "uploaded" and .size > 0)' draft.json
+          done
+          test "$(jq '.assets | length' draft.json)" = 3
+          mkdir incoming
+          gh release download "v$VERSION" --pattern "$channel" --dir incoming
+          echo "$CHANNEL_SHA256  incoming/$channel" | sha256sum --check -
+      - name: Validate the complete update channel
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, pathlib, tarfile
+          version = os.environ['VERSION']
+          root = pathlib.Path('pages')
+          root.mkdir()
+          with tarfile.open(f'incoming/SoundFlow-{version}-update-channel.tar') as archive:
+              members = archive.getmembers()
+              assert sum(m.size for m in members) < 600 * 1024 * 1024
+              for member in members:
+                  path = pathlib.PurePosixPath(member.name)
+                  assert not path.is_absolute() and '..' not in path.parts
+                  assert member.isdir() or member.isfile()
+                  assert path == pathlib.PurePosixPath('.') or path.parts[0] == 'updates'
+              archive.extractall(root, members=members, filter='data')
+          directory = root / 'updates/win-x64'
+          assets = json.loads((directory/'releases.win.json').read_text())['Assets']
+          assert len(assets) == 1
+          asset = assets[0]
+          name = f'SoundFlow-{version}-full.nupkg'
+          assert asset['PackageId'] == 'SoundFlow' and asset['Version'] == version
+          assert asset['Type'] == 'Full' and asset['FileName'] == name
+          package = directory / name
+          assert package.stat().st_size == asset['Size']
+          assert hashlib.file_digest(package.open('rb'), 'sha256').hexdigest().lower() == asset['SHA256'].lower()
+          assert {p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()} == {'updates/win-x64/releases.win.json', 'updates/win-x64/'+name}
+          print('Canonical update channel verified')
+          PY
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: pages
+
+  deploy:
+    needs: stage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - uses: actions/deploy-pages@v4
+        id: deployment
+
+  publish:
+    needs: [stage, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Verify the public feed and package
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, time, urllib.request
+          base = 'https://despito-studio.github.io/SoundFlow/updates/win-x64/'
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(base+'releases.win.json', timeout=30) as response:
+                      assets = json.load(response)['Assets']
+                  assert len(assets) == 1
+                  asset = assets[0]
+                  assert asset['Version'] == os.environ['VERSION']
+                  assert asset['FileName'] == f"SoundFlow-{os.environ['VERSION']}-full.nupkg"
+                  digest, size = hashlib.sha256(), 0
+                  with urllib.request.urlopen(base+asset['FileName'], timeout=60) as response:
+                      while block := response.read(1024*1024):
+                          digest.update(block)
+                          size += len(block)
+                  assert size == asset['Size'] and digest.hexdigest().lower() == asset['SHA256'].lower()
+                  print('Public HTTPS feed and package verified')
+                  break
+              except Exception:
+                  if attempt == 11:
+                      raise
+                  time.sleep(5)
+          PY
+      - name: Publish exactly two downloads at the verified source revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG_SHA: ${{ inputs.previous_tag_sha }}
+        run: |
+          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > draft.json
+          jq -e --arg sha "$GITHUB_SHA" '.target_commitish == $sha' draft.json
+          if jq -e '.draft == false' draft.json > /dev/null; then
+            test "$(jq '.assets | length' draft.json)" = 2
+            for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip"; do
+              jq -e --arg name "$file" '.assets[] | select(.name == $name and .state == "uploaded")' draft.json
+            done
+            exit 0
+          fi
+          if gh api "repos/$GH_REPO/git/ref/tags/v$VERSION" > tag.json; then
+            if test "$(jq -r '.object.sha' tag.json)" != "$GITHUB_SHA"; then
+              test -n "$PREVIOUS_TAG_SHA"
+              test "$(jq -r '.object.sha' tag.json)" = "$PREVIOUS_TAG_SHA"
+              gh api --method PATCH "repos/$GH_REPO/git/refs/tags/v$VERSION" -f sha="$GITHUB_SHA" -F force=true
+            fi
+          else
+            test -z "$PREVIOUS_TAG_SHA"
+            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$GITHUB_SHA"
+          fi
+          channel="SoundFlow-$VERSION-update-channel.tar"
+          asset_id="$(jq -r --arg name "$channel" '.assets[] | select(.name == $name) | .id' draft.json)"
+          if test -n "$asset_id"; then
+            gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
+          fi
+          gh api "repos/$GH_REPO/releases/tags/v$VERSION" > draft.json
+          test "$(jq '.assets | length' draft.json)" = 2
+          for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip"; do
+            jq -e --arg name "$file" '.assets[] | select(.name == $name and .state == "uploaded")' draft.json
+          done
+          release_id="$(jq -er '.id' draft.json)"
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true

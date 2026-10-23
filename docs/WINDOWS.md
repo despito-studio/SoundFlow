@@ -59,8 +59,7 @@ Progress eases between reports, and
 completion/hover motion plays from the library. Windows reduced-motion settings use final
 static geometry. The completion reveal finishes before the application takes focus.
 
-Release versioning starts at **1.0.0**. Historical 3.5.x builds are preliminary;
-there is no compatibility/migration updater for them. Keep Cargo.toml and
+Release versioning starts at **1.0.0**. Keep Cargo.toml and
 flutter_app/pubspec.yaml in agreement. Never replace a published stable version.
 
 Public GitHub Release assets are exactly:
@@ -123,6 +122,17 @@ creation failed, rerun the failed job; do not rebuild/overwrite the same version
 The Pages artifact currently owns the update host; a future website deployment
 must include dist/pages/updates alongside its own content, not erase this path.
 Local packaging never uploads or deploys anything.
+
+For an already tested local build, `publish-prebuilt.yml` publishes the exact
+verified artifacts without rebuilding. Prepare a private draft with the installer,
+portable ZIP and `SoundFlow-<version>-update-channel.tar` containing `dist/pages`.
+Set the draft's target commit to the exact source revision. Dispatch from that
+revision with the channel archive SHA-256 and, when replacing a pre-product tag,
+its expected old object SHA. The workflow validates the channel, deploys Pages,
+checks its public HTTPS package, sets the tag, removes the private transfer
+archive and publishes exactly two downloads. Tag changes use GITHUB_TOKEN so
+they do not trigger a second build. Subsequent stable versions normally use the
+tag-based release workflow. Published stable versions must remain immutable.
 
 Local commands:
 
