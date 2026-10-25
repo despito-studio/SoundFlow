@@ -157,6 +157,7 @@ class _WorkspaceState extends State<Workspace> {
                             child: Text(
                               'Вибери версію треку',
                               style: TextStyle(
+                                fontFamily: SoundFlowType.heading,
                                 fontSize: 24,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -299,6 +300,7 @@ class _WorkspaceState extends State<Workspace> {
                       child: Text(
                         title,
                         style: const TextStyle(
+                          fontFamily: SoundFlowType.heading,
                           fontSize: 24,
                           fontWeight: FontWeight.w600,
                         ),
@@ -623,6 +625,7 @@ class _WorkspaceState extends State<Workspace> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
+                                    fontFamily: SoundFlowType.heading,
                                     fontSize: 22,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -771,6 +774,7 @@ class _WorkspaceState extends State<Workspace> {
                     Text(
                       c.playlist['name'] ?? 'Плейліст',
                       style: const TextStyle(
+                        fontFamily: SoundFlowType.heading,
                         fontSize: 34,
                         height: 1.15,
                         fontWeight: FontWeight.w600,
@@ -939,6 +943,7 @@ class _WorkspaceState extends State<Workspace> {
                       Text(
                         trackTitle(t),
                         style: TextStyle(
+                          fontFamily: SoundFlowType.heading,
                           fontSize: width > 950 ? 36 : 27,
                           height: 1.12,
                           fontWeight: FontWeight.w600,

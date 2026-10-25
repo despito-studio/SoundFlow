@@ -13,11 +13,13 @@ class MediaSlider extends StatefulWidget {
     this.continuous = false,
     this.semanticFormatterCallback,
     this.onPreview,
+    this.focusNode,
   });
   final double value, max;
   final ValueChanged<double>? onChanged;
   final bool continuous;
   final ValueChanged<double>? onPreview;
+  final FocusNode? focusNode;
   final SemanticFormatterCallback? semanticFormatterCallback;
   @override
   State<MediaSlider> createState() => _MediaSliderState();
@@ -54,6 +56,7 @@ class _MediaSliderState extends State<MediaSlider> {
     ),
     curve: Curves.linear,
     builder: (context, value, _) => Slider(
+      focusNode: widget.focusNode,
       value: value.clamp(0, widget.max),
       max: widget.max,
       semanticFormatterCallback: widget.semanticFormatterCallback,

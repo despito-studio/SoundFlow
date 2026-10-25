@@ -114,10 +114,46 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           name: windows-release
           path: release
+      - name: Verify the public update channel
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, re, time, urllib.request
+          base = 'https://despito-studio.github.io/SoundFlow/updates/win-x64/'
+          version = os.environ['VERSION']
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(base+'releases.win.json', timeout=30) as response:
+                      assets = json.load(response)['Assets']
+                  assert assets and len({a['FileName'] for a in assets}) == len(assets)
+                  full = [a for a in assets if a['Type'] == 'Full']
+                  assert max(tuple(map(int, a['Version'].split('.'))) for a in full) == tuple(map(int, version.split('.')))
+                  assert any(a['Version'] == version for a in full)
+                  for asset in assets:
+                      assert asset['PackageId'] == 'SoundFlow'
+                      assert re.fullmatch(r'\d+\.\d+\.\d+', asset['Version'])
+                      assert asset['Type'] in ('Full', 'Delta')
+                      assert asset['FileName'] == f"SoundFlow-{asset['Version']}-{asset['Type'].lower()}.nupkg"
+                      assert re.fullmatch(r'[a-fA-F0-9]{64}', asset['SHA256'])
+                      digest, size = hashlib.sha256(), 0
+                      with urllib.request.urlopen(base+asset['FileName'], timeout=60) as response:
+                          while block := response.read(1024*1024):
+                              digest.update(block)
+                              size += len(block)
+                      assert size == asset['Size'] and digest.hexdigest().lower() == asset['SHA256'].lower()
+                  print('Public update feed and all retained packages verified')
+                  break
+              except Exception:
+                  if attempt == 11:
+                      raise
+                  time.sleep(5)
+          PY
       - name: Publish exactly two user downloads
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,13 +176,19 @@ jobs:
               exit 0
             fi
           else
-            gh release create "v$VERSION" --verify-tag --draft --title "SoundFlow $VERSION" --generate-notes
+            gh release create "v$VERSION" --verify-tag --draft --target "$GITHUB_SHA" --title "SoundFlow $VERSION" --notes-file "docs/RELEASE-$VERSION.md"
             find_release
           fi
+          jq -e --arg sha "$GITHUB_SHA" --arg tag "v$VERSION" '.draft == true and .target_commitish == $sha and .tag_name == $tag' release.json
           release_id="$(jq -er '.id' release.json)"
           gh release upload "v$VERSION" --clobber \
             "release/SoundFlow-$VERSION-Setup.exe" \
             "release/SoundFlow-$VERSION-windows-x64.zip"
           gh api "repos/$GH_REPO/releases/$release_id" > release.json
           test "$(jq '.assets | length' release.json)" = 2
-          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true
+          for file in "SoundFlow-$VERSION-Setup.exe" "SoundFlow-$VERSION-windows-x64.zip"; do
+            digest="sha256:$(sha256sum "release/$file" | cut -d' ' -f1)"
+            size="$(stat -c%s "release/$file")"
+            jq -e --arg name "$file" --arg digest "$digest" --argjson size "$size" '.assets[] | select(.name == $name and .state == "uploaded" and .digest == $digest and .size == $size)' release.json > /dev/null
+          done
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -f tag_name="v$VERSION" -F draft=false -F prerelease=false -f make_latest=true

@@ -393,7 +393,11 @@ class _SearchPageState extends State<SearchPage> {
           children: [
             Text(
               title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                fontFamily: SoundFlowType.heading,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             if (subtitle != null) ...[
               const SizedBox(height: 5),
@@ -808,7 +812,11 @@ class _HintCard extends StatelessWidget {
         const SizedBox(height: 14),
         Text(
           title,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontFamily: SoundFlowType.heading,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 8),
         Text(

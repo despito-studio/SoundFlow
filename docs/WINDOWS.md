@@ -13,6 +13,8 @@ Run scripts/build-flutter-windows.ps1. The script builds the Rust library, resol
 
 The output is output/flutter-preview/SoundFlow.exe with its required DLLs and data directories. Keep the whole folder together. -SkipCore reuses the current Rust DLL while iterating on the frontend.
 
+Use `-BundlePath output/flutter-preview-hover` to build into another directory inside the checkout when an existing preview is running.
+
 The application has a native Windows caption and resizable main window. Initial bounds fit the monitor work area. Rust handles the single-instance mutex, tray, media keys and Ctrl+Alt+M shortcuts. The Windows runner owns the Island window and forwards its commands to the main Flutter engine.
 
 User data remains in %APPDATA%\app.soundflow.desktop. --data-dir selects an isolated profile; --resources selects a bundle root; --offline prevents cloud work. --export-design <png> exports one frame directly from the Flutter render tree for design review. It does not inject desktop input.

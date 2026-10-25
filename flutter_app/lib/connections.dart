@@ -141,6 +141,7 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                       child: Text(
                         'Підключення',
                         style: TextStyle(
+                          fontFamily: SoundFlowType.heading,
                           fontSize: 24,
                           fontWeight: FontWeight.w600,
                         ),

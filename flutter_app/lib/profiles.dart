@@ -470,6 +470,7 @@ class ProfileHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 36,
+                    fontFamily: SoundFlowType.heading,
                     height: 1.12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -602,6 +603,7 @@ class _UserProfileState extends State<UserProfile> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 44,
+                              fontFamily: SoundFlowType.heading,
                               height: 1.1,
                               fontWeight: FontWeight.w700,
                             ),

@@ -80,7 +80,7 @@ class _SettingsPageState extends State<SettingsPage> {
           Row(
             children: [
               Text(
-                'SoundFlow ${core.update['current'] ?? '1.0.0'}',
+                'SoundFlow ${core.update['current'] ?? '1.1.0'}',
                 style: TextStyle(fontSize: 12, color: context.paints.muted),
               ),
               const Spacer(),
@@ -100,7 +100,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => showAboutDialog(
                   context: context,
                   applicationName: 'SoundFlow',
-                  applicationVersion: '1.0.0',
+                  applicationVersion:
+                      core.update['current']?.toString() ?? '1.1.0',
                   children: [
                     const Text('Музика, медіатека й мініплеєр для Windows.'),
                   ],
@@ -178,7 +179,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: _label(
                     context,
                     update['version'] == null
-                        ? 'Версія ${update['current'] ?? '1.0.0'}'
+                        ? 'Версія ${update['current'] ?? '1.1.0'}'
                         : 'Доступна версія ${update['version']}',
                     description,
                   ),
@@ -355,6 +356,7 @@ class _SettingsPageState extends State<SettingsPage> {
     child: Text(
       title,
       style: TextStyle(
+        fontFamily: SoundFlowType.heading,
         fontSize: 13,
         fontWeight: FontWeight.w600,
         color: context.paints.muted,

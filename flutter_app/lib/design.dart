@@ -7,7 +7,6 @@ import 'anicry_motion.dart';
 
 import 'core.dart';
 import 'concentric.dart';
-import 'media_slider.dart';
 
 class Paints extends ThemeExtension<Paints> {
   const Paints(
@@ -96,11 +95,16 @@ extension Design on BuildContext {
   Paints get paints => Theme.of(this).extension<Paints>()!;
 }
 
+abstract final class SoundFlowType {
+  static const body = 'Onest';
+  static const heading = 'Montserrat';
+}
+
 ThemeData soundflowTheme(bool dark, bool reduced, {String? scheme}) {
   final p = Paints.forScheme(scheme ?? (dark ? 'dark' : 'light'));
   return ThemeData(
     brightness: dark ? Brightness.dark : Brightness.light,
-    fontFamily: 'Segoe UI',
+    fontFamily: SoundFlowType.body,
     scaffoldBackgroundColor: p.canvas,
     colorScheme: ColorScheme.fromSeed(
       seedColor: p.accent,
@@ -113,9 +117,19 @@ ThemeData soundflowTheme(bool dark, bool reduced, {String? scheme}) {
     hoverColor: Colors.transparent,
     focusColor: Colors.transparent,
     textTheme: TextTheme(
+      displayLarge: TextStyle(fontFamily: SoundFlowType.heading, color: p.ink),
+      displayMedium: TextStyle(fontFamily: SoundFlowType.heading, color: p.ink),
+      displaySmall: TextStyle(fontFamily: SoundFlowType.heading, color: p.ink),
+      headlineLarge: TextStyle(fontFamily: SoundFlowType.heading, color: p.ink),
+      headlineMedium: TextStyle(
+        fontFamily: SoundFlowType.heading,
+        color: p.ink,
+      ),
+      headlineSmall: TextStyle(fontFamily: SoundFlowType.heading, color: p.ink),
       bodyMedium: TextStyle(fontSize: 14, color: p.ink),
       bodySmall: TextStyle(fontSize: 13, color: p.muted),
       titleLarge: TextStyle(
+        fontFamily: SoundFlowType.heading,
         fontSize: 22,
         fontWeight: FontWeight.w600,
         color: p.ink,
@@ -127,7 +141,11 @@ ThemeData soundflowTheme(bool dark, bool reduced, {String? scheme}) {
         color: p.hover,
         borderRadius: BorderRadius.circular(7),
       ),
-      textStyle: TextStyle(fontSize: 12, color: p.ink),
+      textStyle: TextStyle(
+        fontFamily: SoundFlowType.body,
+        fontSize: 12,
+        color: p.ink,
+      ),
     ),
     sliderTheme: SliderThemeData(
       trackHeight: 3,
@@ -399,6 +417,7 @@ class Heading extends StatelessWidget {
         child: Text(
           text,
           style: TextStyle(
+            fontFamily: SoundFlowType.heading,
             fontSize: 20,
             fontWeight: FontWeight.w600,
             color: context.paints.ink,
@@ -422,7 +441,11 @@ class EmptyState extends StatelessWidget {
       children: [
         Text(
           title,
-          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontFamily: SoundFlowType.heading,
+            fontSize: 26,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 10),
         Text(
@@ -895,75 +918,98 @@ class _TrackRowState extends State<TrackRow> {
   }
 }
 
-Future<void> showVolume(BuildContext anchor, Core core) async {
+Future<void> showPlayerPopover(
+  BuildContext anchor, {
+  required double width,
+  required String label,
+  required Widget child,
+}) async {
   final render = anchor.findRenderObject() as RenderBox;
   final point = render.localToGlobal(Offset.zero);
-  final screen = MediaQuery.sizeOf(anchor);
+  final media = MediaQuery.of(anchor);
+  final screen = media.size;
+  final maxWidth = screen.width - media.padding.horizontal - 24;
+  final panelWidth = width.clamp(0.0, maxWidth);
+  final left = (point.dx + (render.size.width - panelWidth) / 2).clamp(
+    media.padding.left + 12,
+    screen.width - media.padding.right - panelWidth - 12,
+  );
+  final bottom = screen.height - point.dy + 12;
+  final maxHeight = point.dy - media.padding.top - 24;
+  final paints = anchor.paints;
   await showGeneralDialog<void>(
     context: anchor,
     barrierDismissible: true,
-    barrierLabel: 'Закрити гучність',
+    barrierLabel: label,
     barrierColor: Colors.transparent,
-    transitionDuration: MediaQuery.disableAnimationsOf(anchor)
+    transitionDuration: media.disableAnimations
         ? Duration.zero
         : Anicry.popover,
-    pageBuilder: (context, animation, secondary) => Stack(
-      children: [
-        Positioned(
-          left: (point.dx - 86).clamp(12, screen.width - 224),
-          top: (point.dy - 74).clamp(12, screen.height - 72),
-          child: Material(
-            color: anchor.paints.surface,
-            borderRadius: BorderRadius.circular(18),
-            child: SizedBox(
-              width: 212,
-              height: 56,
-              child: ValueListenableBuilder<Json>(
-                valueListenable: core.playback,
-                builder: (context, value, _) {
-                  final volume = (value['volume'] as num?)?.toDouble() ?? .8;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      children: [
-                        Control(
-                          volume == 0 ? 'volume-x' : 'volume-2',
-                          'Вимкнути звук',
-                          size: 32,
-                          onTap: () => core.player('mute'),
-                        ),
-                        Expanded(
-                          child: MediaSlider(
-                            value: volume,
-                            continuous: true,
-                            onChanged: core.setVolume,
-                            semanticFormatterCallback: (v) =>
-                                'Гучність ${(v * 100).round()}%',
-                          ),
-                        ),
-                        SizedBox(
-                          width: 32,
-                          child: Text(
-                            '${(volume * 100).round()}%',
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+    pageBuilder: (context, animation, secondary) => _PlayerPopover(
+      child: Stack(
+        children: [
+          Positioned(
+            left: left,
+            bottom: bottom,
+            width: panelWidth,
+            child: FadeTransition(
+              opacity: animation.drive(CurveTween(curve: Anicry.easeOut)),
+              child: SlideTransition(
+                position: animation.drive(
+                  Tween(
+                    begin: const Offset(0, .06),
+                    end: Offset.zero,
+                  ).chain(CurveTween(curve: Anicry.easeOut)),
+                ),
+                child: Material(
+                  color: paints.surface,
+                  borderRadius: BorderRadius.circular(
+                    SoundFlowCorners.panel - 4,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxHeight),
+                    child: SingleChildScrollView(child: child),
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
-    transitionBuilder: (context, animation, secondary, child) => FadeTransition(
-      opacity: CurvedAnimation(parent: animation, curve: Anicry.easeOut),
-      child: child,
-    ),
+    transitionBuilder: (context, animation, secondary, child) => child,
   );
+}
+
+class _PlayerPopover extends StatefulWidget {
+  const _PlayerPopover({required this.child});
+  final Widget child;
+  @override
+  State<_PlayerPopover> createState() => _PlayerPopoverState();
+}
+
+class _PlayerPopoverState extends State<_PlayerPopover>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (ModalRoute.of(context)?.isCurrent == true) Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 String initials(String name) {

@@ -1,4 +1,4 @@
-param([switch]$SkipCore)
+param([switch]$SkipCore, [string]$BundlePath = 'output/flutter-preview')
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $appRoot = Join-Path $projectRoot 'flutter_app'
@@ -9,7 +9,7 @@ if (-not (Test-Path -LiteralPath $flutter)) { $flutter = (Get-Command flutter.ba
 if (-not (Test-Path -LiteralPath $cmake)) { $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source }
 if (-not (Test-Path -LiteralPath $ninja)) { $ninja = (Get-Command ninja.exe -ErrorAction Stop).Source }
 $buildDir = Join-Path $appRoot 'build/windows-ninja'
-$bundle = [IO.Path]::GetFullPath((Join-Path $projectRoot 'output/flutter-preview'))
+$bundle = [IO.Path]::GetFullPath((Join-Path $projectRoot $BundlePath))
 if (-not $bundle.StartsWith($projectRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Bundle must stay within the checkout.' }
 if ((Test-Path -LiteralPath $bundle) -and ((Get-Item -LiteralPath $bundle).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Bundle must not be a junction.' }
 if (-not (Test-Path -LiteralPath $flutter)) { throw 'Flutter SDK is missing from output/toolchain/flutter.' }
