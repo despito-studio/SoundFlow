@@ -80,7 +80,7 @@ class _SettingsPageState extends State<SettingsPage> {
           Row(
             children: [
               Text(
-                'SoundFlow ${core.update['current'] ?? '1.1.0'}',
+                'SoundFlow ${core.update['current'] ?? '1.1.1'}',
                 style: TextStyle(fontSize: 12, color: context.paints.muted),
               ),
               const Spacer(),
@@ -101,7 +101,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   context: context,
                   applicationName: 'SoundFlow',
                   applicationVersion:
-                      core.update['current']?.toString() ?? '1.1.0',
+                      core.update['current']?.toString() ?? '1.1.1',
                   children: [
                     const Text('Музика, медіатека й мініплеєр для Windows.'),
                   ],
@@ -179,7 +179,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: _label(
                     context,
                     update['version'] == null
-                        ? 'Версія ${update['current'] ?? '1.1.0'}'
+                        ? 'Версія ${update['current'] ?? '1.1.1'}'
                         : 'Доступна версія ${update['version']}',
                     description,
                   ),

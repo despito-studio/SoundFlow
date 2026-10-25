@@ -94,22 +94,26 @@ class Core extends ChangeNotifier {
       return;
     }
     final time = now ?? DateTime.now();
-    if (_startupUpdateChecked &&
-        time.difference(_updatePoll) < const Duration(hours: 12)) {
-      return;
-    }
-    _startupUpdateChecked = true;
-    _updatePoll = time;
+    final status = update['status'];
     if ([
+      'checking',
       'available',
       'ready',
       'downloading',
       'verifying',
       'installing',
       'restarting',
-    ].contains(update['status'])) {
+    ].contains(status)) {
       return;
     }
+    final interval = status == 'error'
+        ? const Duration(minutes: 1)
+        : const Duration(hours: 12);
+    if (_startupUpdateChecked && time.difference(_updatePoll) < interval) {
+      return;
+    }
+    _startupUpdateChecked = true;
+    _updatePoll = time;
     action('update-check', {'download': false});
   }
 

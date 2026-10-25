@@ -114,6 +114,25 @@ void main() {
       offline.dispose();
     },
   );
+  test(
+    'startup retries a failed check without duplicating an active check',
+    () {
+      final core = fixture(status: 'idle');
+      final now = DateTime(2026, 10, 25);
+      core.checkForStartupUpdate(now: now);
+      core.state['update'] = {...core.update, 'status': 'checking'};
+      core.checkForStartupUpdate(now: now.add(const Duration(hours: 13)));
+      expect(core.commands, hasLength(1));
+      core.state['update'] = {...core.update, 'status': 'error'};
+      core.checkForStartupUpdate(now: now.add(const Duration(seconds: 59)));
+      expect(core.commands, hasLength(1));
+      core.checkForStartupUpdate(now: now.add(const Duration(minutes: 1)));
+      expect(core.commands, hasLength(2));
+      core.checkForStartupUpdate(now: now.add(const Duration(seconds: 61)));
+      expect(core.commands, hasLength(2));
+      core.dispose();
+    },
+  );
   testWidgets(
     'one startup action owns asynchronous progress and cancellation',
     (tester) async {

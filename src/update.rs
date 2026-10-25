@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
     io::{Read, Write},
+    panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -77,14 +78,17 @@ struct PagesSource {
     assets: Arc<Mutex<Vec<VelopackAsset>>>,
 }
 impl PagesSource {
-    fn client(&self) -> Result<Client, Error> {
-        let builder = reqwest::Client::builder()
+    fn client_builder() -> reqwest::blocking::ClientBuilder {
+        // The blocking response reads its body outside Tokio. An async
+        // read_timeout wrapper panics there instead of returning an IO error.
+        Client::builder()
             .https_only(true)
             .connect_timeout(Duration::from_secs(8))
-            .read_timeout(Duration::from_secs(3))
-            .user_agent(format!("SoundFlow/{}", env!("CARGO_PKG_VERSION")));
-        reqwest::blocking::ClientBuilder::from(builder)
-            .timeout(None)
+            .timeout(Duration::from_secs(30))
+            .user_agent(format!("SoundFlow/{}", env!("CARGO_PKG_VERSION")))
+    }
+    fn client(&self) -> Result<Client, Error> {
+        Self::client_builder()
             .build()
             .map_err(|e| Error::Other(e.to_string()))
     }
@@ -290,9 +294,11 @@ impl Updater {
             cancel: cancel.clone(),
             assets: assets.clone(),
         };
-        let manager = UpdateManager::new(source, None, None)
-            .ok()
-            .filter(|m| m.get_app_id() == "SoundFlow");
+        let (manager, initialization_error) = match UpdateManager::new(source, None, None) {
+            Ok(manager) if manager.get_app_id() == "SoundFlow" => (Some(manager), None),
+            Ok(_) => (None, Some("Unexpected application package ID".to_string())),
+            Err(error) => (None, Some(format!("{error:?}"))),
+        };
         let packages = velopack::locator::auto_locate_app_manifest(
             velopack::locator::LocationContext::FromCurrentExe,
         )
@@ -316,6 +322,9 @@ impl Updater {
             current,
         });
         updater.set("idle", "", None, 0);
+        if let Some(error) = initialization_error {
+            updater.log(&format!("initialization failed: {error}"));
+        }
         updater.restore();
         updater
     }
@@ -349,6 +358,26 @@ impl Updater {
     pub fn snapshot(&self) -> Value {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
+    fn log(&self, event: &str) {
+        let Some(directory) = self.record.parent() else {
+            return;
+        };
+        if fs::create_dir_all(directory).is_err() {
+            return;
+        }
+        let path = directory.join("updater.log");
+        if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > 256 * 1024) {
+            let _ = fs::rename(&path, directory.join("updater.previous.log"));
+        }
+        if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(
+                file,
+                "{} [{current}] {event}",
+                chrono::Utc::now().to_rfc3339(),
+                current = self.current
+            );
+        }
+    }
     fn set(&self, status: &str, message: &str, asset: Option<&VelopackAsset>, received: u64) {
         *self.state.lock().unwrap_or_else(|e| e.into_inner()) = json!({"status":status,"message":message,
             "sequence":self.sequence.fetch_add(1,Ordering::AcqRel)+1,"current":self.current,"installed":self.manager.is_some(),
@@ -365,7 +394,16 @@ impl Updater {
         self.cancel.store(false, Ordering::Release);
         let worker = self.clone();
         std::thread::spawn(move || {
-            if let Err(error) = task(&worker) {
+            let result = catch_unwind(AssertUnwindSafe(|| task(&worker))).unwrap_or_else(|panic| {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("unknown panic");
+                Err(Error::Other(format!("Updater worker panicked: {message}")))
+            });
+            if let Err(error) = result {
+                worker.log(&format!("operation failed: {error:?}"));
                 let info = worker
                     .info
                     .lock()
@@ -617,6 +655,71 @@ impl Updater {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn blocking_transport_reads_http_body_without_a_tokio_runtime() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(30));
+            stream.write_all(b"package").unwrap();
+        });
+        let reader = std::thread::spawn(move || {
+            let client = PagesSource::client_builder()
+                .https_only(false)
+                .no_proxy()
+                .build()
+                .unwrap();
+            let mut response = client
+                .get(format!("http://{address}/package"))
+                .send()
+                .unwrap();
+            let mut bytes = Vec::new();
+            copy_package(
+                &mut response,
+                &mut bytes,
+                7,
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap();
+            assert_eq!(bytes, b"package");
+        });
+        reader.join().unwrap();
+        server.join().unwrap();
+    }
+    #[test]
+    fn worker_panic_reports_failure_and_allows_another_operation() {
+        let temp = tempfile::tempdir().unwrap();
+        let worker = Updater::new(temp.path(), true);
+        worker.start(|_| panic!("transport regression"));
+        for _ in 0..500 {
+            if !worker.busy.load(Ordering::Acquire) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!worker.busy.load(Ordering::Acquire));
+        assert_eq!(worker.snapshot()["status"], "error");
+        assert!(fs::read_to_string(temp.path().join("updates/updater.log"))
+            .unwrap()
+            .contains("transport regression"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        worker.start(move |_| {
+            tx.send(()).unwrap();
+            Ok(())
+        });
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
     fn asset() -> VelopackAsset {
         VelopackAsset {
             PackageId: "SoundFlow".into(),
