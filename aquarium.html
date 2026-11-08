@@ -1,0 +1,1631 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D Аквариум — Three.js</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02060c;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  canvas { display: block; outline: none; }
+  #ui { position: fixed; left: 16px; top: 16px; color: #d4ecff; background: rgba(4, 22, 40, .55);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(140, 200, 255, .18);
+    border-radius: 14px; padding: 12px 14px; max-width: 300px; font-size: 13px; line-height: 1.5;
+    user-select: none; box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }
+  #ui h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; letter-spacing: .3px; }
+  #ui .hint { opacity: .78; }
+  #ui .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  #ui button { cursor: pointer; border: 1px solid rgba(150, 210, 255, .3); background: rgba(40, 120, 180, .25);
+    color: #e6f4ff; border-radius: 9px; padding: 6px 10px; font: inherit; transition: background .2s, transform .1s; }
+  #ui button:hover { background: rgba(60, 150, 220, .45); }
+  #ui button:active { transform: scale(.96); }
+  #ui button.on { background: rgba(80, 180, 255, .55); }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #9fd3ff; font-size: 15px; letter-spacing: .5px; background: #02060c; transition: opacity .8s; z-index: 5; }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="loading">Наполняем аквариум…</div>
+<div id="ui">
+  <h1>🐠 3D Аквариум</h1>
+  <div class="hint">ЛКМ — вращать · колесо — приблизить · ПКМ — сдвинуть<br>Двойной клик — постучать по стеклу</div>
+  <div class="btns">
+    <button id="feed">🍤 Покормить</button>
+    <button id="rotate">⟳ Облёт</button>
+    <button id="light">🌙 Ночь</button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/* =====================================================================
+   Утилиты: детерминированный ГСЧ, шум, интерполяция
+   ===================================================================== */
+let _seed = 20261108;
+function rand() {
+  _seed = (_seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(_seed ^ (_seed >>> 15), 1 | _seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const rr = (a, b) => a + (b - a) * rand();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+const C = (h) => new THREE.Color(h);
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+
+function hash3(x, y, z) {
+  let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(z, 1274126177)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function vnoise(x, y, z) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+  const c000 = hash3(xi, yi, zi), c100 = hash3(xi + 1, yi, zi);
+  const c010 = hash3(xi, yi + 1, zi), c110 = hash3(xi + 1, yi + 1, zi);
+  const c001 = hash3(xi, yi, zi + 1), c101 = hash3(xi + 1, yi, zi + 1);
+  const c011 = hash3(xi, yi + 1, zi + 1), c111 = hash3(xi + 1, yi + 1, zi + 1);
+  const x00 = lerp(c000, c100, u), x10 = lerp(c010, c110, u), x01 = lerp(c001, c101, u), x11 = lerp(c011, c111, u);
+  return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w);
+}
+function fbm(x, y, z, oct = 4) {
+  let a = 0.5, f = 1, s = 0, n = 0;
+  for (let i = 0; i < oct; i++) { s += a * vnoise(x * f, y * f, z * f); n += a; f *= 2.03; a *= 0.5; }
+  return s / n;
+}
+
+/* =====================================================================
+   Размеры аквариума
+   ===================================================================== */
+const TW = 24, TH = 13, TD = 12;          // ширина, высота, глубина
+const HW = TW / 2, HD = TD / 2;
+const GLASS = 0.14;
+const WATER_Y = TH - 0.9;
+
+function sandY(x, z) {
+  const back = clamp(-z / TD + 0.5, 0, 1);   // 0 — спереди, 1 — сзади
+  let h = 0.95 + 1.6 * back * back + 0.5 * back;
+  h += (fbm(x * 0.18 + 3.1, 0.0, z * 0.18 + 7.7, 4) - 0.5) * 1.1;
+  h += Math.sin(x * 2.2 + z * 0.7 + fbm(x * 0.5, 1.3, z * 0.5, 2) * 5) * 0.035; // мелкая рябь
+  return h;
+}
+
+/* =====================================================================
+   Рендерер, сцена, камера
+   ===================================================================== */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x03070d);
+scene.fog = new THREE.FogExp2(0x05202f, 0.013);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environment = envTex;
+scene.environmentIntensity = 0.35;
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.05, 300);
+camera.position.set(-7, 9.5, 31);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 5.8, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 3;
+controls.maxDistance = 70;
+controls.maxPolarAngle = Math.PI * 0.62;
+controls.autoRotateSpeed = 0.6;
+controls.update();
+
+/* =====================================================================
+   Общие юниформы и патч стандартных материалов
+   (каустика, изгиб тела рыб, колыхание растений)
+   ===================================================================== */
+const shared = { uTime: { value: 0 }, uCaustic: { value: 1 } };
+
+const CAUSTIC_GLSL = /* glsl */`
+float causticFn(vec2 p, float t){
+  vec2 i = p; float c = 1.0; float inten = 0.005;
+  for (int n = 0; n < 4; n++) {
+    float tt = t * (1.0 - (3.5 / float(n + 1)));
+    i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
+    c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / inten), p.y / (cos(i.y + tt) / inten)));
+  }
+  c /= 4.0;
+  c = 1.17 - pow(c, 1.4);
+  return pow(abs(c), 8.0);
+}`;
+
+const SWAY_GLSL = /* glsl */`{
+  float hf = aSway.x; float w = hf * hf * aSway.z;
+  float tt = uTime * (0.9 + 0.25 * sin(aSway.y)) + aSway.y;
+  float sx = sin(tt + position.y * 0.45 + position.x * 0.15) * 0.6 + sin(tt * 2.1 + aSway.y * 1.7 + position.y * 0.8) * 0.16;
+  float sz = cos(tt * 0.73 + position.y * 0.35 + 1.7 + position.z * 0.2) * 0.4;
+  transformed.x += w * (sx + 0.25 * sin(uTime * 0.35 + position.z * 0.2));
+  transformed.z += w * sz;
+}`;
+
+// Тело рыбы: бегущая волна от головы к хвосту + изгиб при повороте + трепет плавников
+const SWIM_NORMAL_GLSL = /* glsl */`{
+  float L = uSwim.z; float ft = max((L * 0.5 - position.z) / L, 0.0);
+  float A = uSwim.y * L * 0.11; float env = 0.06 + 0.94 * ft * ft; float ph = uSwim.x - ft * 4.2;
+  float dft = A * (1.88 * ft * sin(ph) - env * 4.2 * cos(ph)) + uTurn * 2.0 * ft * L * 0.28;
+  float dz = -dft / L;
+  objectNormal = normalize(vec3(objectNormal.x, objectNormal.y, objectNormal.z - dz * objectNormal.x));
+}`;
+const SWIM_GLSL = /* glsl */`{
+  float L = uSwim.z; float ft = max((L * 0.5 - position.z) / L, 0.0);
+  float env = 0.06 + 0.94 * ft * ft;
+  transformed.x += sin(uSwim.x - ft * 4.2) * uSwim.y * env * L * 0.11;
+  transformed.x += uTurn * ft * ft * L * 0.28;
+  transformed.x += aFlex * sin(uSwim.w + uv.x * 6.0 - uv.y * 2.5) * uv.y * L * 0.035;
+}`;
+
+function patchMaterial(mat, o = {}) {
+  const caust = o.caustics || 0, swim = o.swim || null, sway = !!o.sway;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = shared.uTime;
+    sh.uniforms.uCaustic = shared.uCaustic;
+    let vh = 'uniform float uTime;\n', fh = 'uniform float uTime;\nuniform float uCaustic;\n';
+    let vNormal = '', vBegin = '', vProj = '', fOut = '';
+    if (swim) {
+      sh.uniforms.uSwim = swim.uSwim; sh.uniforms.uTurn = swim.uTurn;
+      vh += 'uniform vec4 uSwim;\nuniform float uTurn;\nattribute float aFlex;\n';
+      vNormal = SWIM_NORMAL_GLSL; vBegin += SWIM_GLSL;
+    }
+    if (sway) { vh += 'attribute vec3 aSway;\n'; vBegin += SWAY_GLSL; }
+    if (caust > 0) {
+      vh += 'varying vec3 vCWorld;\nvarying float vCUp;\n';
+      fh += 'varying vec3 vCWorld;\nvarying float vCUp;\n' + CAUSTIC_GLSL;
+      vProj = `{
+        vec4 cW = vec4(transformed, 1.0);
+        vec3 cN = objectNormal;
+        #ifdef USE_INSTANCING
+          cW = instanceMatrix * cW; cN = mat3(instanceMatrix) * cN;
+        #endif
+        cW = modelMatrix * cW;
+        vCWorld = cW.xyz;
+        vCUp = normalize(mat3(modelMatrix) * cN).y;
+      }`;
+      fOut = `{
+        vec2 cp = vCWorld.xz * 0.55 + vec2(vCWorld.y * 0.12);
+        float t = uTime * 0.45;
+        float c1 = causticFn(cp - 250.0, t);
+        float c2 = causticFn(cp * 1.015 - 250.0 + 0.04, t);
+        vec3 cc = vec3(c1 * 0.85, (c1 + c2) * 0.5, c2 * 1.05);
+        float up = smoothstep(-0.25, 0.9, vCUp);
+        float inside = step(abs(vCWorld.x), ${HW.toFixed(2)}) * step(abs(vCWorld.z), ${HD.toFixed(2)}) * step(vCWorld.y, ${WATER_Y.toFixed(2)});
+        float depthF = clamp((${WATER_Y.toFixed(2)} - vCWorld.y) / ${WATER_Y.toFixed(2)}, 0.0, 1.0);
+        outgoingLight += diffuseColor.rgb * cc * ${caust.toFixed(3)} * up * inside * (1.0 - 0.45 * depthF) * uCaustic;
+      }`;
+    }
+    sh.vertexShader = vh + sh.vertexShader
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + vNormal)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + vBegin)
+      .replace('#include <project_vertex>', '#include <project_vertex>\n' + vProj);
+    sh.fragmentShader = fh + sh.fragmentShader
+      .replace('#include <opaque_fragment>', fOut + '\n#include <opaque_fragment>');
+  };
+  // onBeforeCompile — замыкание, поэтому ключ кэша программ задаём явно
+  mat.customProgramCacheKey = () => `aq:${swim ? 1 : 0}${sway ? 1 : 0}:${caust}`;
+  return mat;
+}
+
+/* =====================================================================
+   Процедурные канвас‑текстуры
+   ===================================================================== */
+function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')]; }
+
+function makeSandTexture() {
+  const [c, g] = canvas(512, 512);
+  g.fillStyle = '#ece0c6'; g.fillRect(0, 0, 512, 512);
+  const pal = ['#ffffff', '#f6eedc', '#d9c7a2', '#c2a97c', '#a89070', '#8e7a62', '#e8d2a8', '#b9b1a3'];
+  for (let i = 0; i < 26000; i++) {
+    g.fillStyle = pal[(rand() * pal.length) | 0];
+    g.globalAlpha = 0.35 + rand() * 0.6;
+    const r = 0.5 + rand() * 1.6;
+    g.beginPath(); g.arc(rand() * 512, rand() * 512, r, 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+
+function makeFinTexture() {
+  const [c, g] = canvas(256, 256);
+  const img = g.createImageData(256, 256);
+  for (let y = 0; y < 256; y++) {
+    const v = 1 - y / 255;                       // верх канваса = край плавника
+    for (let x = 0; x < 256; x++) {
+      const u = x / 255;
+      const ray = Math.pow(0.5 + 0.5 * Math.cos(u * Math.PI * 2 * 16), 5);
+      const seg = 0.5 + 0.5 * Math.cos(v * Math.PI * 2 * 7 + u * 3);  // членики лучей
+      let a = 0.82 - 0.4 * v + ray * 0.2;
+      const edge = 0.95 + 0.05 * ray;              // зазубренный край между лучами
+      a *= 1 - smooth(edge - 0.06, edge, v);
+      const b = 0.86 + ray * 0.14 * (0.8 + 0.2 * seg) - v * 0.06;
+      const i = (y * 256 + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = clamp(b, 0, 1) * 255;
+      img.data[i + 3] = clamp(a, 0, 1) * 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function makeScaleTexture() {
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#777'; g.fillRect(0, 0, 256, 256);
+  const S = 16;
+  for (let row = -1; row <= 256 / S * 2 + 1; row++) {
+    for (let col = -1; col <= 256 / S + 1; col++) {
+      const cx = col * S + (row % 2 ? S / 2 : 0), cy = row * S / 2;
+      const gr = g.createRadialGradient(cx - 3, cy, 1, cx, cy, S * 0.62);
+      gr.addColorStop(0, '#d8d8d8'); gr.addColorStop(0.75, '#9a9a9a'); gr.addColorStop(1, '#404040');
+      g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, S * 0.62, -Math.PI / 2, Math.PI / 2); g.closePath(); g.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(12, 6);
+  return t;
+}
+
+function makeWoodTexture(base, dark, planks, w = 1024, h = 1024) {
+  const [c, g] = canvas(w, h);
+  const ph = h / planks;
+  for (let p = 0; p < planks; p++) {
+    const s = 0.82 + rand() * 0.3;
+    g.fillStyle = `rgb(${base[0] * s | 0},${base[1] * s | 0},${base[2] * s | 0})`;
+    g.fillRect(0, p * ph, w, ph);
+    for (let i = 0; i < 46; i++) {
+      g.strokeStyle = `rgba(${dark[0]},${dark[1]},${dark[2]},${0.06 + rand() * 0.16})`;
+      g.lineWidth = 0.6 + rand() * 1.8;
+      g.beginPath();
+      const y0 = p * ph + rand() * ph, amp = rand() * 4, fr = 0.004 + rand() * 0.01, ph0 = rand() * 6;
+      g.moveTo(0, y0);
+      for (let x = 0; x <= w; x += 12) g.lineTo(x, y0 + Math.sin(x * fr + ph0) * amp);
+      g.stroke();
+    }
+    for (let k = 0; k < 2; k++) {                 // сучки
+      const kx = rand() * w, ky = p * ph + ph * (0.3 + rand() * 0.4);
+      const gr = g.createRadialGradient(kx, ky, 1, kx, ky, 10 + rand() * 10);
+      gr.addColorStop(0, `rgba(${dark[0]},${dark[1]},${dark[2]},.7)`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.fillRect(kx - 25, ky - 25, 50, 50);
+    }
+    g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, p * ph, w, 2);
+    const off = rand() * w; g.fillRect(off, p * ph, 2, ph);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+
+const SAND_TEX = makeSandTexture();
+const FIN_TEX = makeFinTexture();
+const SCALE_TEX = makeScaleTexture();
+
+/* =====================================================================
+   Освещение
+   ===================================================================== */
+const hemi = new THREE.HemisphereLight(0x9fd8ff, 0x3a2a1a, 0.7);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff1dc, 2.8);
+sun.position.set(5, 30, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 12, bottom: -12, near: 5, far: 50 });
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.03;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0x4fa8ff, 0.6);
+fill.position.set(-15, 8, 20);
+scene.add(fill);
+
+const tankLight = new THREE.PointLight(0xbfe8ff, 35, 30, 2);
+tankLight.position.set(0, 11, 3.5);
+scene.add(tankLight);
+
+const blueLight = new THREE.PointLight(0x2fb8ff, 25, 22, 2);
+blueLight.position.set(-8, 7, -3);
+scene.add(blueLight);
+
+const warmLight = new THREE.PointLight(0xffb070, 12, 18, 2);
+warmLight.position.set(8, 6, 2);
+scene.add(warmLight);
+
+/* =====================================================================
+   Комната: пол, тумба, стена
+   ===================================================================== */
+const FLOOR_Y = -6.1;
+{
+  const floorTex = makeWoodTexture([120, 82, 52], [40, 22, 10], 8);
+  floorTex.repeat.set(10, 10);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.62, metalness: 0.05 }));
+  floor.rotation.x = -Math.PI / 2; floor.position.y = FLOOR_Y; floor.receiveShadow = true;
+  scene.add(floor);
+
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(200, 60),
+    new THREE.MeshStandardMaterial({ color: 0x18222c, roughness: 0.95 }));
+  wall.position.set(0, 20, -22);
+  scene.add(wall);
+
+  const cabTex = makeWoodTexture([70, 44, 28], [20, 10, 4], 6);
+  cabTex.repeat.set(1, 1);
+  const cabMat = new THREE.MeshStandardMaterial({ map: cabTex, roughness: 0.45, metalness: 0.05 });
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(TW + 0.8, 6, TD + 0.8), cabMat);
+  cab.position.y = -3.05; cab.castShadow = cab.receiveShadow = true;
+  scene.add(cab);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(TW + 1.2, 0.22, TD + 1.2), cabMat);
+  top.position.y = -0.11; top.receiveShadow = true;
+  scene.add(top);
+  const gapMat = new THREE.MeshStandardMaterial({ color: 0x0a0604, roughness: 0.8 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xc9ccd2, roughness: 0.25, metalness: 1.0 });
+  for (const x of [-TW / 4, 0, TW / 4]) {
+    const gap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 5.4, 0.05), gapMat);
+    gap.position.set(x, -3.1, HD + 0.42); scene.add(gap);
+  }
+  for (const x of [-TW / 4 - 0.6, -TW / 4 + 0.6, TW / 4 - 0.6, TW / 4 + 0.6]) {
+    const h = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 1.2, 4, 12), metal);
+    h.position.set(x, -2.2, HD + 0.52); scene.add(h);
+  }
+}
+
+/* =====================================================================
+   Аквариум: стекло, рама, фон, вода, светильник
+   ===================================================================== */
+const tankGroup = new THREE.Group();
+scene.add(tankGroup);
+
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color: 0xd6f5ff, metalness: 0, roughness: 0.03, transparent: true, opacity: 0.13,
+  envMap: envTex, envMapIntensity: 1.7, clearcoat: 1, clearcoatRoughness: 0.02,
+  depthWrite: false, side: THREE.DoubleSide,
+});
+const glassPanels = [];
+function addGlass(w, h, d, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), glassMat);
+  m.position.set(x, y, z); m.renderOrder = 10;
+  tankGroup.add(m); glassPanels.push(m);
+}
+addGlass(TW, TH, GLASS, 0, TH / 2, HD - GLASS / 2);
+addGlass(TW, TH, GLASS, 0, TH / 2, -HD + GLASS / 2);
+addGlass(GLASS, TH, TD - 2 * GLASS, HW - GLASS / 2, TH / 2, 0);
+addGlass(GLASS, TH, TD - 2 * GLASS, -HW + GLASS / 2, TH / 2, 0);
+
+{ // торцы стекла (зеленоватый оттенок) и силиконовые швы
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x6fd6c0, transparent: true, opacity: 0.45, roughness: 0.1, depthWrite: false });
+  const silMat = new THREE.MeshStandardMaterial({ color: 0x0c1418, transparent: true, opacity: 0.7, roughness: 0.4, depthWrite: false });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const e = new THREE.Mesh(new THREE.BoxGeometry(0.05, TH, 0.05), edgeMat);
+    e.position.set(sx * (HW - 0.01), TH / 2, sz * (HD - 0.01)); e.renderOrder = 11; tankGroup.add(e);
+    const s = new THREE.Mesh(new THREE.BoxGeometry(0.16, TH - 0.6, 0.16), silMat);
+    s.position.set(sx * (HW - GLASS - 0.06), TH / 2, sz * (HD - GLASS - 0.06)); s.renderOrder = 9; tankGroup.add(s);
+  }
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0x0b0d10, roughness: 0.32, metalness: 0.4 });
+  const rim = (y, h) => {
+    const t = 0.18;
+    for (const sz of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(TW + 2 * t, h, t), rimMat); m.position.set(0, y, sz * (HD + t / 2)); m.castShadow = true; tankGroup.add(m); }
+    for (const sx of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(t, h, TD), rimMat); m.position.set(sx * (HW + t / 2), y, 0); m.castShadow = true; tankGroup.add(m); }
+  };
+  rim(0.22, 0.44); rim(TH - 0.15, 0.3);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(TW, 0.06, TD), rimMat);
+  base.position.y = 0.03; tankGroup.add(base);
+}
+
+// Светильник с LED‑полосой
+const ledMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.0, 3.2, 3.4), toneMapped: false });
+{
+  const alu = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.3, metalness: 0.85 });
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(TW - 1.5, 0.22, 1.3), alu);
+  lamp.position.set(0, TH + 0.36, 0); lamp.castShadow = false; tankGroup.add(lamp);
+  for (const sx of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.4, 1.3), alu);
+    leg.position.set(sx * (HW - 0.9), TH + 0.1, 0); tankGroup.add(leg);
+  }
+  const strip = new THREE.Mesh(new THREE.PlaneGeometry(TW - 2, 0.7), ledMat);
+  strip.rotation.x = Math.PI / 2; strip.position.set(0, TH + 0.24, 0); tankGroup.add(strip);
+}
+
+// Фон на задней стенке
+const backdropMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: shared.uTime, uLight: { value: 1 }, cTop: { value: C(0x1f86b8) }, cBot: { value: C(0x03182a) } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */`
+    varying vec2 vUv; uniform float uTime, uLight; uniform vec3 cTop, cBot;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+    void main(){
+      float y = vUv.y;
+      vec3 col = mix(cBot, cTop, smoothstep(0.0, 1.0, y));
+      float blot = n2(vUv * vec2(7.0, 3.5) + vec2(uTime * 0.02, 0.0)) * 0.6 + n2(vUv * vec2(19.0, 9.0)) * 0.4;
+      col *= 0.72 + 0.4 * blot;
+      float shafts = n2(vec2(vUv.x * 7.0 + uTime * 0.05 + y * 1.5, 0.5));
+      col += cTop * pow(shafts, 2.0) * smoothstep(0.25, 1.0, y) * 0.45;
+      float hill1 = 0.22 + 0.10 * n2(vec2(vUv.x * 4.0, 2.0)) + 0.04 * sin(vUv.x * 17.0);
+      float hill2 = 0.12 + 0.07 * n2(vec2(vUv.x * 7.0, 5.0));
+      col = mix(col, col * 0.55, smoothstep(hill1 + 0.01, hill1 - 0.01, y));
+      col = mix(col, col * 0.4, smoothstep(hill2 + 0.01, hill2 - 0.01, y));
+      col *= mix(0.55, 1.0, smoothstep(0.0, 0.2, vUv.x) * smoothstep(1.0, 0.8, vUv.x));
+      gl_FragColor = vec4(col * uLight, 1.0);
+    }`,
+});
+{
+  const bd = new THREE.Mesh(new THREE.PlaneGeometry(TW - 2 * GLASS, TH - 0.1), backdropMat);
+  bd.position.set(0, TH / 2, -HD + GLASS + 0.02);
+  tankGroup.add(bd);
+}
+
+// Лёгкий объём воды (тонирование)
+{
+  const box = new THREE.Mesh(new THREE.BoxGeometry(TW - 2 * GLASS - 0.02, WATER_Y - 0.08, TD - 2 * GLASS - 0.02),
+    new THREE.MeshBasicMaterial({ color: 0x1d86b0, transparent: true, opacity: 0.07, depthWrite: false }));
+  box.position.y = (WATER_Y - 0.08) / 2 + 0.06; box.renderOrder = -1;
+  tankGroup.add(box);
+}
+
+// Поверхность воды
+const waterGeo = new THREE.PlaneGeometry(TW - 2 * GLASS, TD - 2 * GLASS, 96, 48);
+waterGeo.rotateX(-Math.PI / 2);
+const waterBase = waterGeo.attributes.position.array.slice();
+const water = new THREE.Mesh(waterGeo, new THREE.MeshPhysicalMaterial({
+  color: 0x86d6ee, transparent: true, opacity: 0.42, roughness: 0.06, metalness: 0.0,
+  envMap: envTex, envMapIntensity: 1.3, side: THREE.DoubleSide, depthWrite: false,
+}));
+water.position.y = WATER_Y; water.renderOrder = 8;
+tankGroup.add(water);
+function updateWater(t) {
+  const p = waterGeo.attributes.position.array;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = waterBase[i], z = waterBase[i + 2];
+    p[i + 1] = 0.05 * Math.sin(x * 0.9 + t * 1.3) + 0.04 * Math.sin(z * 1.3 - t * 1.1 + x * 0.3)
+      + 0.02 * Math.sin((x + z) * 2.6 + t * 2.2) + 0.012 * Math.sin(x * 5.1 - z * 3.7 + t * 3.1);
+  }
+  waterGeo.attributes.position.needsUpdate = true;
+  waterGeo.computeVertexNormals();
+}
+
+/* =====================================================================
+   Песчаное дно
+   ===================================================================== */
+{
+  const sw = TW - 2 * GLASS, sd = TD - 2 * GLASS;
+  const geo = new THREE.PlaneGeometry(sw, sd, 180, 90);
+  geo.rotateX(-Math.PI / 2);
+  const p = geo.attributes.position, cols = [];
+  const cA = C(0xe0cda3), cB = C(0xc4a676), cC = C(0xefe2c2), cD = C(0x9f8a6a), tmp = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    p.setY(i, sandY(x, z));
+    const n = fbm(x * 0.35, 5.0, z * 0.35, 3), n2 = fbm(x * 1.6, 2.0, z * 1.6, 2);
+    tmp.copy(cA).lerp(cB, smooth(0.35, 0.7, n)).lerp(cC, smooth(0.55, 0.8, n2) * 0.6).lerp(cD, smooth(0.62, 0.8, n) * 0.4);
+    cols.push(tmp.r, tmp.g, tmp.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  geo.computeVertexNormals();
+  SAND_TEX.repeat.set(7, 3.5);
+  const mat = patchMaterial(new THREE.MeshStandardMaterial({
+    vertexColors: true, map: SAND_TEX, bumpMap: SAND_TEX, bumpScale: 1.5, roughness: 0.96, metalness: 0,
+  }), { caustics: 1.3 });
+  const sand = new THREE.Mesh(geo, mat);
+  sand.receiveShadow = true;
+  tankGroup.add(sand);
+
+  // Срез грунта, видимый сквозь стекло (слои)
+  const sk = { pos: [], col: [], idx: [] };
+  const layers = [C(0x8a7458), C(0xb79e78), C(0x6f5e48), C(0xc9b28a)];
+  const addSkirt = (pts) => {
+    const base = sk.pos.length / 3, NV = 10;
+    pts.forEach(([x, z]) => {
+      const top = sandY(x, z);
+      for (let k = 0; k <= NV; k++) {
+        const y = lerp(0.06, top, k / NV);
+        sk.pos.push(x, y, z);
+        const li = Math.floor((y * 3.1 + fbm(x * 0.8, y * 2, z * 0.8, 2) * 1.5)) % layers.length;
+        const c = layers[(li + layers.length) % layers.length].clone().lerp(cA, smooth(top - 0.25, top, y) * 0.8);
+        sk.col.push(c.r, c.g, c.b);
+      }
+    });
+    for (let i = 0; i < pts.length - 1; i++) for (let k = 0; k < NV; k++) {
+      const a = base + i * (NV + 1) + k, b = a + NV + 1;
+      sk.idx.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  };
+  const N = 120, ex = sw / 2 - 0.001, ez = sd / 2 - 0.001;
+  addSkirt(Array.from({ length: N + 1 }, (_, i) => [lerp(-ex, ex, i / N), ez]));
+  addSkirt(Array.from({ length: N + 1 }, (_, i) => [lerp(ex, -ex, i / N), -ez]));
+  addSkirt(Array.from({ length: 61 }, (_, i) => [ex, lerp(ez, -ez, i / 60)]));
+  addSkirt(Array.from({ length: 61 }, (_, i) => [-ex, lerp(-ez, ez, i / 60)]));
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.Float32BufferAttribute(sk.pos, 3));
+  sg.setAttribute('color', new THREE.Float32BufferAttribute(sk.col, 3));
+  sg.setIndex(sk.idx); sg.computeVertexNormals();
+  tankGroup.add(new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide })));
+}
+
+/* =====================================================================
+   Камни, галька, коряга, шары мха
+   ===================================================================== */
+const OBSTACLES = [];   // {c: Vector3, r} — препятствия для рыб
+
+function makeRockGeometry(seed, detail, sx, sy, sz, palette) {
+  let g = new THREE.IcosahedronGeometry(1, detail);
+  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  g = mergeVertices(g);
+  const p = g.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const n1 = fbm(v.x * 1.1 + seed, v.y * 1.1 + seed * 0.7, v.z * 1.1 - seed, 4);
+    const n2 = fbm(v.x * 3.5 - seed, v.y * 3.5, v.z * 3.5 + seed, 3);
+    const n3 = vnoise(v.x * 2.2 + seed * 2, v.y * 2.2, v.z * 2.2);
+    let r = 1 + (n1 - 0.5) * 0.9 + (n2 - 0.5) * 0.2 + (1 - Math.abs(2 * n3 - 1)) * 0.1;
+    v.multiplyScalar(r);
+    v.x *= sx; v.y *= sy; v.z *= sz;
+    const fl = -0.4 * sy;
+    if (v.y < fl) v.y = fl + (v.y - fl) * 0.25;
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  const nrm = g.attributes.normal, cols = [], c = new THREE.Color();
+  const moss = C(0x3f6e2a), moss2 = C(0x5c8a34), dark = C(0x24211e);
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const n = fbm(v.x * 2.4 + seed, v.y * 2.4, v.z * 2.4, 3);
+    c.copy(palette[0]).lerp(palette[1], smooth(0.3, 0.7, n));
+    const strata = Math.sin(v.y * 9 + fbm(v.x, v.y, v.z + seed, 2) * 6);
+    c.multiplyScalar(0.82 + 0.25 * fbm(v.x * 7, v.y * 7, v.z * 7, 2) + 0.08 * strata);
+    c.lerp(dark, smooth(0.42, 0.25, n) * 0.35);
+    const up = nrm.getY(i);
+    const mossN = fbm(v.x * 2.0 + 9 + seed, v.y * 2.0, v.z * 2.0, 3);
+    c.lerp(mossN > 0.55 ? moss2 : moss, smooth(0.45, 0.85, up) * smooth(0.45, 0.6, mossN) * 0.9);
+    cols.push(c.r, c.g, c.b);
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  return g;
+}
+
+const rockMat = patchMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.02 }), { caustics: 1.0 });
+const PALETTES = [
+  [C(0x6e747b), C(0x8b8f93)],    // сланец
+  [C(0x7a6552), C(0x9b8670)],    // бурый
+  [C(0x5a5d61), C(0x7c7369)],    // тёмный
+];
+const ROCKS = [
+  { x: -7.0, z: -1.6, r: 2.1, sx: 1.35, sy: 0.95, sz: 1.0, pal: 0, ry: 0.3 },
+  { x: -4.8, z: -3.4, r: 1.6, sx: 0.9, sy: 1.6, sz: 0.85, pal: 2, ry: 1.2 },
+  { x: -9.2, z: 1.4, r: 1.0, sx: 1.1, sy: 0.8, sz: 1.0, pal: 1, ry: 0.5 },
+  { x: 6.6, z: -2.6, r: 2.0, sx: 1.0, sy: 1.7, sz: 0.95, pal: 0, ry: 2.1 },
+  { x: 8.8, z: -0.4, r: 1.25, sx: 1.2, sy: 0.85, sz: 1.0, pal: 2, ry: 0.9 },
+  { x: 4.4, z: 1.9, r: 0.85, sx: 1.2, sy: 0.7, sz: 1.0, pal: 1, ry: 2.6 },
+  { x: -2.6, z: 2.6, r: 0.6, sx: 1.3, sy: 0.6, sz: 1.0, pal: 0, ry: 1.7 },
+];
+ROCKS.forEach((R, i) => {
+  const g = makeRockGeometry(i * 13.7 + 3, i < 2 || i === 3 ? 5 : 4, R.sx, R.sy, R.sz, PALETTES[R.pal]);
+  const m = new THREE.Mesh(g, rockMat);
+  const y = sandY(R.x, R.z) + R.r * R.sy * 0.15;
+  m.position.set(R.x, y, R.z); m.scale.setScalar(R.r); m.rotation.y = R.ry;
+  m.castShadow = m.receiveShadow = true;
+  tankGroup.add(m);
+  OBSTACLES.push({ c: V(R.x, y + R.r * R.sy * 0.25, R.z), r: R.r * Math.max(R.sx, R.sz) * 0.95 });
+  if (R.sy > 1.3) OBSTACLES.push({ c: V(R.x, y + R.r * R.sy * 0.9, R.z), r: R.r * 0.75 });
+});
+
+{ // галька
+  const pebbleGeos = [0, 1, 2].map(k => makeRockGeometry(100 + k * 7, 2, 1, 0.65, 0.9, [C(0xffffff), C(0xe8e8e8)]));
+  const pebbleMat = patchMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0 }), { caustics: 1.0 });
+  const pcols = [0xa49a8c, 0x6f6a66, 0xc2b8a6, 0x8a7c6c, 0x5b5754, 0xd8cfc0, 0x9c8572].map(C);
+  const dummy = new THREE.Object3D();
+  pebbleGeos.forEach((g, k) => {
+    const n = 60;
+    const im = new THREE.InstancedMesh(g, pebbleMat, n);
+    for (let i = 0; i < n; i++) {
+      let x, z, ok = false, tries = 0;
+      while (!ok && tries++ < 30) {
+        x = rr(-HW + 0.6, HW - 0.6); z = rr(-HD + 0.6, HD - 0.6);
+        ok = ROCKS.every(R => Math.hypot(x - R.x, z - R.z) > R.r * 0.9) || rand() < 0.15;
+        // галька кучкуется у камней
+        if (ok && rand() < 0.5) { const R = ROCKS[(rand() * ROCKS.length) | 0]; const a = rand() * 6.28, d = R.r * rr(1.0, 1.8); x = R.x + Math.cos(a) * d; z = R.z + Math.sin(a) * d; x = clamp(x, -HW + 0.5, HW - 0.5); z = clamp(z, -HD + 0.5, HD - 0.5); }
+      }
+      const s = rr(0.1, 0.32);
+      dummy.position.set(x, sandY(x, z) + s * 0.1, z);
+      dummy.rotation.set(rr(-0.3, 0.3), rand() * 6.28, rr(-0.3, 0.3));
+      dummy.scale.set(s * rr(0.8, 1.3), s, s * rr(0.8, 1.2));
+      dummy.updateMatrix(); im.setMatrixAt(i, dummy.matrix);
+      im.setColorAt(i, pcols[(rand() * pcols.length) | 0].clone().multiplyScalar(rr(0.85, 1.15)));
+    }
+    im.castShadow = im.receiveShadow = true;
+    tankGroup.add(im);
+  });
+}
+
+// Коряга
+{
+  const mat = patchMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }), { caustics: 0.9 });
+  const c0 = C(0x4f3523), c1 = C(0x8a6646), c2 = C(0x2e1d12), col = new THREE.Color(), v = new THREE.Vector3(), ctr = new THREE.Vector3();
+  const branch = (pts, r0, r1, seed) => {
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const TS = 90, RS = 14;
+    const geo = new THREE.TubeGeometry(curve, TS, 1, RS, false);
+    const p = geo.attributes.position, cols = [];
+    for (let i = 0; i <= TS; i++) {
+      const t = i / TS;
+      curve.getPointAt(t, ctr);
+      const rad = lerp(r0, r1, t) * (1 - 0.82 * Math.pow(t, 7));
+      for (let j = 0; j <= RS; j++) {
+        const k = i * (RS + 1) + j;
+        v.fromBufferAttribute(p, k).sub(ctr);
+        const w = ctr.clone().add(v);
+        const n = fbm(w.x * 1.3 + seed, w.y * 1.3, w.z * 1.3, 3);
+        const groove = Math.sin(j / RS * Math.PI * 2 * 3 + t * 9 + n * 4);
+        const g = 0.78 + 0.45 * n + 0.07 * groove;
+        p.setXYZ(k, ctr.x + v.x * rad * g, ctr.y + v.y * rad * g, ctr.z + v.z * rad * g);
+        const streak = fbm(t * 26 + seed, j * 0.45, seed, 2);
+        col.copy(c0).lerp(c1, smooth(0.35, 0.75, streak)).lerp(c2, smooth(0.0, -1.0, groove) * 0.6);
+        cols.push(col.r, col.g, col.b);
+      }
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = m.receiveShadow = true;
+    tankGroup.add(m);
+    for (let i = 0; i <= 8; i++) { const t = i / 8; OBSTACLES.push({ c: curve.getPointAt(t), r: lerp(r0, r1, t) + 0.15 }); }
+  };
+  const sy = (x, z, o = 0) => sandY(x, z) + o;
+  branch([V(-3.6, sy(-3.6, -1.9, -0.3), -1.9), V(-2.0, sy(-2, -2.6, 0.9), -2.6), V(-0.2, 3.6, -3.1), V(1.5, 5.9, -2.8), V(2.6, 7.8, -2.1), V(3.1, 8.9, -1.6)], 0.6, 0.22, 1);
+  branch([V(-0.6, 3.2, -3.0), V(-1.5, 4.6, -2.4), V(-2.4, 6.0, -1.9), V(-3.4, 6.8, -1.7)], 0.3, 0.12, 2);
+  branch([V(1.1, 5.1, -2.9), V(2.5, 5.9, -3.6), V(3.8, 6.2, -4.2)], 0.22, 0.09, 3);
+  branch([V(-3.2, sy(-3.2, -1.7, 0.1), -1.7), V(-4.4, sy(-4.4, -0.6, 0.3), -0.6), V(-5.0, sy(-5, 0.6, 0.2), 0.6)], 0.32, 0.12, 4);
+}
+
+// Шары мха (марима)
+{
+  const mat = patchMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }), { caustics: 0.6 });
+  [[-1.4, 3.4, 0.42], [2.6, 3.9, 0.34], [0.6, 2.2, 0.5]].forEach(([x, z, r], k) => {
+    let g = new THREE.IcosahedronGeometry(1, 4); g.deleteAttribute('normal'); g.deleteAttribute('uv'); g = mergeVertices(g);
+    const p = g.attributes.position, v = new THREE.Vector3(), cols = [], c = new THREE.Color();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      const n = vnoise(v.x * 9 + k * 5, v.y * 9, v.z * 9);
+      v.multiplyScalar(1 + (n - 0.5) * 0.12);
+      p.setXYZ(i, v.x, v.y * 0.92, v.z);
+      c.setHex(0x2f6b23).lerp(C(0x6aa83a), n * 0.8).multiplyScalar(0.8 + 0.3 * vnoise(v.x * 20, v.y * 20, v.z * 20));
+      cols.push(c.r, c.g, c.b);
+    }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat);
+    m.scale.setScalar(r); m.position.set(x, sandY(x, z) + r * 0.75, z);
+    m.castShadow = m.receiveShadow = true;
+    tankGroup.add(m);
+  });
+}
+
+// Распылитель воздуха и шланг
+const AIRSTONE = V(10.4, 0, -4.6);
+AIRSTONE.y = sandY(AIRSTONE.x, AIRSTONE.z) + 0.12;
+{
+  const stone = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.35, 20),
+    new THREE.MeshStandardMaterial({ color: 0x8c8f93, roughness: 1 }));
+  stone.position.copy(AIRSTONE); stone.castShadow = true; tankGroup.add(stone);
+  const curve = new THREE.CatmullRomCurve3([
+    AIRSTONE.clone().add(V(0.2, 0.1, -0.1)), V(11.1, AIRSTONE.y + 0.8, -5.2), V(11.3, 6, -5.45), V(11.3, 12.4, -5.45), V(11.2, TH + 0.4, -5.2),
+  ]);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 80, 0.06, 8, false),
+    new THREE.MeshPhysicalMaterial({ color: 0xbfe8d0, transparent: true, opacity: 0.6, roughness: 0.2, depthWrite: false }));
+  tankGroup.add(tube);
+}
+
+/* =====================================================================
+   Растения (вся геометрия с атрибутом aSway → колыхание в шейдере)
+   ===================================================================== */
+const plantData = { pos: [], col: [], sway: [], idx: [] };
+const PLANT_TOPS = [];   // точки для пузырьков кислорода
+const _pc = new THREE.Color();
+
+function addBlade(o) {
+  const B = plantData, S = o.segs || 10, base = B.pos.length / 3;
+  for (let i = 0; i <= S; i++) {
+    const t = i / S;
+    const y = o.y + t * o.height * (1 - o.bend * 0.3 * t);
+    const off = o.bend * t * t * o.height * 0.6;
+    const cx = o.x + o.bdx * off, cz = o.z + o.bdz * off;
+    let w;
+    if (o.shape === 'leaf') w = t < o.stalk ? o.width * 0.07 : o.width * Math.pow(Math.sin(Math.PI * (t - o.stalk) / (1 - o.stalk)), 0.75);
+    else if (o.shape === 'grass') w = o.width * Math.pow(1 - t, 0.8);
+    else w = o.width * (1 - 0.2 * t) * (t > 0.9 ? (1 - t) / 0.1 * 0.8 + 0.2 : 1);
+    const ang = o.angle + o.twist * t;
+    const ax = Math.cos(ang), az = Math.sin(ang), nx = -az, nz = ax, rib = w * 0.16;
+    const c0 = _pc.copy(o.c0).lerp(o.c1, Math.pow(t, 0.8));
+    const pts = [[cx - ax * w * 0.5, cz - az * w * 0.5, 0.88], [cx + nx * rib, cz + nz * rib, 1.12], [cx + ax * w * 0.5, cz + az * w * 0.5, 0.88]];
+    const hs = o.swayH0 !== undefined ? lerp(o.swayH0, o.swayH1, t) : t;
+    for (const [px, pz, sh] of pts) {
+      B.pos.push(px, y, pz);
+      B.col.push(c0.r * sh, c0.g * sh, c0.b * sh);
+      B.sway.push(hs, o.phase, o.amp);
+    }
+  }
+  for (let i = 0; i < S; i++) for (let j = 0; j < 2; j++) {
+    const a = base + i * 3 + j, b = a + 3;
+    B.idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+}
+
+function nearRock(x, z, pad = 0.3) { return ROCKS.some(R => Math.hypot(x - R.x, z - R.z) < R.r * Math.max(R.sx, R.sz) + pad); }
+
+// Валлиснерия — длинные ленты вдоль задней стенки
+for (let k = 0; k < 13; k++) {
+  const cx = lerp(-10.8, 10.8, k / 12) + rr(-0.5, 0.5), cz = rr(-5.3, -4.3);
+  const n = 10 + (rand() * 8 | 0);
+  for (let i = 0; i < n; i++) {
+    const x = cx + rr(-0.6, 0.6), z = cz + rr(-0.35, 0.35);
+    const h = rr(6.5, 10.5), a = rand() * 6.28;
+    addBlade({ x, z, y: sandY(x, z) - 0.1, height: h, width: rr(0.22, 0.34), angle: a, twist: rr(-1.5, 1.5),
+      bend: rr(0.1, 0.35), bdx: Math.cos(a + 1.57), bdz: Math.sin(a + 1.57) * 0.5 + 0.4,
+      c0: C(0x2f6a26), c1: rand() < 0.3 ? C(0xa6d86e) : C(0x7cc456), phase: rand() * 6.28, amp: rr(0.7, 1.1), segs: 18 });
+    if (i === 0) PLANT_TOPS.push(V(x, sandY(x, z) + h * 0.8, z));
+  }
+}
+
+// Эхинодорус — широкие листья розеткой
+const SWORDS = [[-2.4, -1.0, 0x3c7d2c, 0x8ccc5a], [2.6, -3.6, 0x376f28, 0x7fbf4f], [9.9, -3.4, 0x41822e, 0x9bd466], [-10.3, -3.0, 0x5a2a3a, 0xc8506a]];
+SWORDS.forEach(([cx, cz, a, b]) => {
+  const n = 12 + (rand() * 6 | 0);
+  for (let i = 0; i < n; i++) {
+    const th = i / n * 6.28 + rr(-0.2, 0.2);
+    const h = rr(2.2, 4.0);
+    addBlade({ x: cx, z: cz, y: sandY(cx, cz) - 0.05, height: h, width: rr(0.7, 1.0), angle: th + 1.57, twist: rr(-0.3, 0.3),
+      bend: rr(0.35, 0.8), bdx: Math.cos(th), bdz: Math.sin(th), shape: 'leaf', stalk: 0.22,
+      c0: C(a), c1: C(b), phase: rand() * 6.28, amp: rr(0.12, 0.25), segs: 12 });
+  }
+  PLANT_TOPS.push(V(cx, sandY(cx, cz) + 2.5, cz));
+});
+
+// Людвигия — красные стебли с парными листочками
+[[-8.4, -4.6], [0.8, -4.8], [7.9, -4.9], [-6.0, 0.6]].forEach(([gx, gz]) => {
+  const stems = 5 + (rand() * 4 | 0);
+  for (let s = 0; s < stems; s++) {
+    const x = gx + rr(-0.5, 0.5), z = gz + rr(-0.35, 0.35), y0 = sandY(x, z) - 0.1;
+    const h = rr(3.5, 6.5), ph = rand() * 6.28, amp = rr(0.35, 0.55);
+    addBlade({ x, z, y: y0, height: h, width: 0.06, angle: rand() * 6.28, twist: 3, bend: 0, bdx: 0, bdz: 0,
+      c0: C(0x4a2a1a), c1: C(0x8a3a2a), phase: ph, amp, segs: 12 });
+    const pairs = Math.floor(h / 0.38);
+    for (let k = 1; k <= pairs; k++) {
+      const t = k / (pairs + 0.5), ly = y0 + t * h;
+      for (const side of [0, Math.PI]) {
+        const th = k * 1.1 + side + ph;
+        addBlade({ x, z, y: ly, height: rr(0.35, 0.55) * (1.1 - t * 0.35), width: 0.22, angle: th + 1.57, twist: 0,
+          bend: 1.4, bdx: Math.cos(th), bdz: Math.sin(th), shape: 'leaf', stalk: 0.1,
+          c0: _pc.setHex(0x4d7a34).lerp(C(0xc23a4a), smooth(0.2, 0.8, t)).clone(), c1: C(0xff6a6a).lerp(C(0x7aa84a), 1 - smooth(0.3, 0.9, t)),
+          phase: ph, amp, segs: 4, swayH0: t, swayH1: t + 0.03 });
+      }
+    }
+  }
+});
+
+// Мелкая травка‑ковёр (элеохарис) спереди
+for (let k = 0; k < 46; k++) {
+  let cx, cz, tries = 0;
+  do { cx = rr(-11, 11); cz = rr(0.0, 5.2); } while (nearRock(cx, cz, 0.4) && tries++ < 20);
+  const n = 18 + (rand() * 12 | 0);
+  for (let i = 0; i < n; i++) {
+    const a = rand() * 6.28, d = rand() * 0.45;
+    const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+    addBlade({ x, z, y: sandY(x, z) - 0.05, height: rr(0.4, 1.3), width: rr(0.04, 0.07), angle: rand() * 6.28, twist: 0.5,
+      bend: rr(0.1, 0.6), bdx: Math.cos(a), bdz: Math.sin(a), shape: 'grass',
+      c0: C(0x2d5e22), c1: C(0x8fd060), phase: rand() * 6.28, amp: rr(0.06, 0.12), segs: 5 });
+  }
+}
+
+{
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(plantData.pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(plantData.col, 3));
+  g.setAttribute('aSway', new THREE.Float32BufferAttribute(plantData.sway, 3));
+  g.setIndex(plantData.idx);
+  g.computeVertexNormals();
+  const mat = patchMaterial(new THREE.MeshStandardMaterial({
+    vertexColors: true, side: THREE.DoubleSide, roughness: 0.55, metalness: 0,
+    emissive: 0x0b2a10, emissiveIntensity: 0.6,
+  }), { sway: true, caustics: 0.55 });
+  const plants = new THREE.Mesh(g, mat);
+  plants.receiveShadow = true;
+  plants.frustumCulled = false;
+  tankGroup.add(plants);
+}
+
+/* =====================================================================
+   Лучи света, взвесь частиц
+   ===================================================================== */
+const rayUniforms = { uInt: { value: 1 } };
+{
+  const mat0 = {
+    vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uTime, uSeed, uInt; uniform vec3 uColor; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){
+        float edge = pow(abs(dot(normalize(vN), normalize(vV))), 2.5);
+        float fall = pow(vUv.y, 1.6) * smoothstep(0.0, 0.25, vUv.y);
+        float flick = 0.6 + 0.4 * sin(uTime * 0.8 + uSeed * 10.0 + vUv.x * 12.566) * sin(uTime * 0.53 + uSeed * 3.0);
+        gl_FragColor = vec4(uColor, edge * fall * flick * uInt * 0.2);
+      }`,
+  };
+  for (let i = 0; i < 7; i++) {
+    const h = WATER_Y - rr(1.2, 2.5);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rr(0.4, 0.9), rr(1.5, 2.6), h, 32, 1, true),
+      new THREE.ShaderMaterial({
+        ...mat0,
+        uniforms: { uTime: shared.uTime, uSeed: { value: rand() }, uInt: rayUniforms.uInt, uColor: { value: C(0xbfeaff) } },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      }));
+    m.position.set(lerp(-9, 9, i / 6) + rr(-1, 1), WATER_Y - h / 2, rr(-3, 2.5));
+    m.rotation.z = 0.12 + rr(-0.04, 0.04); m.rotation.x = rr(-0.08, 0.08);
+    m.renderOrder = 1;
+    tankGroup.add(m);
+  }
+}
+
+const dustUniforms = { uTime: shared.uTime, uPR: { value: renderer.getPixelRatio() }, uInt: { value: 1 } };
+{
+  const n = 600, pos = new Float32Array(n * 3), seeds = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = rr(-HW + 1, HW - 1); pos[i * 3 + 1] = rr(1.5, WATER_Y - 0.6); pos[i * 3 + 2] = rr(-HD + 1, HD - 1);
+    seeds[i] = rand();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
+  const pts = new THREE.Points(g, new THREE.ShaderMaterial({
+    uniforms: dustUniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `attribute float aSeed; uniform float uTime, uPR; varying float vA;
+      void main(){ vec3 p = position; float s = aSeed * 6.2831;
+        p.x += sin(uTime * 0.13 + s) * 0.6; p.y += sin(uTime * 0.09 + s * 1.3) * 0.4; p.z += cos(uTime * 0.11 + s * 0.7) * 0.5;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
+        gl_PointSize = (1.0 + aSeed * 2.0) * uPR * (16.0 / -mv.z);
+        vA = 0.2 + 0.35 * fract(aSeed * 7.13); }`,
+    fragmentShader: `uniform float uInt; varying float vA;
+      void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vA * uInt;
+        gl_FragColor = vec4(vec3(0.75, 0.92, 1.0), a); }`,
+  }));
+  pts.frustumCulled = false; pts.renderOrder = 2;
+  tankGroup.add(pts);
+}
+
+/* =====================================================================
+   Пузырьки
+   ===================================================================== */
+const MAX_BUBBLES = 420;
+const bubbleMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
+  vertexShader: `varying vec3 vN; varying vec3 vV;
+    void main(){
+      mat4 m = modelMatrix * instanceMatrix;
+      vec4 mv = viewMatrix * m * vec4(position, 1.0);
+      vN = normalize(mat3(viewMatrix) * mat3(m) * normal);
+      vV = normalize(-mv.xyz);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `varying vec3 vN; varying vec3 vV;
+    void main(){
+      vec3 n = normalize(vN), v = normalize(vV);
+      float f = 1.0 - abs(dot(n, v));
+      float rim = pow(f, 2.2);
+      float spec = pow(max(dot(n, normalize(vec3(0.35, 0.8, 0.45) + v)), 0.0), 90.0);
+      float spec2 = pow(max(dot(n, normalize(vec3(-0.3, -0.7, 0.4) + v)), 0.0), 25.0) * 0.35;
+      vec3 col = vec3(0.7, 0.92, 1.0) * rim * 1.1 + vec3(1.0) * (spec * 2.2 + spec2);
+      float a = clamp(rim * 0.85 + spec + spec2 + 0.05, 0.0, 1.0);
+      gl_FragColor = vec4(col, a);
+    }`,
+});
+const bubbleMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 16, 12), bubbleMat, MAX_BUBBLES);
+bubbleMesh.frustumCulled = false; bubbleMesh.renderOrder = 3;
+tankGroup.add(bubbleMesh);
+const bubbles = Array.from({ length: MAX_BUBBLES }, () => ({ alive: false, p: V(0, 0, 0), bx: 0, bz: 0, size: 0, vy: 0, age: 0, ph: 0 }));
+let bubbleCursor = 0;
+function spawnBubble(pos, size, spread = 0.1) {
+  for (let k = 0; k < MAX_BUBBLES; k++) {
+    const b = bubbles[(bubbleCursor + k) % MAX_BUBBLES];
+    if (!b.alive) {
+      bubbleCursor = (bubbleCursor + k + 1) % MAX_BUBBLES;
+      b.alive = true; b.size = size; b.age = 0; b.ph = rand() * 6.28; b.vy = 0.3;
+      b.bx = pos.x + rr(-spread, spread); b.bz = pos.z + rr(-spread, spread);
+      b.p.set(b.bx, pos.y, b.bz);
+      return;
+    }
+  }
+}
+const EMITTERS = [
+  { p: AIRSTONE.clone().add(V(0, 0.2, 0)), rate: 26, size: [0.04, 0.13], spread: 0.22, acc: 0 },
+  { p: V(ROCKS[1].x + 0.6, sandY(ROCKS[1].x + 0.6, ROCKS[1].z + 1.1) + 0.3, ROCKS[1].z + 1.1), rate: 2.5, size: [0.03, 0.08], spread: 0.05, acc: 0, burst: 0 },
+];
+const _bm = new THREE.Matrix4(), _bq = new THREE.Quaternion(), _bs = new THREE.Vector3();
+function updateBubbles(dt, t) {
+  for (const e of EMITTERS) {
+    let rate = e.rate;
+    if (e.burst !== undefined) { // «дыхание» камня — периодические серии
+      rate = (Math.sin(t * 0.7) > 0.6) ? 14 : 0.5;
+    }
+    e.acc += dt * rate;
+    while (e.acc > 1) { e.acc -= 1; spawnBubble(e.p, rr(e.size[0], e.size[1]), e.spread); }
+  }
+  if (rand() < dt * 1.2) { const x = rr(-HW + 1, HW - 1), z = rr(-HD + 1, HD - 1); spawnBubble(V(x, sandY(x, z) + 0.05, z), rr(0.02, 0.05), 0); }
+  if (rand() < dt * 2.0 && PLANT_TOPS.length) { const pt = PLANT_TOPS[(rand() * PLANT_TOPS.length) | 0]; spawnBubble(pt, rr(0.015, 0.04), 0.3); }
+
+  for (let i = 0; i < MAX_BUBBLES; i++) {
+    const b = bubbles[i];
+    if (b.alive) {
+      b.age += dt;
+      const target = 1.0 + b.size * 14;
+      b.vy += (target - b.vy) * Math.min(1, dt * 2.5);
+      b.p.y += b.vy * dt;
+      const wob = 0.05 + b.size * 0.6;
+      b.bx += Math.sin(t * 0.3 + b.ph) * 0.05 * dt;
+      b.p.x = b.bx + Math.sin(b.age * 7 + b.ph) * wob * Math.min(1, b.age);
+      b.p.z = b.bz + Math.cos(b.age * 6 + b.ph * 1.3) * wob * 0.7 * Math.min(1, b.age);
+      const s = b.size * (1 + b.age * 0.04);
+      if (b.p.y > WATER_Y - s * 0.4) { b.alive = false; }
+      const sq = 0.86 + 0.1 * Math.sin(b.age * 14 + b.ph);
+      _bs.set(s * (1.04 + (1 - sq) * 0.5), s * sq, s);
+      _bm.compose(b.p, _bq, _bs);
+    }
+    if (!b.alive) _bm.makeScale(0, 0, 0);
+    bubbleMesh.setMatrixAt(i, _bm);
+  }
+  bubbleMesh.instanceMatrix.needsUpdate = true;
+}
+
+/* =====================================================================
+   Корм
+   ===================================================================== */
+const MAX_FOOD = 140;
+const foodMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.18, 0.8),
+  new THREE.MeshStandardMaterial({ roughness: 0.8 }), MAX_FOOD);
+foodMesh.frustumCulled = false;
+tankGroup.add(foodMesh);
+const foods = Array.from({ length: MAX_FOOD }, () => ({ alive: false, pos: V(0, 0, 0), vel: V(0, 0, 0), rot: new THREE.Euler(), spin: V(0, 0, 0), age: 0, landed: false }));
+const foodColors = [0xd2691e, 0xb5502a, 0x8b5a2b, 0x6b8e23, 0xe0a040].map(C);
+for (let i = 0; i < MAX_FOOD; i++) foodMesh.setColorAt(i, foodColors[i % foodColors.length]);
+function feed() {
+  const cx = rr(-7, 7), cz = rr(-3, 3);
+  let n = 0;
+  for (const f of foods) {
+    if (f.alive) continue;
+    f.alive = true; f.age = 0; f.landed = false;
+    f.pos.set(cx + rr(-1.4, 1.4), WATER_Y - 0.02, cz + rr(-1.0, 1.0));
+    f.vel.set(rr(-0.1, 0.1), 0, rr(-0.1, 0.1));
+    f.rot.set(rand() * 6, rand() * 6, rand() * 6);
+    f.spin.set(rr(-2, 2), rr(-2, 2), rr(-2, 2));
+    if (++n >= 24) break;
+  }
+}
+const _fd = new THREE.Object3D();
+function updateFood(dt, t) {
+  for (let i = 0; i < MAX_FOOD; i++) {
+    const f = foods[i];
+    if (f.alive) {
+      f.age += dt;
+      if (!f.landed) {
+        const sink = f.age < 1.5 ? 0.02 : 0.38;
+        f.pos.y -= sink * dt;
+        f.pos.x += (f.vel.x + Math.sin(t * 1.5 + i) * 0.12) * dt;
+        f.pos.z += (f.vel.z + Math.cos(t * 1.3 + i) * 0.1) * dt;
+        f.rot.x += f.spin.x * dt; f.rot.y += f.spin.y * dt; f.rot.z += f.spin.z * dt;
+        const g = sandY(f.pos.x, f.pos.z) + 0.03;
+        if (f.pos.y <= g) { f.pos.y = g; f.landed = true; f.rot.x = 0; f.rot.z = 0; }
+      }
+      if (f.age > 45) f.alive = false;
+      const s = 0.1 * (f.age > 40 ? (45 - f.age) / 5 : 1);
+      _fd.position.copy(f.pos); _fd.rotation.copy(f.rot); _fd.scale.setScalar(s);
+      _fd.updateMatrix();
+      foodMesh.setMatrixAt(i, _fd.matrix);
+    } else {
+      _fd.scale.setScalar(0); _fd.updateMatrix(); foodMesh.setMatrixAt(i, _fd.matrix);
+    }
+  }
+  foodMesh.instanceMatrix.needsUpdate = true;
+}
+
+/* =====================================================================
+   Рыбы: процедурная геометрия тела, плавников, глаз
+   ===================================================================== */
+function bodyShape(t, sp) {
+  const k = sp.bulge;
+  if (t < k) { const u = t / k; return Math.pow(1 - (1 - u) * (1 - u), sp.noseExp); }
+  const u = (t - k) / (1 - k);
+  return sp.peduncle + (1 - sp.peduncle) * (0.5 + 0.5 * Math.cos(Math.PI * Math.pow(u, sp.tailExp || 1)));
+}
+
+function newBuilder() { return { pos: [], uv: [], col: [], flex: [], idx: [] }; }
+function builderGeometry(B) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(B.pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(B.uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(B.col, 3));
+  g.setAttribute('aFlex', new THREE.Float32BufferAttribute(B.flex, 1));
+  g.setIndex(B.idx);
+  g.computeVertexNormals();
+  return g;
+}
+// Полоса плавника между линией основания и краем; u — вдоль основания, v — к краю
+function finStrip(B, rootFn, tipFn, nu, nv, colFn, flex, sag) {
+  const base = B.pos.length / 3, p = new THREE.Vector3();
+  for (let i = 0; i <= nu; i++) {
+    const u = i / nu, r = rootFn(u), tp = tipFn(u);
+    for (let k = 0; k <= nv; k++) {
+      const v = k / nv;
+      p.copy(r).lerp(tp, v);
+      if (sag) p.addScaledVector(sag, v * v);
+      B.pos.push(p.x, p.y, p.z);
+      B.uv.push(u, v);
+      const c = colFn(u, v);
+      B.col.push(c.r, c.g, c.b);
+      B.flex.push(v * flex);
+    }
+  }
+  for (let i = 0; i < nu; i++) for (let k = 0; k < nv; k++) {
+    const a = base + i * (nv + 1) + k, b = a + nv + 1;
+    B.idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+}
+
+function buildBody(sp) {
+  const L = sp.len, H = sp.height, W = sp.width, NL = 48, NR = 30;
+  const pos = [], col = [], uv = [], idx = [];
+  const c = new THREE.Color(), WHITE = C(0xffffff);
+  for (let i = 0; i <= NL; i++) {
+    const t = i / NL, s = bodyShape(t, sp), z = L * 0.5 - t * L;
+    for (let j = 0; j <= NR; j++) {
+      const a = j / NR * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      const hy = H * 0.5 * (sa > 0 ? sp.top : sp.bot);
+      const ex = Math.sign(ca) * Math.pow(Math.abs(ca), sp.ex || 0.9);
+      const x = ex * W * 0.5 * s, y = sa * hy * s;
+      pos.push(x, y, z);
+      uv.push(t, j / NR);
+      c.copy(sp.color(t, sa, ca, x, y, z));
+      c.lerp(sp.belly || WHITE, smooth(-0.15, -0.9, sa) * (sp.bellyAmt ?? 0.4));          // светлое брюшко
+      c.multiplyScalar(1 - 0.22 * smooth(0.35, 1.0, sa));                                 // тёмная спинка
+      const gd = Math.abs(t - ((sp.gillT || 0.22) + 0.025 * sa * sa));
+      if (gd < 0.014) c.multiplyScalar(0.8 + 0.2 * gd / 0.014);                           // жаберная крышка
+      c.multiplyScalar(0.85 + 0.15 * smooth(0.0, 0.06, t));
+      col.push(c.r, c.g, c.b);
+    }
+  }
+  for (let i = 0; i < NL; i++) for (let j = 0; j < NR; j++) {
+    const a = i * (NR + 1) + j, b = a + NR + 1;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  // заглушка у хвостового стебля
+  const ci = pos.length / 3, rs = NL * (NR + 1);
+  pos.push(0, 0, -L * 0.5 - 0.005); uv.push(1, 0.5);
+  { const k = col.length - 3; col.push(col[k], col[k + 1], col[k + 2]); }
+  for (let j = 0; j < NR; j++) idx.push(rs + j, ci, rs + j + 1);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  // сглаживаем шов и носик
+  const n = g.attributes.normal, tv = new THREE.Vector3();
+  for (let i = 0; i <= NL; i++) {
+    const a = i * (NR + 1), b = a + NR;
+    tv.set(n.getX(a) + n.getX(b), n.getY(a) + n.getY(b), n.getZ(a) + n.getZ(b)).normalize();
+    n.setXYZ(a, tv.x, tv.y, tv.z); n.setXYZ(b, tv.x, tv.y, tv.z);
+  }
+  for (let j = 0; j <= NR; j++) n.setXYZ(j, 0, 0, 1);
+  return g;
+}
+
+function buildMedianFins(sp) {
+  const B = newBuilder(), L = sp.len, H = sp.height;
+  const s = (t) => bodyShape(t, sp);
+  const topY = (t) => H * 0.5 * sp.top * s(t), botY = (t) => -H * 0.5 * sp.bot * s(t);
+  const zAt = (t) => L * 0.5 - t * L;
+  const median = (f, up) => {
+    const yb = (t) => up ? topY(t) : botY(t);
+    finStrip(B,
+      (u) => { const t = lerp(f.t0, f.t1, u); return V(0, yb(t) * 0.88, zAt(t)); },
+      (u) => { const t = lerp(f.t0, f.t1, u), hp = f.h * L * f.prof(u); return V(0, yb(t) + (up ? hp : -hp), zAt(t) - f.sweep * hp); },
+      16, 7, (u, v) => f.col(u, v, lerp(f.t0, f.t1, u)), sp.flex, null);
+  };
+  if (sp.dorsal) median(sp.dorsal, true);
+  if (sp.anal) median(sp.anal, false);
+  const tl = sp.tail, ped = s(1) * 0.92;
+  const rootY = (u) => lerp(-H * 0.5 * sp.bot * ped, H * 0.5 * sp.top * ped, u);
+  const z0 = -L * 0.5 + 0.05 * L;
+  finStrip(B,
+    (u) => V(0, rootY(u), z0),
+    (u) => { const phi = lerp(-tl.spread, tl.spread, u), l = tl.len * L * tl.prof(u); return V(0, rootY(u) + Math.sin(phi) * l, z0 - Math.cos(phi) * l); },
+    22, 9, (u, v) => tl.col(u, v), sp.flex * 1.3, tl.sag ? V(0, -tl.sag * L, 0) : null);
+  return builderGeometry(B);
+}
+
+function buildPairFin(f, L) {
+  const B = newBuilder(), l = f.len * L, w = f.w * L;
+  finStrip(B,
+    (u) => V(0, lerp(-w * 0.5, w * 0.5, u), 0),
+    (u) => { const a = lerp(-0.35, 0.45, u) * (f.spread ?? 1); const ll = l * (f.prof ? f.prof(u) : 0.7 + 0.3 * Math.sin(Math.PI * u)); return V(0, lerp(-w * 0.5, w * 0.5, u) + Math.sin(a) * ll, -Math.cos(a) * ll); },
+    8, 6, (u, v) => f.col(u, v), 0, null);
+  return builderGeometry(B);
+}
+
+function buildEyes(sp) {
+  const L = sp.len, H = sp.height, W = sp.width;
+  const t = sp.eyeT, s = bodyShape(t, sp), ey = sp.eyeY;
+  const y = ey * H * 0.5 * sp.top * s;
+  const x = W * 0.5 * s * Math.pow(Math.max(0.05, Math.cos(Math.asin(clamp(ey, -0.95, 0.95)))), sp.ex || 0.9);
+  const z = L * 0.5 - t * L, re = sp.eyeR * L;
+  const iris = [], pupil = [];
+  for (const sx of [-1, 1]) {
+    iris.push(new THREE.SphereGeometry(re, 18, 14).translate(sx * (x - re * 0.35), y, z));
+    pupil.push(new THREE.SphereGeometry(re * 0.62, 16, 12).translate(sx * (x + re * 0.12), y, z + re * 0.05));
+  }
+  return { iris: mergeGeometries(iris), pupil: mergeGeometries(pupil) };
+}
+
+/* ---------- Виды рыб ---------- */
+const finCol = (c) => { const cc = C(c); return () => cc; };
+function gradFin(root, tip, edge, edgeStart = 0.85) {
+  const a = C(root), b = C(tip), e = edge != null ? C(edge) : null, o = new THREE.Color();
+  return (u, v) => { o.copy(a).lerp(b, v); if (e) o.lerp(e, smooth(edgeStart - 0.06, edgeStart + 0.04, v)); return o; };
+}
+const sinProf = (p) => (u) => Math.pow(Math.sin(Math.PI * u), p);
+
+const SPECIES = [
+  { // Неоновая тетра — стайка
+    name: 'Неон', count: 14, size: [0.9, 1.1], len: 0.55, height: 0.17, width: 0.09, bulge: 0.38, peduncle: 0.32, noseExp: 0.55,
+    top: 1, bot: 1, ex: 0.9, belly: C(0xe8eef2), bellyAmt: 0.5, iris: 0x9ad7ff, eyeT: 0.12, eyeY: 0.2, eyeR: 0.08,
+    color: (() => {
+      const o = new THREE.Color(), olive = C(0x5e5a3c), silver = C(0xcfd8de), blue = C(0x18d0ff), blue2 = C(0x2a6bff), red = C(0xff1a2e);
+      return (t, ny) => {
+        o.copy(silver);
+        if (ny > 0.2) o.copy(olive);
+        const sc = 0.12 + 0.06 * Math.sin(t * Math.PI);
+        if (t > 0.12 && t < 0.9 && Math.abs(ny - sc) < 0.16) o.copy(blue).lerp(blue2, t);
+        if (ny < sc - 0.16 && t > 0.46 && t < 0.98) o.copy(red).multiplyScalar(0.8 + 0.2 * smooth(-1, 0, ny));
+        return o;
+      };
+    })(),
+    dorsal: { t0: 0.42, t1: 0.58, h: 0.2, sweep: 0.5, prof: (u) => Math.pow(Math.sin(Math.PI * u), 0.6) * (1 - 0.3 * u), col: finCol(0xeef4ff) },
+    anal: { t0: 0.55, t1: 0.82, h: 0.12, sweep: 0.3, prof: sinProf(0.5), col: finCol(0xeef4ff) },
+    tail: { len: 0.34, spread: 0.55, prof: (u) => 0.55 + 0.45 * Math.pow(Math.abs(2 * u - 1), 1.3), col: gradFin(0xffd6d6, 0xffffff) },
+    pec: { t: 0.27, len: 0.16, w: 0.05, col: finCol(0xffffff) }, pelvic: { t: 0.45, len: 0.1, w: 0.03, col: finCol(0xffffff) },
+    finOpacity: 0.5, flex: 0.6, speed: [1.6, 3.4], amp: 0.6, beat: 2.2, turnSpeed: 5, school: true, irid: 1.0, rough: 0.3, zone: [0.35, 0.9],
+  },
+  { // Рыба‑клоун
+    name: 'Клоун', count: 3, size: [0.9, 1.15], len: 0.9, height: 0.42, width: 0.22, bulge: 0.42, peduncle: 0.36, noseExp: 0.45,
+    top: 1, bot: 1, ex: 0.85, belly: C(0xffa050), bellyAmt: 0.3, iris: 0xff8a1a, eyeT: 0.13, eyeY: 0.25, eyeR: 0.075,
+    color: (() => {
+      const o = new THREE.Color(), orange = C(0xff6a10), deep = C(0xd8440a), white = C(0xfdfbf5), black = C(0x111111);
+      return (t, ny) => {
+        o.copy(orange).lerp(deep, smooth(0.2, 1, ny) * 0.4);
+        for (const [c, w] of [[0.2 + 0.03 * ny * ny, 0.05], [0.5 - 0.04 * ny, 0.06], [0.87, 0.035]]) {
+          const d = Math.abs(t - c);
+          if (d < w) o.copy(white); else if (d < w + 0.018) o.copy(black);
+        }
+        return o;
+      };
+    })(),
+    dorsal: { t0: 0.27, t1: 0.84, h: 0.24, sweep: 0.2, prof: (u) => Math.pow(Math.sin(Math.PI * u), 0.35) * (0.6 + 0.4 * Math.sin(Math.PI * u)) * (1 - 0.35 * Math.exp(-(((u - 0.38) / 0.06) ** 2))), col: gradFin(0xff6a10, 0xff7a20, 0x111111, 0.78) },
+    anal: { t0: 0.58, t1: 0.84, h: 0.2, sweep: 0.15, prof: sinProf(0.5), col: gradFin(0xff6a10, 0xff7a20, 0x111111, 0.78) },
+    tail: { len: 0.34, spread: 0.65, prof: (u) => 0.85 + 0.15 * Math.sin(Math.PI * u), col: gradFin(0xff6a10, 0xff8030, 0x111111, 0.8) },
+    pec: { t: 0.3, len: 0.2, w: 0.09, col: gradFin(0xff7a20, 0xff8a30, 0x111111, 0.85) }, pelvic: { t: 0.42, len: 0.13, w: 0.05, col: gradFin(0xff7a20, 0xff7a20, 0x111111, 0.8) },
+    finOpacity: 0.95, flex: 0.5, speed: [0.8, 2.0], amp: 0.75, beat: 1.8, turnSpeed: 4, irid: 0, rough: 0.35, zone: [0.0, 0.45],
+  },
+  { // Скалярия
+    name: 'Скалярия', count: 2, size: [1.0, 1.15], len: 0.95, height: 0.85, width: 0.14, bulge: 0.4, peduncle: 0.13, noseExp: 0.75, tailExp: 0.8,
+    top: 1, bot: 1, ex: 0.75, belly: C(0xf4f1ea), bellyAmt: 0.2, iris: 0xc8302a, eyeT: 0.14, eyeY: 0.3, eyeR: 0.075,
+    color: (() => {
+      const o = new THREE.Color(), silver = C(0xdedad0), warm = C(0xe0cf98), black = C(0x161616);
+      return (t, ny) => {
+        o.copy(silver).lerp(warm, smooth(0.3, 1, ny) * 0.5);
+        for (const [c, w, k] of [[0.13, 0.035, 0.9], [0.42, 0.055, 0.95], [0.7, 0.035, 0.7], [0.93, 0.03, 0.5]]) {
+          const d = Math.abs(t - c - 0.02 * ny);
+          o.lerp(black, smooth(w, w * 0.6, d) * k);
+        }
+        return o;
+      };
+    })(),
+    dorsal: { t0: 0.3, t1: 0.82, h: 1.0, sweep: 0.75, prof: (u) => u < 0.22 ? Math.pow(u / 0.22, 0.7) : Math.max(0.06, 1 - Math.pow((u - 0.22) / 0.78, 0.7) * 0.94), col: (() => { const o = new THREE.Color(), s = C(0xe8ecef), b = C(0x202020); return (u, v, t) => { o.copy(s); for (const c of [0.42, 0.7]) o.lerp(b, smooth(0.05, 0.02, Math.abs(t - c)) * 0.8); return o; }; })() },
+    anal: { t0: 0.36, t1: 0.84, h: 0.95, sweep: 0.7, prof: (u) => u < 0.22 ? Math.pow(u / 0.22, 0.7) : Math.max(0.06, 1 - Math.pow((u - 0.22) / 0.78, 0.7) * 0.94), col: (() => { const o = new THREE.Color(), s = C(0xe8ecef), b = C(0x202020); return (u, v, t) => { o.copy(s); for (const c of [0.42, 0.7]) o.lerp(b, smooth(0.05, 0.02, Math.abs(t - c)) * 0.8); return o; }; })() },
+    tail: { len: 0.5, spread: 0.55, prof: (u) => 0.7 + 0.9 * Math.pow(Math.abs(2 * u - 1), 8), col: gradFin(0xdfe4e8, 0xf4f7fa) },
+    pec: { t: 0.3, len: 0.18, w: 0.07, col: finCol(0xf0f4f8) }, pelvic: { t: 0.3, len: 0.85, w: 0.025, spread: 0.2, col: gradFin(0xe8e2d0, 0xffffff), droop: -1.0 },
+    finOpacity: 0.72, flex: 0.8, speed: [0.6, 1.4], amp: 0.45, beat: 1.1, turnSpeed: 2.5, irid: 0.3, rough: 0.3, zone: [0.3, 0.85],
+  },
+  { // Голубой хирург
+    name: 'Хирург', count: 2, size: [0.95, 1.1], len: 1.05, height: 0.62, width: 0.18, bulge: 0.4, peduncle: 0.2, noseExp: 0.6,
+    top: 1, bot: 1, ex: 0.8, belly: C(0x3a6af0), bellyAmt: 0.3, iris: 0x1a1a40, eyeT: 0.15, eyeY: 0.3, eyeR: 0.065,
+    color: (() => {
+      const o = new THREE.Color(), blue = C(0x1f52e0), black = C(0x0a0f22), yellow = C(0xffd21a);
+      return (t, ny) => {
+        o.copy(blue);
+        const tt = clamp((t - 0.14) / 0.82, 0, 1);
+        const lo = 0.3 - 0.35 * Math.sin(Math.PI * tt) - 0.05 * tt, hi = 0.6 + 0.5 * Math.sin(Math.PI * tt) - 0.3 * tt;
+        const inOval = ((t - 0.52) / 0.15) ** 2 + ((ny - 0.72) / 0.2) ** 2 < 1;
+        if (tt > 0 && tt < 1 && ny > lo && ny < hi && !inOval) o.copy(black);
+        if (t > 0.93) o.copy(yellow);
+        return o;
+      };
+    })(),
+    dorsal: { t0: 0.2, t1: 0.92, h: 0.14, sweep: 0.1, prof: sinProf(0.35), col: gradFin(0x1f52e0, 0x2a5cf0, 0x0a0f22, 0.72) },
+    anal: { t0: 0.45, t1: 0.92, h: 0.12, sweep: 0.1, prof: sinProf(0.35), col: gradFin(0x1f52e0, 0x2a5cf0, 0x0a0f22, 0.72) },
+    tail: { len: 0.4, spread: 0.7, prof: (u) => 0.6 + 0.5 * Math.pow(Math.abs(2 * u - 1), 1.5), col: (() => { const o = new THREE.Color(), y = C(0xffd21a), b = C(0x0a0f22); return (u) => o.copy(y).lerp(b, smooth(0.14, 0.06, Math.min(u, 1 - u))); })() },
+    pec: { t: 0.3, len: 0.22, w: 0.08, col: gradFin(0x2a5cf0, 0xffd21a) }, pelvic: { t: 0.4, len: 0.12, w: 0.04, col: finCol(0x1f52e0) },
+    finOpacity: 0.95, flex: 0.4, speed: [1.2, 2.6], amp: 0.5, beat: 1.6, turnSpeed: 3.5, irid: 0.2, rough: 0.35, zone: [0.2, 0.8],
+  },
+  { // Золотая рыбка (рюкин)
+    name: 'Золотая', count: 3, size: [0.9, 1.15], len: 0.85, height: 0.62, width: 0.42, bulge: 0.45, peduncle: 0.3, noseExp: 0.55,
+    top: 1.05, bot: 0.95, ex: 0.95, belly: C(0xffe2b0), bellyAmt: 0.4, iris: 0xffd070, eyeT: 0.14, eyeY: 0.25, eyeR: 0.085,
+    color: (() => {
+      const o = new THREE.Color(), gold = C(0xff8a1a), deep = C(0xff4a00), white = C(0xfff4e6);
+      return (t, ny, nx, x, y, z) => {
+        o.copy(gold).lerp(deep, smooth(0, 1, ny) * 0.55);
+        const n = fbm(x * 5 + 11, y * 5, z * 5, 3);
+        o.lerp(white, smooth(0.54, 0.6, n) * 0.95);
+        return o;
+      };
+    })(),
+    dorsal: { t0: 0.28, t1: 0.62, h: 0.5, sweep: 0.45, prof: (u) => u < 0.25 ? Math.pow(u / 0.25, 0.6) : 1 - 0.75 * (u - 0.25) / 0.75, col: gradFin(0xff7a10, 0xffd8b0) },
+    anal: { t0: 0.66, t1: 0.82, h: 0.22, sweep: 0.4, prof: sinProf(0.6), col: gradFin(0xff7a10, 0xffd8b0) },
+    tail: { len: 1.0, spread: 0.95, sag: 0.18, prof: (u) => 0.75 + 0.25 * Math.sin(Math.PI * u) - 0.25 * Math.exp(-(((u - 0.5) / 0.08) ** 2)), col: gradFin(0xff6a00, 0xffe8d0) },
+    pec: { t: 0.3, len: 0.22, w: 0.09, col: gradFin(0xff8a20, 0xffe0c0) }, pelvic: { t: 0.44, len: 0.2, w: 0.07, col: gradFin(0xff8a20, 0xffe0c0) },
+    finOpacity: 0.8, flex: 1.6, speed: [0.6, 1.5], amp: 0.55, beat: 1.1, turnSpeed: 2.8, irid: 0, rough: 0.3, zone: [0.15, 0.85],
+  },
+  { // Петушок (бетта)
+    name: 'Петушок', count: 2, size: [1.0, 1.1], len: 0.75, height: 0.26, width: 0.15, bulge: 0.35, peduncle: 0.45, noseExp: 0.5,
+    top: 1, bot: 1.1, ex: 0.85, belly: C(0x80102a), bellyAmt: 0.2, iris: 0x401020, eyeT: 0.12, eyeY: 0.2, eyeR: 0.075,
+    color: (() => {
+      const o = new THREE.Color(), red = C(0xb0102c), blue = C(0x3050ff);
+      return (t, ny, nx, x, y, z) => {
+        o.copy(red);
+        const n = fbm(x * 18, y * 18, z * 18 + 5, 2);
+        o.lerp(blue, smooth(0.5, 0.62, n) * 0.6 * (1 - Math.abs(ny)));
+        return o;
+      };
+    })(),
+    dorsal: { t0: 0.45, t1: 0.86, h: 0.55, sweep: 0.55, prof: (u) => Math.pow(Math.sin(Math.PI * Math.min(u * 0.95 + 0.05, 1)), 0.5) * (0.6 + 0.6 * u), col: gradFin(0xa00c2a, 0x8a1a8a, 0x4060ff, 0.82) },
+    anal: { t0: 0.3, t1: 0.95, h: 0.55, sweep: 0.45, prof: (u) => Math.pow(Math.sin(Math.PI * Math.min(u * 0.9 + 0.1, 1)), 0.4) * (0.5 + 0.7 * u), col: gradFin(0xa00c2a, 0x8a1a8a, 0x4060ff, 0.82) },
+    tail: { len: 1.0, spread: 1.45, sag: 0.1, prof: (u) => 0.95 + 0.05 * Math.sin(Math.PI * u), col: gradFin(0xb0102c, 0x901a90, 0x4a6aff, 0.84) },
+    pec: { t: 0.28, len: 0.18, w: 0.07, col: finCol(0xd03050) }, pelvic: { t: 0.38, len: 0.45, w: 0.04, spread: 0.3, col: gradFin(0xb0102c, 0xffffff), droop: -0.8 },
+    finOpacity: 0.85, flex: 2.0, speed: [0.5, 1.2], amp: 0.5, beat: 1.0, turnSpeed: 2.2, irid: 0.8, rough: 0.3, zone: [0.5, 1.0],
+  },
+];
+
+const FISH_SCALE = 1.35;
+const eyeMats = {};
+const pupilMat = new THREE.MeshPhysicalMaterial({ color: 0x050505, roughness: 0.05, metalness: 0, clearcoat: 1, clearcoatRoughness: 0 });
+
+function speciesAssets(sp) {
+  if (sp._assets) return sp._assets;
+  sp._assets = {
+    body: buildBody(sp), fins: buildMedianFins(sp), eyes: buildEyes(sp),
+    pec: buildPairFin(sp.pec, sp.len), pelvic: sp.pelvic ? buildPairFin(sp.pelvic, sp.len) : null,
+    irisMat: new THREE.MeshPhysicalMaterial({ color: sp.iris, roughness: 0.25, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.05 }),
+  };
+  return sp._assets;
+}
+
+const _acc = new THREE.Vector3(), _v1 = new THREE.Vector3(), _al = new THREE.Vector3(), _co = new THREE.Vector3();
+const _fwd = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
+const fishes = [];
+
+function randomTarget(sp, out) {
+  for (let i = 0; i < 20; i++) {
+    const x = rr(-HW + 2, HW - 2), z = rr(-HD + 1.8, HD - 1.8);
+    const fy = sandY(x, z) + 1.0, cy = WATER_Y - 1.0;
+    const y = lerp(fy, cy, rr(sp.zone[0], sp.zone[1]));
+    out.set(x, y, z);
+    if (OBSTACLES.every(o => o.c.distanceTo(out) > o.r + 1.0)) return out;
+  }
+  return out;
+}
+
+class Fish {
+  constructor(sp) {
+    this.sp = sp;
+    this.size = rr(sp.size[0], sp.size[1]) * FISH_SCALE;
+    this.L = sp.len;
+    this.radius = sp.len * this.size * 0.5;
+    this.seed = rand();
+    this.speedMul = rr(0.9, 1.1);
+    this.uniforms = { uSwim: { value: new THREE.Vector4(rand() * 10, sp.amp, sp.len, rand() * 10) }, uTurn: { value: 0 } };
+    const A = speciesAssets(sp);
+
+    const bodyMat = patchMaterial(new THREE.MeshPhysicalMaterial({
+      vertexColors: true, roughness: sp.rough, metalness: 0.05, clearcoat: 0.7, clearcoatRoughness: 0.25,
+      bumpMap: SCALE_TEX, bumpScale: 0.7, iridescence: sp.irid, iridescenceIOR: 1.5, iridescenceThicknessRange: [200, 600],
+    }), { swim: this.uniforms, caustics: 0.5 });
+    const finProps = { vertexColors: true, map: FIN_TEX, transparent: true, opacity: sp.finOpacity, side: THREE.DoubleSide, depthWrite: false, roughness: 0.45, metalness: 0 };
+    const finMat = patchMaterial(new THREE.MeshStandardMaterial(finProps), { swim: this.uniforms, caustics: 0.4 });
+    const pairMat = patchMaterial(new THREE.MeshStandardMaterial(finProps), { caustics: 0.4 });
+
+    const g = this.group = new THREE.Group();
+    g.scale.setScalar(this.size);
+    const body = new THREE.Mesh(A.body, bodyMat); body.castShadow = true; g.add(body);
+    g.add(new THREE.Mesh(A.fins, finMat));
+    g.add(new THREE.Mesh(A.eyes.iris, A.irisMat));
+    g.add(new THREE.Mesh(A.eyes.pupil, pupilMat));
+
+    // парные плавники на шарнирах
+    const L = sp.len, H = sp.height, W = sp.width;
+    this.pairs = [];
+    const addPair = (f, geo, below) => {
+      const s = bodyShape(f.t, sp);
+      const y = below ? -H * 0.5 * sp.bot * s * 0.75 : -H * 0.5 * s * 0.2;
+      const x = below ? W * 0.5 * s * 0.45 : W * 0.5 * s * 0.92;
+      for (const side of [-1, 1]) {
+        const pivot = new THREE.Group();
+        pivot.position.set(side * x, y, L * 0.5 - f.t * L);
+        pivot.add(new THREE.Mesh(geo, pairMat));
+        g.add(pivot);
+        this.pairs.push({ pivot, side, x: side * x, ft: f.t, below, droop: f.droop ?? (below ? -0.6 : -0.15) });
+      }
+    };
+    addPair(sp.pec, A.pec, false);
+    if (A.pelvic) addPair(sp.pelvic, A.pelvic, true);
+    this.pecPhase = rand() * 6.28;
+
+    this.pos = randomTarget(sp, V(0, 0, 0));
+    const a = rand() * 6.28;
+    this.vel = V(Math.cos(a), 0, Math.sin(a)).multiplyScalar(sp.speed[0]);
+    this.target = randomTarget(sp, V(0, 0, 0));
+    this.retarget = rr(3, 8);
+    this.turn = 0; this.fear = 0; this.feeding = false;
+    g.position.copy(this.pos);
+    g.quaternion.setFromEuler(_e.set(0, Math.atan2(this.vel.x, this.vel.z), 0, 'YXZ'));
+    this.prevYaw = Math.atan2(this.vel.x, this.vel.z);
+    tankGroup.add(g);
+  }
+
+  update(dt, t) {
+    const sp = this.sp, p = this.pos, v = this.vel, acc = _acc.set(0, 0, 0), r = this.radius;
+    const maxS = sp.speed[1] * this.speedMul, minS = sp.speed[0] * this.speedMul;
+    this.fear = Math.max(0, this.fear - dt);
+    const mood = clamp(0.4 + 0.35 * Math.sin(t * 0.23 + this.seed * 6.28) + 0.2 * Math.sin(t * 0.71 + this.seed * 3), 0, 1);
+    let cruise = lerp(minS, maxS, mood);
+    const k = maxS * 3.0;
+    const seek = (tp, speed, w) => {
+      _v1.subVectors(tp, p); const d = _v1.length();
+      if (d > 1e-4) { _v1.multiplyScalar(speed / d * Math.min(1, d / 1.5 + 0.3)).sub(v).multiplyScalar(w); acc.add(_v1); }
+      return d;
+    };
+
+    // корм
+    let best = null, bd = 100;
+    for (const f of foods) if (f.alive && f.age > 0.6) { const d = f.pos.distanceToSquared(p); if (d < bd) { bd = d; best = f; } }
+    this.feeding = !!best;
+    if (best) {
+      seek(best.pos, maxS * 1.3, 2.5);
+      _fwd.set(0, 0, 1).applyQuaternion(this.group.quaternion);
+      const nose = _v1.copy(p).addScaledVector(_fwd, sp.len * this.size * 0.5);
+      if (nose.distanceTo(best.pos) < 0.22 + 0.12 * this.size) best.alive = false;
+    } else if (sp.school) {
+      seek(sp._target, cruise, 0.5);
+    } else {
+      this.retarget -= dt;
+      if (p.distanceTo(this.target) < 1.2 || this.retarget < 0) { randomTarget(sp, this.target); this.retarget = rr(4, 10); }
+      seek(this.target, cruise, 0.8);
+    }
+    if (this.fear > 0) cruise = maxS * 1.8;
+
+    // стенки, дно, поверхность
+    const bx = HW - 0.9 - r, bz = HD - 0.9 - r;
+    const floor = sandY(p.x, p.z) + (this.feeding ? 0.25 : 0.7) + r * 0.3, ceil = WATER_Y - 0.5 - r * 0.3;
+    const wall = (d, m) => { const x = clamp(d / m, 0, 2); return x * x; };
+    acc.x -= k * wall(p.x - (bx - 2.2), 2.2); acc.x += k * wall((-bx + 2.2) - p.x, 2.2);
+    acc.z -= k * wall(p.z - (bz - 2.0), 2.0); acc.z += k * wall((-bz + 2.0) - p.z, 2.0);
+    acc.y += k * wall(floor + 1.2 - p.y, 1.2); acc.y -= k * wall(p.y - (ceil - 1.0), 1.0);
+
+    // камни и коряга
+    for (const o of OBSTACLES) {
+      _v1.subVectors(p, o.c); const d = _v1.length(), R = o.r + r + 0.25;
+      if (d < R + 1.6 && d > 1e-4) {
+        _v1.divideScalar(d);
+        const f = (R + 1.6 - d) / 1.6;
+        acc.addScaledVector(_v1, k * f * f * 1.3);
+        if (d < R) p.addScaledVector(_v1, (R - d) * Math.min(1, dt * 8));
+      }
+    }
+
+    // разделение и стайность
+    let ac = 0; _al.set(0, 0, 0); _co.set(0, 0, 0);
+    for (const o of fishes) {
+      if (o === this) continue;
+      _v1.subVectors(p, o.pos); const d2 = _v1.lengthSq(), sr = r + o.radius + 0.35;
+      if (d2 < sr * sr && d2 > 1e-6) { const d = Math.sqrt(d2); acc.addScaledVector(_v1, (sr - d) / sr * k * 1.2 / d); }
+      if (sp.school && o.sp === sp && d2 < 9) { _al.add(o.vel); _co.add(o.pos); ac++; }
+    }
+    if (ac) {
+      acc.add(_al.divideScalar(ac).sub(v).multiplyScalar(0.9));
+      acc.add(_co.divideScalar(ac).sub(p).multiplyScalar(0.7));
+    }
+
+    // интегрирование
+    const maxF = maxS * 2.2 + (this.fear > 0 ? 8 : 0);
+    if (acc.length() > maxF) acc.setLength(maxF);
+    v.addScaledVector(acc, dt);
+    v.y *= 1 - Math.min(1, dt * 0.6);
+    const hs = Math.hypot(v.x, v.z), vyMax = 0.35 * hs + 0.25;
+    v.y = clamp(v.y, -vyMax, vyMax);
+    let s = v.length();
+    const sMax = this.fear > 0 ? maxS * 2.2 : Math.max(cruise * 1.25, minS);
+    if (s > sMax) v.multiplyScalar(sMax / s);
+    if (s < minS * 0.4) { if (s < 1e-4) v.set(rand() - 0.5, 0, rand() - 0.5); v.setLength(minS * 0.4); }
+    s = v.length();
+
+    // ориентация: плавный поворот носом по направлению движения
+    const dir = _v1.copy(v).normalize();
+    const pitch = clamp(Math.atan2(dir.y, Math.hypot(dir.x, dir.z)), -0.5, 0.5);
+    const yaw = Math.atan2(dir.x, dir.z);
+    _q.setFromEuler(_e.set(-pitch, yaw, -this.turn * 0.25, 'YXZ'));
+    this.group.quaternion.slerp(_q, 1 - Math.exp(-dt * sp.turnSpeed * (this.fear > 0 ? 2 : 1)));
+
+    _fwd.set(0, 0, 1).applyQuaternion(this.group.quaternion);
+    p.addScaledVector(_fwd, s * dt * 0.8).addScaledVector(v, dt * 0.2);
+    p.x = clamp(p.x, -bx - 0.4, bx + 0.4); p.z = clamp(p.z, -bz - 0.4, bz + 0.4);
+    p.y = clamp(p.y, sandY(p.x, p.z) + 0.2 + r * 0.2, WATER_Y - 0.25);
+    this.group.position.copy(p);
+
+    // скорость поворота → изгиб тела
+    const yawNow = Math.atan2(_fwd.x, _fwd.z);
+    let dy = yawNow - this.prevYaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    this.prevYaw = yawNow;
+    this.turn = lerp(this.turn, clamp(dy / Math.max(dt, 1e-3) * 0.3, -1, 1), 1 - Math.exp(-dt * 5));
+
+    // анимация тела и плавников
+    const u = this.uniforms.uSwim.value, sn = s / maxS;
+    u.x += dt * Math.PI * 2 * (sp.beat * (0.6 + 1.1 * sn) + (this.fear > 0 ? 2 : 0));
+    u.y = sp.amp * (0.45 + 0.55 * clamp(sn, 0, 1.5)) + Math.abs(this.turn) * 0.25;
+    u.w += dt * (5 + sn * 3);
+    this.uniforms.uTurn.value = this.turn;
+
+    this.pecPhase += dt * (5.5 - 2.5 * clamp(sn, 0, 1));
+    for (const pr of this.pairs) {
+      const ft = pr.ft, env = 0.06 + 0.94 * ft * ft;
+      const off = Math.sin(u.x - ft * 4.2) * u.y * env * sp.len * 0.11 + this.turn * ft * ft * sp.len * 0.28;
+      pr.pivot.position.x = pr.x + off;
+      const flap = pr.below ? 0.12 * Math.sin(this.pecPhase * 0.6) : 0.4 * Math.sin(this.pecPhase + (pr.side > 0 ? 0 : 0.6));
+      const base = pr.below ? 0.35 : 0.55 + 0.4 * (1 - clamp(sn, 0, 1));
+      pr.pivot.rotation.set(pr.droop, -pr.side * (base + flap), 0);
+    }
+  }
+
+  scare(point) {
+    _v1.subVectors(this.pos, point);
+    const d = _v1.length();
+    if (d < 8) {
+      this.fear = 1.2 + rand() * 0.6;
+      this.vel.addScaledVector(_v1.normalize(), this.sp.speed[1] * 2.5);
+    }
+  }
+}
+
+for (const sp of SPECIES) {
+  if (sp.school) { sp._target = randomTarget(sp, V(0, 0, 0)); sp._timer = rr(5, 9); }
+  for (let i = 0; i < sp.count; i++) fishes.push(new Fish(sp));
+}
+// стайка неонов стартует вместе
+{ const neon = fishes.filter(f => f.sp.school); const c = neon[0].pos.clone(); neon.forEach(f => f.pos.copy(c).add(V(rr(-1.5, 1.5), rr(-0.6, 0.6), rr(-1, 1)))); }
+
+/* =====================================================================
+   Постобработка
+   ===================================================================== */
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 }));
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.38, 0.55, 0.88);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+composer.setSize(innerWidth, innerHeight);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+});
+
+/* =====================================================================
+   Интерфейс
+   ===================================================================== */
+let nightTarget = 0, night = 0;
+document.getElementById('feed').onclick = feed;
+document.getElementById('rotate').onclick = (e) => { controls.autoRotate = !controls.autoRotate; e.currentTarget.classList.toggle('on', controls.autoRotate); };
+document.getElementById('light').onclick = (e) => { nightTarget = 1 - nightTarget; e.currentTarget.textContent = nightTarget ? '☀️ День' : '🌙 Ночь'; };
+
+const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const tankBox = new THREE.Box3(V(-HW, 0, -HD), V(HW, TH, HD));
+renderer.domElement.addEventListener('dblclick', (ev) => {
+  ndc.set(ev.clientX / innerWidth * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.ray.intersectBox(tankBox, V(0, 0, 0));
+  if (hit) {
+    fishes.forEach(f => f.scare(hit));
+    for (let i = 0; i < 12; i++) spawnBubble(hit.clone().clampScalar(-100, 100).setY(clamp(hit.y, 1, WATER_Y - 1)), rr(0.03, 0.08), 0.4);
+  }
+});
+
+/* =====================================================================
+   День / ночь
+   ===================================================================== */
+const DAY = { sun: 2.8, sunC: C(0xfff1dc), hemi: 0.7, tank: 35, blue: 25, warm: 12, caustic: 1.0, rays: 1.0, led: new THREE.Color(3.0, 3.2, 3.4), back: 1.0, fog: C(0x05202f), env: 0.35 };
+const NIGHT = { sun: 0.5, sunC: C(0x6a86ff), hemi: 0.15, tank: 6, blue: 30, warm: 0, caustic: 0.35, rays: 0.3, led: new THREE.Color(0.3, 0.6, 3.0), back: 0.4, fog: C(0x020a16), env: 0.12 };
+function applyLighting(k) {
+  sun.intensity = lerp(DAY.sun, NIGHT.sun, k); sun.color.copy(DAY.sunC).lerp(NIGHT.sunC, k);
+  hemi.intensity = lerp(DAY.hemi, NIGHT.hemi, k);
+  tankLight.intensity = lerp(DAY.tank, NIGHT.tank, k);
+  blueLight.intensity = lerp(DAY.blue, NIGHT.blue, k);
+  warmLight.intensity = lerp(DAY.warm, NIGHT.warm, k);
+  shared.uCaustic.value = lerp(DAY.caustic, NIGHT.caustic, k);
+  rayUniforms.uInt.value = lerp(DAY.rays, NIGHT.rays, k);
+  ledMat.color.copy(DAY.led).lerp(NIGHT.led, k);
+  backdropMat.uniforms.uLight.value = lerp(DAY.back, NIGHT.back, k);
+  scene.fog.color.copy(DAY.fog).lerp(NIGHT.fog, k);
+  scene.environmentIntensity = lerp(DAY.env, NIGHT.env, k);
+}
+
+/* =====================================================================
+   Главный цикл
+   ===================================================================== */
+const clock = new THREE.Clock();
+let firstFrame = true;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  shared.uTime.value = t;
+
+  night += (nightTarget - night) * Math.min(1, dt * 2);
+  applyLighting(night);
+
+  for (const sp of SPECIES) if (sp.school) {
+    sp._timer -= dt;
+    if (sp._timer < 0) { randomTarget(sp, sp._target); sp._timer = rr(5, 10); }
+  }
+  for (const f of fishes) f.update(dt, t);
+  updateBubbles(dt, t);
+  updateFood(dt, t);
+  updateWater(t);
+
+  controls.update();
+  composer.render();
+  if (firstFrame) { firstFrame = false; document.getElementById('loading').classList.add('hidden'); }
+});
+</script>
+<script>
+  // Сообщение, если модули/WebGL не загрузились
+  window.addEventListener('error', (e) => {
+    const l = document.getElementById('loading');
+    if (l && !l.classList.contains('hidden')) l.textContent = 'Ошибка загрузки: ' + (e.message || 'проверьте подключение к интернету (Three.js грузится с CDN)');
+  });
+</script>
+</body>
+</html>
