@@ -23,6 +23,101 @@ The Dock, settings and search have Flutter widget tests in flutter_app/test/rede
 
 Flutter package notices are generated into data/flutter_assets/NOTICES.Z and accessible from About. Existing icon and media-runtime notices stay under resources/licenses. The Flutter app and installer embed Onest Regular and SemiBold under the SIL Open Font License; the installer's private DirectWrite collection does not install fonts into Windows. The pinned source, derived faces and provenance are in resources/fonts, with the license in resources/licenses/ONEST-OFL.txt. scripts/prepare-onest.py regenerates the static faces using fonttools 4.60.1.
 
+## Language
+
+Settings > Appearance > Language selects Ukrainian or English. The per-profile
+`language` preference is persisted by the existing library settings store; switching
+updates the main app and Island locale without restarting. Translation uses context
+locale, including Material dialogs and player accessibility labels. Metadata supplied
+by users/music services is preserved. Known native status/error messages are translated
+at presentation; unknown third-party errors remain verbatim. The native installer and
+Windows tray context menu are separate native surfaces and remain Ukrainian for now.
+Localization tests cover switching, settings persistence, template values and unchanged
+track metadata. Dictionaries live in flutter_app/lib/l10n*.dart.
+
+## Local portrait preview
+
+The main app paints an alpha-masked stencil at startup and at low opacity behind
+the workspace. It never handles pointer events or contributes semantics. Cards,
+PlayerDock and the separate Island engine keep their existing widgets. Startup
+waits for the first Flutter frame before synchronous native initialization; this
+shows the portrait, though animation can pause during blocking `sf_open` work.
+The image has transparency; the native main window itself remains opaque.
+Artwork provenance is recorded in resources/ARTWORK.md. Installer artwork remains
+unchanged pending a separate reference image from the user.
+
+`flutter test test/portrait_background_test.dart --dart-define=CAPTURE_UI=true`
+exports `output/portrait-startup-render.png` using actual bundled Onest fonts.
+The build script now fails early if Node, the provider bundle or their license
+files are missing; run `node scripts/build-provider.mjs` before building Windows.
+
+## Local accounts and icon fixes
+
+Profile and Connections expose SoundFlow registration/sign-in. Without a configured
+cloud server these accounts and libraries are local to this PC. New local passwords
+use salted Argon2id PHC hashes, never plaintext, and protected inactive profiles
+require password login. Legacy passwordless profiles are retained but cannot use
+password login. Cloud login errors no longer fall back to local authentication.
+The tray loads embedded ICO images rather than relying on an EXE resource ID;
+settings changes update the tray icon on its owning window thread. Shortcut updates
+notify the Windows shell to invalidate cached association icons.
+
+## Memory budget
+
+Polling remains at 250 ms. New clients opt into `state_patch_v1`: the first response
+is full, subsequent responses replace only changed top-level fields and explicitly
+remove deleted fields. Old clients continue receiving full snapshots. Rust retains
+one prior snapshot for comparison, so this trades a native baseline for smaller
+FFI strings and fewer Dart allocations; it is not a claim of lower total process
+RAM. A 5,000-track fixture reduced a position-only update from 292,874 to 97 bytes.
+Dart caches JSON encoding for immutable unchanged fields. Playback checkpoint,
+resume and toggle paths no longer clone the entire library/feed snapshot.
+These changes preserve UI, playback cadence, queue ordering and audio behavior.
+
+Audio preparation retains at most 16 MiB of full-track PCM (previously 128 MiB).
+Larger tracks use the existing file-backed decoder and rolling normalization;
+this preserves sample rate/channel count but may change normalization behavior
+and increases decoding work during playback. Unknown-duration sources fall back
+to file-backed decoding when the same limit is reached.
+
+Artwork decode widths follow layout size and display pixel ratio in reusable
+64/128/256/512/700/1024 pixel buckets. The retained Flutter image cache is limited
+to 32 MiB in the main engine and 8 MiB in Island. These are cache budgets, not
+process memory limits: visible images, Flutter/GPU resources and provider workers
+consume additional memory. Island's desktop widget is retained.
+
+Validate with `cargo test --lib playback::tests` and
+`flutter test test/artwork_memory_test.dart`. Compare release builds on the same
+playlist, display scale and track after startup, playback, seeking, scrolling a
+large library, and switching tracks. Record both Working Set and Private Bytes,
+including provider child processes. A 400 MiB total target requires runtime
+measurement; these changes alone do not establish that result.
+
+## Playback recovery and library backups
+
+Playback recovery is enabled by default (`restore_playback_enabled`). The native
+session checkpoints the queue, exact queue index (including repeated tracks), and
+position every five seconds and on graceful shutdown. Checkpoints are atomic,
+bounded JSON files under `playback-sessions`, named by a hash of the account ID.
+On launch or profile change the player restores paused, without fetching a stream;
+Play resolves a fresh stream and resumes at the saved position. Invalid checkpoints
+are ignored. Settings → Playback can disable recovery. Closing to the tray does
+not end the session.
+
+Settings → Library lists local backups and offers Create and Restore. Before a
+library save, the prior on-disk state is backed up at most once per hour. Each
+account retains ten automatic, ten manual and three pre-restore safety copies.
+Restore validates the selected copy, creates a safety copy and atomically replaces
+library content. It preserves current settings and account/profile data. Copies
+contain playlists, likes, history, search history, play counts and track metadata,
+not audio files or authentication data. They live beside the library in
+`library-backups/<library filename>`; export to a separate disk remains available
+for protection against disk loss. Damaged backup entries do not hide usable ones.
+
+Relevant checks: `cargo test --lib playback_session::tests`,
+`cargo test --lib backup_tests`, and
+`flutter test test/library_backup_test.dart` from `flutter_app`.
+
 ## Installer and updates
 
 `scripts/package-windows.ps1` builds the native installer and a portable ZIP. The terms
@@ -94,10 +189,15 @@ that receipt. Delta bases require either a prior verified receipt or a matching
 canonical Full hash from the feed; otherwise the client requests a Full update.
 
 The Windows runner calls sf_velopack_startup before COM/Flutter/profile locks.
-Startup auto-apply is disabled: downloading/installing requires the user's Update
-action. Stable installed and managed portable builds check once at startup and
-every 12 hours while enabled. Development flat bundles do not auto-update.
-The existing Onest/Anicry startup card owns progress, cancellation and completion.
+Startup auto-apply is enabled: stable installed and managed portable builds check
+once at startup and every 12 hours while enabled, download updates in the background,
+and install the prepared update on the next launch before the window/audio starts.
+Automatic downloads default to enabled (`auto_update_install`); disabling them keeps
+the manual Update offer. Disabling automatic checks (`auto_update_enabled`) prevents
+future background checks/downloads; a package already staged can still apply on launch.
+Development flat bundles do not auto-update. Background updates do not open a modal
+or interrupt playback. The existing Onest/Anicry startup card owns manual update
+progress, cancellation and completion.
 Its library completion animation finishes before Flutter closes engine/audio.
 User library/settings remain under `%APPDATA%\app.soundflow.desktop`.
 

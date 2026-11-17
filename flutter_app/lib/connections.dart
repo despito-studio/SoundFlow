@@ -1,3 +1,5 @@
+import 'l10n.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -6,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'anicry_motion.dart';
 import 'core.dart';
 import 'design.dart';
+import 'account_login.dart';
 
 class ConnectionsPopup extends StatefulWidget {
   const ConnectionsPopup(this.core, {super.key});
@@ -81,8 +84,9 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
       if (ok) {
         errors.remove(source);
       } else {
-        errors[source] =
-            'Вкажи посилання ${sourceName({'source': source})} через https://';
+        errors[source] = 'Вкажи посилання {source} через https://'
+            .tr(context)
+            .replaceAll('{source}', sourceName({'source': source}, context));
       }
     });
     return ok;
@@ -137,9 +141,9 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
               children: [
                 Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Підключення',
+                        'Підключення'.tr(context),
                         style: TextStyle(
                           fontFamily: SoundFlowType.heading,
                           fontSize: 24,
@@ -149,7 +153,7 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                     ),
                     Control(
                       'x',
-                      'Закрити',
+                      'Закрити'.tr(context),
                       onTap: () => Navigator.pop(context),
                     ),
                   ],
@@ -170,8 +174,8 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                           const SizedBox(height: 4),
                           Text(
                             cloud['signed_in'] == true
-                                ? 'Акаунт SoundFlow підключено'
-                                : 'Синхронізація медіатеки',
+                                ? 'Акаунт SoundFlow підключено'.tr(context)
+                                : 'Синхронізація медіатеки'.tr(context),
                             style: TextStyle(fontSize: 12, color: p.muted),
                           ),
                         ],
@@ -180,8 +184,8 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                     const SizedBox(width: 12),
                     ActionButton(
                       cloud['signed_in'] == true
-                          ? 'Вийти'
-                          : 'Увійти через Google',
+                          ? 'Вийти'.tr(context)
+                          : 'Увійти через Google'.tr(context),
                       flat: true,
                       onTap: () => c.call(
                         cloud['signed_in'] == true ? 'sign_out' : 'start_oauth',
@@ -189,6 +193,44 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 16),
+                ActionButton(
+                  'Серверний акаунт: увійти / зареєструватися'.tr(context),
+                  onTap: () => showAnicryDialog<void>(
+                    context: context,
+                    builder: (_) => AccountLogin(c, server: true),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ActionButton(
+                  'Перевірити адмінські права на сервері'.tr(context),
+                  onTap: () => c.call('get_supabase_admin_status'),
+                ),
+                if (c.state['last_method'] == 'get_supabase_admin_status')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      object(c.state['last_result'])['verified'] == true &&
+                              object(c.state['last_result'])['is_admin'] == true
+                          ? 'Сервер підтвердив роль адміністратора.'.tr(context)
+                          : 'Адмінські права не підтверджені. Увійди в серверний акаунт і перевір призначення ролі в Supabase.'
+                                .tr(context),
+                    ),
+                  ),
+                TextButton(
+                  onPressed: () => c.call('supabase_sign_out'),
+                  child: Text('Вийти із серверного акаунта'.tr(context)),
+                ),
+                const SizedBox(height: 16),
+                ActionButton(
+                  cloud['signed_in'] == true
+                      ? 'Увійти в інший акаунт SoundFlow'.tr(context)
+                      : 'Акаунт SoundFlow: вхід або реєстрація'.tr(context),
+                  onTap: () => showAnicryDialog<void>(
+                    context: context,
+                    builder: (_) => AccountLogin(c),
+                  ),
                 ),
                 const SizedBox(height: 24),
                 Divider(color: p.ink.withValues(alpha: .08), height: 1),
@@ -212,7 +254,7 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                               vertical: 10,
                             ),
                             child: Text(
-                              sourceName({'source': name}),
+                              sourceName({'source': name}, context),
                               style: TextStyle(
                                 fontSize: 14,
                                 color: name == source ? p.ink : p.muted,
@@ -239,7 +281,8 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                     ],
                     Expanded(
                       child: Text(
-                        linked['name']?.toString() ?? 'Профіль або плейліст',
+                        linked['name']?.toString() ??
+                            'Профіль або плейліст'.tr(context),
                         style: TextStyle(fontSize: 13, color: p.muted),
                       ),
                     ),
@@ -247,7 +290,7 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                       Glyph('check', size: 15, color: p.accent),
                       const SizedBox(width: 6),
                       Text(
-                        'Посилання збережено',
+                        'Посилання збережено'.tr(context),
                         style: TextStyle(fontSize: 12, color: p.muted),
                       ),
                     ],
@@ -267,7 +310,7 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                       padding: const EdgeInsets.all(4),
                       child: Control(
                         'copy',
-                        'Вставити посилання',
+                        'Вставити посилання'.tr(context),
                         size: 32,
                         onTap: importing ? null : paste,
                       ),
@@ -279,14 +322,16 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     ActionButton(
-                      'Зберегти',
+                      'Зберегти'.tr(context),
                       flat: true,
                       icon: 'check',
                       onTap: importing ? null : save,
                     ),
                     const SizedBox(width: 10),
                     ActionButton(
-                      importing ? 'Імпортуємо…' : 'Імпортувати плейлісти',
+                      importing
+                          ? 'Імпортуємо…'.tr(context)
+                          : 'Імпортувати плейлісти'.tr(context),
                       primary: true,
                       icon: 'arrow-right',
                       onTap: importing ? null : () => save(import: true),
@@ -300,7 +345,7 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                 if (error.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   Text(
-                    error,
+                    error.tr(context),
                     style: const TextStyle(
                       fontSize: 13,
                       height: 1.4,
@@ -310,7 +355,7 @@ class _ConnectionsPopupState extends State<ConnectionsPopup> {
                 ],
                 const SizedBox(height: 20),
                 Text(
-                  'Імпортовані плейлісти з’являться в медіатеці.',
+                  'Імпортовані плейлісти з’являться в медіатеці.'.tr(context),
                   style: TextStyle(fontSize: 12, height: 1.4, color: p.muted),
                 ),
               ],

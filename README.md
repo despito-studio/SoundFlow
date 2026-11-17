@@ -4,61 +4,61 @@
 
 <h1 align="center">SoundFlow</h1>
 
-<p align="center">A music player for Windows by Despito Studio.</p>
+<p align="center">Музичний плеєр для Windows від Despito Studio.</p>
 
 <p align="center">
-  <a href="https://github.com/despito-studio/SoundFlow/releases">Download</a> ·
-  <a href="CHANGELOG.md">What's new</a> ·
-  <a href="SUPPORT.md">Support</a>
+  <a href="https://github.com/despito-studio/SoundFlow/releases">Завантажити</a> ·
+  <a href="CHANGELOG.md">Що нового</a> ·
+  <a href="SUPPORT.md">Підтримка</a>
 </p>
 
-SoundFlow brings music search, your library, and playback controls together in one calm interface. Find new tracks, build playlists, and keep the music close while you work.
+SoundFlow об’єднує пошук музики, твою медіатеку та керування відтворенням в одному спокійному інтерфейсі. Знаходь нові треки, збирай плейлісти й залишай музику поруч, поки працюєш.
 
-## Features
+## Можливості
 
-- **Music search and discovery.** Search across YouTube and SoundCloud, support for Spotify track links, curated picks and artist pages.
-- **Your own library.** Playlists, favorite tracks, and listening history.
-- **Floating Dock.** A transparent panel with playback controls. Drag it up to open the current track and queue; drag it down or press Escape to collapse it.
-- **Dynamic Island.** Compact controls on your desktop and quick access on top of other apps.
-- **Personalization.** Themes, icon variants, audio settings, and reduced animations.
-- **In-app updates.** New-version notifications and one-click installation with automatic restart.
+- **Пошук і відкриття музики.** Пошук у YouTube та SoundCloud, підтримка посилань на треки Spotify, добірки й сторінки авторів.
+- **Власна медіатека.** Плейлісти, улюблені треки та історія прослуховувань.
+- **Плаваючий Dock.** Прозора панель із керуванням відтворенням. Потягни її вгору, щоб відкрити поточний трек і чергу; потягни вниз або натисни Escape, щоб згорнути.
+- **Dynamic Island.** Компактне керування на робочому столі та швидкий виклик поверх інших програм.
+- **Персоналізація.** Теми оформлення, варіанти іконки, параметри звуку та зменшення анімацій.
+- **Оновлення в застосунку.** Сповіщення про нову версію та встановлення одним натисканням із автоматичним перезапуском.
 
-## Download
+## Завантаження
 
-Official builds are available in [GitHub Releases](https://github.com/despito-studio/SoundFlow/releases). Platform — **Windows x64**.
+Офіційні збірки доступні в [GitHub Releases](https://github.com/despito-studio/SoundFlow/releases). Платформа — **Windows x64**.
 
-| File | How to use |
+| Файл | Як використовувати |
 | --- | --- |
-| `SoundFlow-<version>-Setup.exe` | Run the installer and follow the prompts. SoundFlow opens automatically after installation. |
-| `SoundFlow-<version>-windows-x64.zip` | Extract the archive fully and run `SoundFlow.exe` from the root folder. |
+| `SoundFlow-<version>-Setup.exe` | Запусти інсталятор і дотримуйся підказок. Після встановлення SoundFlow відкриється автоматично. |
+| `SoundFlow-<version>-windows-x64.zip` | Розпакуй архів повністю та запусти `SoundFlow.exe` з кореневої папки. |
 
-Both the installed and portable versions support in-app updates. Current version — **1.1.1**.
+Інстальована та portable-версія підтримують оновлення в застосунку. Поточна версія — **1.1.1**.
 
-In versions 1.0.0 and 1.1.0, the update check could hang. To move from them, run the current installer once, or download and extract the new portable ZIP. Your library and settings are preserved.
+У версіях 1.0.0 та 1.1.0 перевірка оновлень могла зависати. Для переходу з них один раз запусти актуальний інсталятор або завантаж і розпакуй новий portable ZIP. Медіатека та налаштування зберігаються.
 
-## Quick controls
+## Швидке керування
 
-| Shortcut | Action |
+| Комбінація | Дія |
 | --- | --- |
-| `Ctrl+K` | Open search |
-| `Ctrl+Alt+M` or `Ctrl+Shift+Space` | Show the compact Island over the current app |
-| `Ctrl+Alt+Shift+M` | Open the Island with keyboard control |
-| `Escape` | Collapse the expanded player or Island |
+| `Ctrl+K` | Відкрити пошук |
+| `Ctrl+Alt+M` або `Ctrl+Shift+Space` | Показати компактний Island поверх поточної програми |
+| `Ctrl+Alt+Shift+M` | Відкрити Island із керуванням клавіатурою |
+| `Escape` | Згорнути розгорнутий плеєр або Island |
 
-## Feedback
+## Зворотний зв’язок
 
-For bugs and suggestions, use [Issues](https://github.com/despito-studio/SoundFlow/issues). Before reaching out, check the [support rules](SUPPORT.md). Report vulnerabilities according to the [security policy](SECURITY.md).
+Для помилок і пропозицій використовуй [Issues](https://github.com/despito-studio/SoundFlow/issues). Перед зверненням переглянь [правила підтримки](SUPPORT.md). Про вразливості повідомляй за [політикою безпеки](SECURITY.md).
 
-The project's spaces follow the [code of conduct](CODE_OF_CONDUCT.md).
+У просторах проєкту діють [правила поведінки](CODE_OF_CONDUCT.md).
 
-## For developers
+## Для розробників
 
-The interface is built with Flutter; the audio core and library are in Rust. Build and publishing instructions are in the [Windows build](docs/WINDOWS.md), the component overview in the [architecture](docs/ARCHITECTURE.md), and the interface principles in the [design system](docs/design/SOUNDFLOW-REDESIGN.md).
+Інтерфейс побудований на Flutter, аудіоядро й медіатека — на Rust. Інструкції зі збірки та публікації містяться в [Windows build](docs/WINDOWS.md), огляд компонентів — в [архітектурі](docs/ARCHITECTURE.md), принципи інтерфейсу — у [дизайн-системі](docs/design/SOUNDFLOW-REDESIGN.md).
 
-Cloud features and SoundFlow Plus require a separately configured service; building the client yourself does not grant paid access.
+Хмарні функції й SoundFlow Plus потребують окремо налаштованого сервісу; самостійна збірка клієнта не надає платного доступу.
 
-## License
+## Ліцензування
 
-The source code is distributed under the [Apache License 2.0](LICENSE).
+Вихідний код поширюється за ліцензією [Apache License 2.0](LICENSE).
 
-Third-party libraries, icons, and fonts have their own licenses and attributions in [resources/licenses](resources/licenses). Music artwork rights are described in [ARTWORK.md](resources/ARTWORK.md).
+Сторонні бібліотеки, іконки та шрифти мають власні ліцензії й атрибуції в [resources/licenses](resources/licenses). Права на музичні обкладинки описані в [ARTWORK.md](resources/ARTWORK.md).

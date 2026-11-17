@@ -198,7 +198,10 @@ void FlutterWindow::HandleMethod(
     if (main_window) main_window->HideIsland();
   } else if (name == "island-state") {
     island_state_ = std::make_unique<Value>(*args);
-    if (island_ && island_->channel_ && IsWindowVisible(island_->GetHandle()))
+    // A DWM-cloaked desktop Island still reports IsWindowVisible. Keep the
+    // newest state above, but avoid decoding/rebuilding a hidden Flutter view.
+    if (island_ && island_->channel_ && IsWindowVisible(island_->GetHandle()) &&
+        (!island_->desktop_mode_ || island_->desktop_visible_))
       island_->channel_->InvokeMethod("state", std::make_unique<Value>(*args));
   } else if (name == "island-command") {
     if (main_window && main_window->channel_) main_window->channel_->InvokeMethod("core-command", std::make_unique<Value>(*args));
@@ -366,6 +369,9 @@ void FlutterWindow::PlaceOnDesktop(bool notify) {
   if (notify || show != desktop_visible_) {
     desktop_visible_ = show;
     island_height_ = 0;
+    // Catch up before revealing the view after updates were suppressed.
+    if (show && channel_ && main_window && main_window->island_state_)
+      channel_->InvokeMethod("state", std::make_unique<Value>(*main_window->island_state_));
     if (channel_) channel_->InvokeMethod(show ? "desktop" : "hidden", std::make_unique<Value>());
     ShapeIsland(0);
   }

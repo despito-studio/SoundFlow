@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'anicry_motion.dart';
 import 'core.dart';
+import 'l10n.dart';
 import 'installer_design.dart';
 
 /// Keeps the startup offer outside the workspace's navigation/shortcut scope.
@@ -37,6 +38,7 @@ class _UpdatePromptHostState extends State<UpdatePromptHost> {
         update['installed'] != true ||
         widget.core.arguments.contains('--offline') ||
         widget.core.settings['auto_update_enabled'] == false ||
+        widget.core.autoUpdateInstall ||
         !['available', 'ready'].contains(update['status']) ||
         version == null ||
         !offered.add(version)) {
@@ -162,10 +164,16 @@ class _UpdatePromptState extends State<UpdatePrompt> {
     final bytes =
         (widget.core.update['total'] as num?)?.toDouble() ?? total.toDouble();
     final message = status == 'downloading' && bytes > 0
-        ? 'Завантаження · ${(received / bytes * 100).clamp(0, 100).round()}%'
+        ? 'Завантаження · {percent}%'
+              .tr(context)
+              .replaceAll(
+                '{percent}',
+                (received / bytes * 100).clamp(0, 100).round().toString(),
+              )
         : status == 'available' || status == 'ready'
-        ? 'Готуємо оновлення…'
-        : widget.core.update['message']?.toString() ?? 'Оновлення…';
+        ? 'Готуємо оновлення…'.tr(context)
+        : widget.core.update['message']?.toString().tr(context) ??
+              'Оновлення…'.tr(context);
     final failed = status == 'error';
     Widget label(
       String text,
@@ -242,11 +250,11 @@ class _UpdatePromptState extends State<UpdatePrompt> {
         : InstallerDesign.updateLayout;
     final actionText = compact
         ? cancelling
-              ? 'Скасовуємо…'
-              : 'Скасувати'
+              ? 'Скасовуємо…'.tr(context)
+              : 'Скасувати'.tr(context)
         : failed
-        ? 'Спробувати ще раз'
-        : 'Оновити';
+        ? 'Спробувати ще раз'.tr(context)
+        : 'Оновити'.tr(context);
     void cancel() {
       setState(() => cancelling = true);
       widget.core.action('update-cancel');
@@ -263,7 +271,7 @@ class _UpdatePromptState extends State<UpdatePrompt> {
             const Rect.fromLTWH(15, 118, 58, 13),
             Center(
               child: label(
-                'Версія',
+                'Версія'.tr(context),
                 7.2,
                 color: InstallerDesign.muted,
                 center: true,
@@ -287,7 +295,7 @@ class _UpdatePromptState extends State<UpdatePrompt> {
             const Rect.fromLTWH(80, 118, 70, 13),
             Center(
               child: label(
-                'Автооновлення',
+                'Автооновлення'.tr(context),
                 7.2,
                 color: InstallerDesign.muted,
                 center: true,
@@ -306,7 +314,14 @@ class _UpdatePromptState extends State<UpdatePrompt> {
             const Rect.fromLTWH(162, 118, 52, 13),
             Center(
               child: label(
-                total > 0 ? '${(total / 1048576).toStringAsFixed(1)} МБ' : '—',
+                total > 0
+                    ? '{size} МБ'
+                          .tr(context)
+                          .replaceAll(
+                            '{size}',
+                            (total / 1048576).toStringAsFixed(1),
+                          )
+                    : '—',
                 7.2,
                 color: InstallerDesign.muted,
                 center: true,
@@ -317,8 +332,8 @@ class _UpdatePromptState extends State<UpdatePrompt> {
           at(
             const Rect.fromLTWH(16, 89, 198, 43),
             label(
-              widget.core.update['message']?.toString() ??
-                  'Не вдалося оновити. Спробуй ще раз.',
+              widget.core.update['message']?.toString().tr(context) ??
+                  'Не вдалося оновити. Спробуй ще раз.'.tr(context),
               8,
               color: InstallerDesign.muted,
             ),
@@ -446,7 +461,7 @@ class _UpdatePromptState extends State<UpdatePrompt> {
                                 frame.metadata *
                                 frame.metadata,
                             child: label(
-                              'Нова версія',
+                              'Нова версія'.tr(context),
                               7.8,
                               color: const Color(0xff9c95d8),
                             ),
@@ -455,7 +470,9 @@ class _UpdatePromptState extends State<UpdatePrompt> {
                         at(
                           frame.detail,
                           changingLabel(
-                            compact ? message : 'Музичний плеєр\nдля Windows',
+                            compact
+                                ? message
+                                : 'Музичний плеєр\nдля Windows'.tr(context),
                             8.6,
                             identity: compact
                                 ? 'detail:$status'

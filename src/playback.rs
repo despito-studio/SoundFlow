@@ -15,7 +15,103 @@ use std::{
 };
 
 const MAX_AUDIO_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_PCM_SAMPLES: usize = 128 * 1024 * 1024 / size_of::<f32>();
+// Keep only short clips fully decoded. Ordinary songs use the existing
+// file-backed decoder instead of retaining up to 128 MiB of PCM per load.
+const MAX_PCM_SAMPLES: usize = 16 * 1024 * 1024 / size_of::<f32>();
+/// One initial attempt plus three retries for transient network failures.
+pub const MAX_LOAD_ATTEMPTS: u32 = 4;
+const FIRST_RETRY_DELAY: Duration = Duration::from_millis(400);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureKind {
+    /// A newer load replaced this one; nothing is reported to the user.
+    Cancelled,
+    /// Transport failure or a broken body read. Retried with backoff.
+    Network,
+    /// The source exists but cannot be used: 4xx/5xx, empty body, wrong scheme.
+    Source,
+    /// Bytes arrived but do not decode as audio.
+    Decode,
+    /// Local file or cache write failure.
+    Storage,
+}
+
+#[derive(Clone, Debug)]
+pub struct AudioFailure {
+    pub kind: FailureKind,
+    message: String,
+}
+
+impl AudioFailure {
+    fn new(kind: FailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+    fn cancelled() -> Self {
+        Self::new(FailureKind::Cancelled, "Скасовано")
+    }
+    fn network(message: impl Into<String>) -> Self {
+        Self::new(FailureKind::Network, message)
+    }
+    fn source(message: impl Into<String>) -> Self {
+        Self::new(FailureKind::Source, message)
+    }
+    fn decode(message: impl Into<String>) -> Self {
+        Self::new(FailureKind::Decode, message)
+    }
+    fn storage(message: impl Into<String>) -> Self {
+        Self::new(FailureKind::Storage, message)
+    }
+    pub fn retryable(&self) -> bool {
+        matches!(self.kind, FailureKind::Network)
+    }
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.kind, FailureKind::Cancelled)
+    }
+    fn into_message(self) -> String {
+        self.message
+    }
+}
+
+/// Backoff between load attempts: 400 ms, 800 ms, 1.6 s, capped at 5 s.
+pub fn retry_delay(attempt: u32) -> Duration {
+    let factor = 1u32 << attempt.min(16);
+    FIRST_RETRY_DELAY
+        .saturating_mul(factor)
+        .min(MAX_RETRY_DELAY)
+}
+
+/// Sleeps before the next attempt, abandoning the wait when a newer load starts.
+fn wait_for_retry(attempt: u32, generation: &AtomicU64, expected: u64) -> bool {
+    let deadline = Instant::now() + retry_delay(attempt);
+    loop {
+        if generation.load(Ordering::Acquire) != expected {
+            return false;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return true;
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(50)));
+    }
+}
+
+/// Stable cache name for a remote source. Local files bypass the cache.
+fn audio_cache_path(cache_dir: &Path, source: &str) -> PathBuf {
+    cache_dir.join(format!("{:x}.audio", Sha256::digest(source.as_bytes())))
+}
+
+/// A truncated or corrupt download is re-fetched once its cache file is dropped.
+/// Returns true when the file was removed, which makes another attempt useful.
+fn discard_undecodable(failure: &AudioFailure, source: &str, cache_dir: &Path) -> bool {
+    if failure.kind != FailureKind::Decode || !source.starts_with("https://") {
+        return false;
+    }
+    fs::remove_file(audio_cache_path(cache_dir, source)).is_ok()
+}
 
 struct PreparedAudio {
     source: Box<dyn Source<Item = f32> + Send>,
@@ -27,10 +123,12 @@ fn decode_ahead(
     mut file: File,
     generation: &AtomicU64,
     expected: u64,
-) -> Result<PreparedAudio, String> {
-    let backup = file.try_clone().map_err(|e| e.to_string())?;
-    let mut decoder =
-        Decoder::try_from(backup).map_err(|e| format!("Не вдалося відкрити аудіо: {e}"))?;
+) -> Result<PreparedAudio, AudioFailure> {
+    let backup = file
+        .try_clone()
+        .map_err(|e| AudioFailure::storage(format!("Не вдалося відкрити аудіо: {e}")))?;
+    let mut decoder = Decoder::try_from(backup)
+        .map_err(|e| AudioFailure::decode(format!("Не вдалося відкрити аудіо: {e}")))?;
     let channels = decoder.channels();
     let rate = decoder.sample_rate();
     let duration = decoder.total_duration();
@@ -50,13 +148,15 @@ fn decode_ahead(
     let mut energy = 0.0f64;
     while let Some(sample) = decoder.next() {
         if samples.len() % 16384 == 0 && generation.load(Ordering::Acquire) != expected {
-            return Err("Скасовано".into());
+            return Err(AudioFailure::cancelled());
         }
         if samples.len() == MAX_PCM_SAMPLES {
             drop(decoder);
             drop(samples);
-            file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-            let decoder = Decoder::try_from(file).map_err(|e| e.to_string())?;
+            file.seek(SeekFrom::Start(0))
+                .map_err(|e| AudioFailure::storage(e.to_string()))?;
+            let decoder =
+                Decoder::try_from(file).map_err(|e| AudioFailure::decode(e.to_string()))?;
             return Ok(PreparedAudio {
                 source: Box::new(decoder),
                 duration,
@@ -71,7 +171,7 @@ fn decode_ahead(
         samples.push(sample);
     }
     if samples.is_empty() {
-        return Err("Аудіоджерело не містить звуку".into());
+        return Err(AudioFailure::source("Аудіоджерело не містить звуку"));
     }
     let duration = Duration::from_secs_f64(samples.len() as f64 / channels as f64 / rate as f64);
     let rms = (energy / samples.len() as f64).sqrt().max(1e-5);
@@ -91,6 +191,8 @@ pub struct PlayerState {
     pub position: f64,
     pub duration: f64,
     pub volume: f32,
+    /// Short user-facing note while the loader retries a transient failure.
+    pub status: String,
 }
 impl Default for PlayerState {
     fn default() -> Self {
@@ -101,6 +203,7 @@ impl Default for PlayerState {
             position: 0.0,
             duration: 0.0,
             volume: 0.8,
+            status: String::new(),
         }
     }
 }
@@ -140,7 +243,13 @@ enum Command {
     },
     Ready {
         generation: u64,
-        audio: Result<PreparedAudio, String>,
+        audio: Result<PreparedAudio, AudioFailure>,
+    },
+    /// Emitted by the cache worker before it starts another attempt.
+    Retrying {
+        generation: u64,
+        attempt: u32,
+        total: u32,
     },
     Play,
     Pause,
@@ -191,13 +300,45 @@ impl AudioPlayer {
                     if loader_generation.load(Ordering::Acquire) != request.generation {
                         continue;
                     }
-                    let audio = prepare_audio(
-                        &request.source,
-                        &cache_dir,
-                        &loader_generation,
-                        request.generation,
-                    )
-                    .and_then(|file| decode_ahead(file, &loader_generation, request.generation));
+                    let mut attempt = 1;
+                    let audio = loop {
+                        let prepared = prepare_audio(
+                            &request.source,
+                            &cache_dir,
+                            &loader_generation,
+                            request.generation,
+                        )
+                        .and_then(|file| {
+                            decode_ahead(file, &loader_generation, request.generation)
+                        });
+                        match prepared {
+                            Ok(audio) => break Ok(audio),
+                            Err(failure) => {
+                                // A corrupt or truncated cache entry is dropped even on
+                                // the final attempt, so the next play re-downloads it.
+                                let cleared =
+                                    discard_undecodable(&failure, &request.source, &cache_dir);
+                                let retry = attempt < MAX_LOAD_ATTEMPTS
+                                    && (failure.retryable() || cleared);
+                                if !retry {
+                                    break Err(failure);
+                                }
+                                let _ = loader_commands.send(Command::Retrying {
+                                    generation: request.generation,
+                                    attempt: attempt + 1,
+                                    total: MAX_LOAD_ATTEMPTS,
+                                });
+                                if !wait_for_retry(
+                                    attempt.saturating_sub(1),
+                                    &loader_generation,
+                                    request.generation,
+                                ) {
+                                    break Err(AudioFailure::cancelled());
+                                }
+                                attempt += 1;
+                            }
+                        }
+                    };
                     let _ = loader_commands.send(Command::Ready {
                         generation: request.generation,
                         audio,
@@ -356,73 +497,97 @@ fn prepare_audio(
     cache_dir: &Path,
     generation: &AtomicU64,
     expected: u64,
-) -> Result<File, String> {
+) -> Result<File, AudioFailure> {
     if generation.load(Ordering::Acquire) != expected {
-        return Err("Скасовано".into());
+        return Err(AudioFailure::cancelled());
     }
     if !source.starts_with("https://") {
         if source.contains("://") {
-            return Err("Непідтримуване аудіоджерело".into());
+            return Err(AudioFailure::source("Непідтримуване аудіоджерело"));
         }
-        return File::open(source).map_err(|_| "Не вдалося відкрити локальне аудіо".into());
+        return File::open(source)
+            .map_err(|_| AudioFailure::source("Не вдалося відкрити локальне аудіо"));
     }
-    fs::create_dir_all(cache_dir).map_err(|_| "Не вдалося створити аудіокеш".to_string())?;
-    let name = format!("{:x}.audio", Sha256::digest(source.as_bytes()));
-    let complete = cache_dir.join(&name);
+    fs::create_dir_all(cache_dir)
+        .map_err(|_| AudioFailure::storage("Не вдалося створити аудіокеш"))?;
+    // Single source of truth for the cache name: the retry path drops the same
+    // file when it cannot be decoded.
+    let complete = audio_cache_path(cache_dir, source);
     if complete.is_file() {
-        return File::open(complete).map_err(|_| "Аудіокеш недоступний".into());
+        return File::open(&complete).map_err(|_| AudioFailure::storage("Аудіокеш недоступний"));
     }
-    let partial = cache_dir.join(format!("{name}.{expected}.partial"));
+    let partial = cache_dir.join(format!(
+        "{}.{}.partial",
+        complete
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("audio"),
+        expected
+    ));
     let result = (|| {
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::limited(5))
             .build()
-            .map_err(|_| "Не вдалося підготувати аудіозапит".to_string())?;
+            .map_err(|_| AudioFailure::network("Не вдалося підготувати аудіозапит"))?;
         let mut response = client
             .get(source)
             .header("User-Agent", "Mozilla/5.0 SoundFlow/3.2")
             .send()
-            .and_then(|r| r.error_for_status())
-            .map_err(|_| "Аудіоджерело недоступне. Спробуй іншу версію треку.".to_string())?;
+            .map_err(|error| {
+                if error.is_timeout() || error.is_connect() || error.is_request() {
+                    AudioFailure::network(
+                        "Аудіоджерело не відповідає. Спробуй іншу версію треку.",
+                    )
+                } else {
+                    AudioFailure::source(
+                        "Аудіоджерело недоступне. Спробуй іншу версію треку.",
+                    )
+                }
+            })?
+            .error_for_status()
+            .map_err(|_| {
+                AudioFailure::source("Аудіоджерело недоступне. Спробуй іншу версію треку.")
+            })?;
         if response.url().scheme() != "https"
             || response
                 .content_length()
                 .is_some_and(|size| size > MAX_AUDIO_BYTES)
         {
-            return Err("Аудіоджерело недоступне або завелике".into());
+            return Err(AudioFailure::source("Аудіоджерело недоступне або завелике"));
         }
-        let mut file =
-            File::create(&partial).map_err(|_| "Не вдалося зберегти аудіокеш".to_string())?;
+        let mut file = File::create(&partial)
+            .map_err(|_| AudioFailure::storage("Не вдалося зберегти аудіокеш"))?;
         let mut buffer = [0u8; 64 * 1024];
         let mut bytes = 0u64;
         loop {
             if generation.load(Ordering::Acquire) != expected {
-                return Err("Скасовано".into());
+                return Err(AudioFailure::cancelled());
             }
-            let count = response
-                .read(&mut buffer)
-                .map_err(|_| "З’єднання з аудіоджерелом перервано".to_string())?;
+            let count = response.read(&mut buffer).map_err(|_| {
+                AudioFailure::network("З’єднання з аудіоджерелом перервано")
+            })?;
             if count == 0 {
                 break;
             }
             bytes += count as u64;
             if bytes > MAX_AUDIO_BYTES {
-                return Err("Аудіофайл перевищує розмір кешу".into());
+                return Err(AudioFailure::source("Аудіофайл перевищує розмір кешу"));
             }
             file.write_all(&buffer[..count])
-                .map_err(|_| "Не вдалося записати аудіокеш".to_string())?;
+                .map_err(|_| AudioFailure::storage("Не вдалося записати аудіокеш"))?;
         }
         if bytes == 0 {
-            return Err("Аудіоджерело порожнє".into());
+            return Err(AudioFailure::source("Аудіоджерело порожнє"));
         }
         file.sync_all()
-            .map_err(|_| "Не вдалося завершити аудіокеш".to_string())?;
+            .map_err(|_| AudioFailure::storage("Не вдалося завершити аудіокеш"))?;
         drop(file);
-        fs::rename(&partial, &complete).map_err(|_| "Не вдалося завершити аудіокеш".to_string())?;
+        fs::rename(&partial, &complete)
+            .map_err(|_| AudioFailure::storage("Не вдалося завершити аудіокеш"))?;
         prune_audio_cache(cache_dir, &complete);
-        File::open(&complete).map_err(|_| "Не вдалося відкрити аудіокеш".into())
+        File::open(&complete).map_err(|_| AudioFailure::storage("Не вдалося відкрити аудіокеш"))
     })();
     if result.is_err() {
         let _ = fs::remove_file(&partial);
@@ -595,6 +760,7 @@ fn audio_loop(
                 };
                 state.playing = false;
                 state.loading = true;
+                state.status.clear();
                 wanted_playing = true;
                 session = Some(Session {
                     report: ListeningReport {
@@ -613,6 +779,15 @@ fn audio_loop(
                     source,
                 });
             }
+            Ok(Command::Retrying {
+                generation: id,
+                attempt,
+                total,
+            }) if id == current_generation && generation.load(Ordering::Acquire) == id => {
+                state.loading = true;
+                state.status = format!("Відновлюємо з’єднання. Спроба {attempt} з {total}");
+            }
+            Ok(Command::Retrying { .. }) => {}
             Ok(Command::Ready {
                 generation: id,
                 audio,
@@ -635,6 +810,7 @@ fn audio_loop(
                                 }
                                 Err(_) => {
                                     state.loading = false;
+                                    state.status.clear();
                                     wanted_playing = false;
                                     let _ = events.send(AudioEvent::Error(
                                         "Немає доступного пристрою відтворення аудіо".into(),
@@ -676,14 +852,19 @@ fn audio_loop(
                             }
                             state.playing = wanted_playing;
                             state.loading = false;
+                            state.status.clear();
                             sink = Some(output);
                         }
                     }
-                    Err(error) => {
+                    Err(failure) => {
                         state.loading = false;
                         state.playing = false;
+                        state.status.clear();
                         wanted_playing = false;
-                        let _ = events.send(AudioEvent::Error(error));
+                        // A superseded load is not an error the listener asked about.
+                        if !failure.is_cancelled() {
+                            let _ = events.send(AudioEvent::Error(failure.into_message()));
+                        }
                     }
                 }
             }
@@ -791,6 +972,7 @@ fn audio_loop(
                 state.track = None;
                 state.playing = false;
                 state.loading = false;
+                state.status.clear();
                 state.position = 0.0;
                 state.duration = 0.0;
                 wanted_playing = false;
@@ -821,5 +1003,80 @@ fn audible_delta(playing: bool, volume: f32, delta: f64, elapsed: f64) -> f64 {
         delta.min(elapsed * 1.2 + 0.02)
     } else {
         0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A real PCM WAV exercises both preparation paths without an audio device.
+    fn wav(seconds: u32) -> File {
+        let mut file = tempfile::tempfile().unwrap();
+        let bytes = seconds * 44100 * 2 * 2;
+        file.write_all(b"RIFF").unwrap();
+        file.write_all(&(36 + bytes).to_le_bytes()).unwrap();
+        file.write_all(b"WAVEfmt ").unwrap();
+        file.write_all(&16u32.to_le_bytes()).unwrap();
+        file.write_all(&1u16.to_le_bytes()).unwrap();
+        file.write_all(&2u16.to_le_bytes()).unwrap();
+        file.write_all(&44100u32.to_le_bytes()).unwrap();
+        file.write_all(&176400u32.to_le_bytes()).unwrap();
+        file.write_all(&4u16.to_le_bytes()).unwrap();
+        file.write_all(&16u16.to_le_bytes()).unwrap();
+        file.write_all(b"data").unwrap();
+        file.write_all(&bytes.to_le_bytes()).unwrap();
+        file.set_len(44 + bytes as u64).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        file
+    }
+
+    #[test]
+    fn ordinary_songs_remain_file_backed_and_seekable() {
+        let mut audio = decode_ahead(wav(180), &AtomicU64::new(1), 1).unwrap();
+        assert!(audio.gain.is_none(), "long songs must not retain a full PCM buffer");
+        assert_eq!(audio.source.channels(), 2);
+        assert_eq!(audio.source.sample_rate(), 44100);
+        audio.source.try_seek(Duration::from_secs(42)).unwrap();
+        assert!(audio.source.next().is_some());
+    }
+
+    #[test]
+    fn short_clips_keep_precomputed_normalization() {
+        let audio = decode_ahead(wav(1), &AtomicU64::new(1), 1).unwrap();
+        assert!(audio.gain.is_some());
+        assert_eq!(audio.duration, Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn retry_delay_grows_then_caps() {
+        assert_eq!(retry_delay(0), Duration::from_millis(400));
+        assert_eq!(retry_delay(1), Duration::from_millis(800));
+        assert_eq!(retry_delay(2), Duration::from_millis(1600));
+        assert_eq!(retry_delay(3), Duration::from_millis(3200));
+        assert_eq!(retry_delay(4), MAX_RETRY_DELAY);
+        assert_eq!(retry_delay(u32::MAX), MAX_RETRY_DELAY);
+    }
+
+    #[test]
+    fn only_transport_failures_are_retried() {
+        assert!(AudioFailure::network("timeout").retryable());
+        assert!(!AudioFailure::source("404").retryable());
+        assert!(!AudioFailure::decode("bad container").retryable());
+        assert!(!AudioFailure::storage("no space").retryable());
+        assert!(!AudioFailure::cancelled().retryable());
+        assert!(AudioFailure::cancelled().is_cancelled());
+    }
+
+    #[test]
+    fn retry_wait_aborts_on_new_generation() {
+        let generation = AtomicU64::new(1);
+        assert!(!wait_for_retry(3, &generation, 0));
+        assert!(wait_for_retry(0, &generation, 1));
+    }
+
+    #[test]
+    fn attempt_budget_covers_three_retries() {
+        assert_eq!(MAX_LOAD_ATTEMPTS, 4);
     }
 }

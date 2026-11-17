@@ -13,7 +13,10 @@ export async function bundleProvider() {
   await build({entryPoints:[path.join(root,'worker.mjs')],outfile:path.join(output,'worker.cjs'),bundle:true,format:'cjs',platform:'node',target:'node24',minify:true,keepNames:true,legalComments:'eof',define:{__SOUNDFLOW_BUNDLED__:'true'},logOverride:{'empty-import-meta':'silent'},logLevel:'warning'});
   const packages=['youtubei.js','fflate','meriyah','@bufbuild/protobuf'];const sections=[];
   for(const name of packages) {
-    const dir=path.join(root,'node_modules',name);const metadata=JSON.parse(await fs.readFile(path.join(dir,'package.json'),'utf8'));
+    const youtubeRoot=await fs.realpath(path.join(root,'node_modules','youtubei.js'));
+    const direct=path.join(root,'node_modules',name);
+    const dir=await fs.access(path.join(direct,'package.json')).then(()=>direct).catch(()=>path.join(path.dirname(youtubeRoot),name));
+    const metadata=JSON.parse(await fs.readFile(path.join(dir,'package.json'),'utf8'));
     const files=await fs.readdir(dir);const license=files.find(f=>/^licen[sc]e(?:\.|$)/i.test(f));
     let contents;
     if(license)contents=await fs.readFile(path.join(dir,license),'utf8');

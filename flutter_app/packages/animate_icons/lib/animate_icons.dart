@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -6,16 +7,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_parsing/path_parsing.dart';
 
+part 'src/encoded_catalog.dart';
+
 abstract final class AnimateIcons {
-  static Map<String, dynamic> catalog = {};
+  static Map<String, dynamic> _catalog = {};
+  static Map<String, dynamic> get catalog => _catalog;
+  static set catalog(Map<String, dynamic> value) {
+    _catalog = value;
+    _icons.clear();
+  }
+
   static final _icons = <String, _Node>{};
   static Future<void> load() async {
-    catalog = Map<String, dynamic>.from(
-      jsonDecode(
-        await rootBundle.loadString(
-          'packages/animate_icons/assets/catalog.json',
-        ),
-      ) as Map,
+    catalog = _EncodedCatalog(
+      await rootBundle.loadString(
+        'packages/animate_icons/assets/catalog.json',
+        cache: false,
+      ),
     );
   }
 

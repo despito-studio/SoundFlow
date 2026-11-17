@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'anicry_motion.dart';
 import 'concentric.dart';
 import 'core.dart';
+import 'l10n.dart';
 import 'design.dart';
 import 'media_slider.dart';
 
@@ -301,27 +302,33 @@ class _DockControls extends StatelessWidget {
           value: 'like',
           child: Text(
             core.isLiked(core.current)
-                ? 'Прибрати з улюбленого'
-                : 'Додати в улюблене',
+                ? 'Прибрати з улюбленого'.tr(context)
+                : 'Додати в улюблене'.tr(context),
           ),
         ),
         CheckedPopupMenuItem(
           value: 'shuffle',
           checked: core.settings['shuffle'] == true,
-          child: const Text('Перемішувати'),
+          child: Text('Перемішувати'.tr(context)),
         ),
         PopupMenuItem(
           value: 'repeat',
           child: Text(
-            'Повтор: ${switch (core.settings['repeat']) {
-              'all' => 'уся черга',
-              'one' => 'один трек',
-              _ => 'вимкнено',
-            }}',
+            'Повтор: {mode}'.tr(context).replaceAll(
+              '{mode}',
+              switch (core.settings['repeat']) {
+                'all' => 'уся черга'.tr(context),
+                'one' => 'один трек'.tr(context),
+                _ => 'вимкнено'.tr(context),
+              },
+            ),
           ),
         ),
-        const PopupMenuItem(value: 'creator', child: Text('Перейти до автора')),
-        const PopupMenuItem(value: 'island', child: Text('Dynamic Island')),
+        PopupMenuItem(
+          value: 'creator',
+          child: Text('Перейти до автора'.tr(context)),
+        ),
+        PopupMenuItem(value: 'island', child: Text('Dynamic Island')),
       ],
     );
     if (result == 'island') {
@@ -367,7 +374,7 @@ class _DockControls extends StatelessWidget {
                           'previous',
                           _DockButton(
                             'skip-back',
-                            'Попередній трек',
+                            'Попередній трек'.tr(context),
                             onTap: () => core.player('previous'),
                           ),
                         ),
@@ -375,7 +382,9 @@ class _DockControls extends StatelessWidget {
                           'toggle',
                           _DockButton(
                             pb['playing'] == true ? 'pause' : 'play',
-                            pb['playing'] == true ? 'Пауза' : 'Відтворити',
+                            pb['playing'] == true
+                                ? 'Пауза'.tr(context)
+                                : 'Відтворити'.tr(context),
                             wide: true,
                             onTap: () => core.player('toggle'),
                           ),
@@ -384,7 +393,7 @@ class _DockControls extends StatelessWidget {
                           'next',
                           _DockButton(
                             'skip-forward',
-                            'Наступний трек',
+                            'Наступний трек'.tr(context),
                             onTap: () => core.player('next'),
                           ),
                         ),
@@ -393,7 +402,9 @@ class _DockControls extends StatelessWidget {
                           'queue',
                           _DockButton(
                             'list',
-                            'Черга · далі $queued',
+                            'Черга · далі {count}'
+                                .tr(context)
+                                .replaceAll('{count}', queued.toString()),
                             onTap: onExpand,
                           ),
                         ),
@@ -723,8 +734,12 @@ class _DockVolumeState extends State<_DockVolume>
                                     ),
                                     child: Text(
                                       '${(volume * 100).round()}',
-                                      semanticsLabel:
-                                          'Гучність ${(volume * 100).round()}%',
+                                      semanticsLabel: 'Гучність {value}%'
+                                          .tr(context)
+                                          .replaceAll(
+                                            '{value}',
+                                            (volume * 100).round().toString(),
+                                          ),
                                       style: const TextStyle(fontSize: 11),
                                     ),
                                   ),
@@ -742,7 +757,14 @@ class _DockVolumeState extends State<_DockVolume>
                                           continuous: true,
                                           onChanged: widget.core.setVolume,
                                           semanticFormatterCallback: (v) =>
-                                              'Гучність ${(v * 100).round()}%',
+                                              'Гучність {value}%'
+                                                  .tr(context)
+                                                  .replaceAll(
+                                                    '{value}',
+                                                    (v * 100)
+                                                        .round()
+                                                        .toString(),
+                                                  ),
                                         ),
                                       ),
                                     ),
@@ -797,7 +819,7 @@ class _DockVolumeState extends State<_DockVolume>
                   visible: false,
                   child: _DockButton(
                     volume == 0 ? 'volume-x' : 'volume-2',
-                    '${volume == 0 ? 'Увімкнути звук' : 'Вимкнути звук'} · ${(volume * 100).round()}%',
+                    '${volume == 0 ? 'Увімкнути звук'.tr(context) : 'Вимкнути звук'.tr(context)} · ${(volume * 100).round()}%',
                     focusNode: buttonFocus,
                     onTap: () => widget.core.player('mute'),
                   ),
@@ -821,7 +843,7 @@ class _DockTrack extends StatelessWidget {
     await showPlayerPopover(
       anchor,
       width: 320,
-      label: 'Закрити прев’ю пісні',
+      label: 'Закрити прев’ю пісні'.tr(anchor),
       child: ValueListenableBuilder<Json>(
         valueListenable: core.playback,
         builder: (context, playback, _) {
@@ -842,7 +864,7 @@ class _DockTrack extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            trackTitle(track),
+                            trackTitle(track, context),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -852,9 +874,11 @@ class _DockTrack extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            playback['loading'] == true
-                                ? 'Завантажуємо…'
-                                : trackArtist(track),
+                            core.playerStatus.isNotEmpty
+                                ? core.playerStatus.tr(context)
+                                : playback['loading'] == true
+                                ? 'Завантажуємо…'.tr(context)
+                                : trackArtist(track, context),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -868,7 +892,7 @@ class _DockTrack extends StatelessWidget {
                     const SizedBox(width: 8),
                     Control(
                       'expand',
-                      'Відкрити пісню та чергу',
+                      'Відкрити пісню та чергу'.tr(context),
                       size: 44,
                       onTap: () {
                         expandAfterClose = true;
@@ -901,10 +925,12 @@ class _DockTrack extends StatelessWidget {
     final track = core.current;
     final radius = _DockLayout.radiusFor('track');
     return Tooltip(
-      message: 'Потягни вгору, щоб відкрити пісню та чергу',
+      message: 'Потягни вгору, щоб відкрити пісню та чергу'.tr(context),
       child: Semantics(
         button: true,
-        label: 'Зараз звучить: ${trackTitle(track)}. Прев’ю пісні',
+        label: 'Зараз звучить: {title}. Прев’ю пісні'
+            .tr(context)
+            .replaceAll('{title}', trackTitle(track, context)),
         child: AnicryTap(
           onTap: () => preview(context),
           radius: radius,
@@ -925,7 +951,7 @@ class _DockTrack extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        trackTitle(track),
+                        trackTitle(track, context),
                         key: const ValueKey('dock-track-title'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -938,9 +964,11 @@ class _DockTrack extends StatelessWidget {
                       if (MediaQuery.textScalerOf(context).scale(13) <= 17)
                         const SizedBox(height: 3),
                       Text(
-                        core.playback.value['loading'] == true
-                            ? 'Завантажуємо…'
-                            : trackArtist(track),
+                        core.playerStatus.isNotEmpty
+                            ? core.playerStatus.tr(context)
+                            : core.playback.value['loading'] == true
+                            ? 'Завантажуємо…'.tr(context)
+                            : trackArtist(track, context),
                         key: const ValueKey('dock-track-artist'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -998,7 +1026,7 @@ class _PlayerDetails extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        'Зараз звучить',
+                        'Зараз звучить'.tr(context),
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -1008,7 +1036,7 @@ class _PlayerDetails extends StatelessWidget {
                       const Spacer(),
                       Control(
                         'chevron-down',
-                        'Згорнути плеєр · Escape',
+                        'Згорнути плеєр · Escape'.tr(context),
                         size: 34,
                         onTap: onCollapse,
                       ),
@@ -1127,8 +1155,8 @@ class _PlayerDetails extends StatelessWidget {
             Text(
               core.settings['shuffle'] == true ||
                       core.settings['repeat'] == 'one'
-                  ? 'У черзі'
-                  : 'Далі в черзі',
+                  ? 'У черзі'.tr(context)
+                  : 'Далі в черзі'.tr(context),
               style: const TextStyle(
                 fontFamily: SoundFlowType.heading,
                 fontSize: 18,
@@ -1138,10 +1166,12 @@ class _PlayerDetails extends StatelessWidget {
             const SizedBox(height: 5),
             Text(
               core.settings['repeat'] == 'one'
-                  ? 'Повторюється поточна пісня'
+                  ? 'Повторюється поточна пісня'.tr(context)
                   : core.settings['shuffle'] == true
-                  ? 'Випадковий порядок · ${trackCount(count)}'
-                  : trackCount(count),
+                  ? 'Випадковий порядок · {count}'
+                        .tr(context)
+                        .replaceAll('{count}', trackCount(count, context))
+                  : trackCount(count, context),
               style: TextStyle(fontSize: 12, color: context.paints.muted),
             ),
           ],
@@ -1149,7 +1179,7 @@ class _PlayerDetails extends StatelessWidget {
       ),
       Control(
         'trash-2',
-        'Очистити наступні треки',
+        'Очистити наступні треки'.tr(context),
         size: 32,
         glyphSize: 17,
         onTap: count == 0 ? null : () => core.action('queue_clear'),
@@ -1160,10 +1190,10 @@ class _PlayerDetails extends StatelessWidget {
   Widget _emptyQueue(BuildContext context) => Padding(
     padding: const EdgeInsets.all(24),
     child: EmptyState(
-      'Черга відкрита для нового',
-      'Додай наступний трек із пошуку або своєї медіатеки.',
+      'Черга відкрита для нового'.tr(context),
+      'Додай наступний трек із пошуку або своєї медіатеки.'.tr(context),
       action: ActionButton(
-        'Знайти музику',
+        'Знайти музику'.tr(context),
         icon: 'search',
         onTap: () {
           onCollapse();
@@ -1178,6 +1208,7 @@ class _PlayerDetails extends StatelessWidget {
     final repeat = core.settings['repeat']?.toString() ?? 'off';
     final duration = (playback['duration'] as num?)?.toDouble() ?? 0;
     final volume = (playback['volume'] as num?)?.toDouble() ?? .8;
+    final status = playback['status']?.toString() ?? '';
     return Column(
       children: [
         ConstrainedBox(
@@ -1189,7 +1220,7 @@ class _PlayerDetails extends StatelessWidget {
         ),
         const SizedBox(height: 22),
         Text(
-          trackTitle(track),
+          trackTitle(track, context),
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
@@ -1210,7 +1241,7 @@ class _PlayerDetails extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(4),
             child: Text(
-              trackArtist(track),
+              trackArtist(track, context),
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 15, color: p.muted),
             ),
@@ -1232,7 +1263,7 @@ class _PlayerDetails extends StatelessWidget {
           children: [
             Control(
               'shuffle',
-              'Перемішувати',
+              'Перемішувати'.tr(context),
               active: core.settings['shuffle'] == true,
               size: 34,
               glyphSize: 18,
@@ -1241,7 +1272,7 @@ class _PlayerDetails extends StatelessWidget {
             const SizedBox(width: 10),
             Control(
               'skip-back',
-              'Попередній трек',
+              'Попередній трек'.tr(context),
               size: 38,
               glyphSize: 23,
               onTap: () => core.player('previous'),
@@ -1250,7 +1281,9 @@ class _PlayerDetails extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Control(
                 playback['playing'] == true ? 'pause' : 'play',
-                playback['playing'] == true ? 'Пауза' : 'Відтворити',
+                playback['playing'] == true
+                    ? 'Пауза'.tr(context)
+                    : 'Відтворити'.tr(context),
                 primary: true,
                 size: 58,
                 glyphSize: 27,
@@ -1259,7 +1292,7 @@ class _PlayerDetails extends StatelessWidget {
             ),
             Control(
               'skip-forward',
-              'Наступний трек',
+              'Наступний трек'.tr(context),
               size: 38,
               glyphSize: 23,
               onTap: () => core.player('next'),
@@ -1267,11 +1300,14 @@ class _PlayerDetails extends StatelessWidget {
             const SizedBox(width: 10),
             Control(
               repeat == 'one' ? 'repeat-1' : 'repeat',
-              'Повтор: ${switch (repeat) {
-                'one' => 'один трек',
-                'all' => 'уся черга',
-                _ => 'вимкнено',
-              }}',
+              'Повтор: {mode}'.tr(context).replaceAll(
+                '{mode}',
+                switch (repeat) {
+                  'one' => 'один трек'.tr(context),
+                  'all' => 'уся черга'.tr(context),
+                  _ => 'вимкнено'.tr(context),
+                },
+              ),
               active: repeat != 'off',
               size: 34,
               glyphSize: 18,
@@ -1286,8 +1322,8 @@ class _PlayerDetails extends StatelessWidget {
             Control(
               'heart',
               core.isLiked(track)
-                  ? 'Прибрати з улюбленого'
-                  : 'Додати в улюблене',
+                  ? 'Прибрати з улюбленого'.tr(context)
+                  : 'Додати в улюблене'.tr(context),
               active: core.isLiked(track),
               size: 34,
               glyphSize: 18,
@@ -1296,7 +1332,9 @@ class _PlayerDetails extends StatelessWidget {
             const SizedBox(width: 12),
             Control(
               volume == 0 ? 'volume-x' : 'volume-2',
-              volume == 0 ? 'Увімкнути звук' : 'Вимкнути звук',
+              volume == 0
+                  ? 'Увімкнути звук'.tr(context)
+                  : 'Вимкнути звук'.tr(context),
               size: 32,
               glyphSize: 18,
               onTap: () => core.player('mute'),
@@ -1307,14 +1345,15 @@ class _PlayerDetails extends StatelessWidget {
                 value: volume,
                 continuous: true,
                 onChanged: core.setVolume,
-                semanticFormatterCallback: (v) =>
-                    'Гучність ${(v * 100).round()}%',
+                semanticFormatterCallback: (v) => 'Гучність {value}%'
+                    .tr(context)
+                    .replaceAll('{value}', (v * 100).round().toString()),
               ),
             ),
             const SizedBox(width: 12),
             Control(
               'picture-in-picture',
-              'Відкрити Dynamic Island',
+              'Відкрити Dynamic Island'.tr(context),
               size: 34,
               glyphSize: 18,
               onTap: core.island,
@@ -1323,9 +1362,11 @@ class _PlayerDetails extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(
-          playback['loading'] == true
-              ? 'Завантажуємо аудіо…'
-              : '${sourceName(track)}${track['duration_formatted'] == null ? '' : ' · ${track['duration_formatted']}'}',
+          status.isNotEmpty
+              ? status.tr(context)
+              : playback['loading'] == true
+              ? 'Завантажуємо аудіо…'.tr(context)
+              : '${sourceName(track, context)}${track['duration_formatted'] == null ? '' : ' · ${track['duration_formatted']}'}',
           style: TextStyle(fontSize: 12, color: p.muted),
         ),
       ],

@@ -12,6 +12,15 @@ AnimateIcon('huge/headphones', animation: controller);
 ```
 
 `AnimateIcons.names` exposes the entire catalog. Unprefixed names select Lucide.
+The full catalog asset remains bundled. Loading indexes encoded JSON entries
+without decoding their nested graphs, and bypasses the asset string cache.
+Entries are decoded on access; only icons used by the renderer retain parsed
+nodes and paths. `AnimateIcons.catalog` remains a map with the original keys and
+values, but each lookup returns a fresh decoded value: nested mutations of a
+returned value do not change the catalog. Assign a complete entry to replace it.
+Replacing the catalog or calling `load()` clears the renderer's parsed cache.
+This reduces retained object graphs; process memory savings depend on the engine
+and the number of icons used and must be measured in the application.
 `AnimateIcons.duration(name)` supplies the finite animation duration. With no
 external animation, hover starts one sequence. Applications can drive an
 external controller for focus and press. System reduced motion displays the

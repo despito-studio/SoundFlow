@@ -1,3 +1,5 @@
+import 'l10n.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -80,7 +82,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     final artists = <String, Json>{};
     for (final t in [...c.homeTracks, ...youtube, ...soundcloud]) {
       if (source == 'all' || t['source'] == source) {
-        artists.putIfAbsent('${t['source']}:${trackArtist(t)}', () => t);
+        artists.putIfAbsent('${t['source']}:${trackArtist(t, context)}', () => t);
       }
     }
     return Column(
@@ -90,8 +92,16 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
           spacing: 8,
           runSpacing: 8,
           children: [
+            ActionButton(
+              'Інші треки'.tr(context),
+              compact: true,
+              flat: true,
+              onTap: c.pending > 0
+                  ? null
+                  : () => c.call('get_home_feed', [true]),
+            ),
             for (final s in [
-              ('all', 'Усе'),
+              ('all', 'Усе'.tr(context)),
               ('youtube', 'YouTube'),
               ('soundcloud', 'SoundCloud'),
             ])
@@ -105,9 +115,9 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         if (recent.isNotEmpty) ...[
           const SizedBox(height: 24),
           Heading(
-            'Продовжити слухати',
+            'Продовжити слухати'.tr(context),
             action: ActionButton(
-              'Історія',
+              'Історія'.tr(context),
               flat: true,
               onTap: () => c.nav('history'),
             ),
@@ -144,7 +154,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      trackTitle(t),
+                                      trackTitle(t, context),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -154,7 +164,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      trackArtist(t),
+                                      trackArtist(t, context),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
@@ -179,17 +189,17 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         ],
         shelf(
           feed['personalized'] == true
-              ? 'Більше того, що подобається'
-              : 'Відкрити для себе',
+              ? 'Більше того, що подобається'.tr(context)
+              : 'Відкрити для себе'.tr(context),
           recommendations,
           subtitle: feed['personalized'] == true
-              ? 'За твоїми останніми прослуховуваннями'
-              : 'Музика з YouTube та SoundCloud',
+              ? 'За твоїми останніми прослуховуваннями'.tr(context)
+              : 'Музика з YouTube та SoundCloud'.tr(context),
         ),
-        shelf('З YouTube', youtube),
-        shelf('Із SoundCloud', soundcloud),
+        shelf('З YouTube'.tr(context), youtube),
+        shelf('Із SoundCloud'.tr(context), soundcloud),
         if (feed['loaded'] != true)
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(vertical: 32),
             child: Row(
               children: [
@@ -199,7 +209,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 SizedBox(width: 12),
-                Text('Знаходимо музику для тебе…'),
+                Text('Знаходимо музику для тебе…'.tr(context)),
               ],
             ),
           ),
@@ -210,17 +220,17 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
           Padding(
             padding: const EdgeInsets.only(top: 32),
             child: EmptyState(
-              'Добірки поки недоступні',
-              'Перевір підключення або знайди музику через пошук.',
+              'Добірки поки недоступні'.tr(context),
+              'Перевір підключення або знайди музику через пошук.'.tr(context),
               action: ActionButton(
-                'Оновити добірки',
+                'Оновити добірки'.tr(context),
                 onTap: () => c.call('get_home_feed', [true]),
               ),
             ),
           ),
         if (artists.isNotEmpty) ...[
           const SizedBox(height: 32),
-          const Heading('Автори'),
+          Heading('Автори'.tr(context)),
           const SizedBox(height: 16),
           SizedBox(
             height: 214,
@@ -238,9 +248,9 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         if (c.playlists.isNotEmpty) ...[
           const SizedBox(height: 32),
           Heading(
-            'З твоєї медіатеки',
+            'З твоєї медіатеки'.tr(context),
             action: ActionButton(
-              'Усе',
+              'Усе'.tr(context),
               flat: true,
               onTap: () => c.nav('library'),
             ),
@@ -281,13 +291,13 @@ class LibraryPage extends StatelessWidget {
         runSpacing: 12,
         children: [
           ActionButton(
-            'Новий плейліст',
+            'Новий плейліст'.tr(context),
             icon: 'plus',
             primary: true,
             onTap: onCreate,
           ),
           ActionButton(
-            'Імпорт із сервісів',
+            'Імпорт із сервісів'.tr(context),
             onTap: () => core.nav('connections'),
           ),
         ],
@@ -323,8 +333,8 @@ class LibraryPage extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Улюблене',
+                      Text(
+                        'Улюблене'.tr(context),
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w600,
@@ -332,7 +342,7 @@ class LibraryPage extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        trackCount(core.liked.length),
+                        trackCount(core.liked.length, context),
                         style: TextStyle(
                           color: context.paints.muted,
                           fontSize: 13,
@@ -348,13 +358,16 @@ class LibraryPage extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 32),
-      const Heading('Твої плейлісти'),
+      Heading('Твої плейлісти'.tr(context)),
       const SizedBox(height: 18),
       if (core.playlists.isEmpty)
         EmptyState(
-          'Збережи свою першу добірку',
-          'Створи плейліст або імпортуй його з музичного сервісу.',
-          action: ActionButton('Створити плейліст', onTap: onCreate),
+          'Збережи свою першу добірку'.tr(context),
+          'Створи плейліст або імпортуй його з музичного сервісу.'.tr(context),
+          action: ActionButton(
+            'Створити плейліст'.tr(context),
+            onTap: onCreate,
+          ),
         )
       else
         LayoutBuilder(

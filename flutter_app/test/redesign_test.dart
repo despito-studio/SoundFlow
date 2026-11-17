@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -173,6 +174,10 @@ void main() {
         child: ListenableBuilder(
           listenable: core,
           builder: (context, _) => MaterialApp(
+      locale: const Locale('uk'),
+      supportedLocales: const [Locale('uk'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+
             theme: soundflowTheme(core.dark, reduced, scheme: core.scheme),
             debugShowCheckedModeBanner: false,
             scrollBehavior: const MaterialScrollBehavior().copyWith(
@@ -212,6 +217,39 @@ void main() {
     await tester.pump();
     return mouse;
   }
+
+  testWidgets('workspace sidebar uses text-only navigation and profile links', (
+    tester,
+  ) async {
+    final core = PreviewCore();
+    await mount(
+      tester,
+      core,
+      Workspace(core),
+      size: const Size(1280, 800),
+    );
+    expect(find.text('SoundFlow'), findsOneWidget);
+    expect(find.text('Головна'), findsOneWidget);
+    expect(find.text('Пошук').first, findsOneWidget);
+    expect(find.text('Каталог'), findsOneWidget);
+    expect(find.text('Мій профіль'), findsOneWidget);
+    expect(find.text('Улюблене'), findsOneWidget);
+    expect(find.byTooltip('Головна'), findsNothing);
+    expect(find.text('Головна').evaluate().first.widget, isA<Text>());
+
+    await tester.tap(find.text('Каталог'));
+    await tester.pumpAndSettle();
+    expect(core.route, 'library');
+    await tester.tap(find.text('Мій профіль'));
+    await tester.pumpAndSettle();
+    expect(core.route, 'profile');
+    await tester.tap(find.text('Головна'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Для нічних прогулянок').first);
+    await tester.pumpAndSettle();
+    expect(core.route, 'playlist');
+    await unmount(tester, core);
+  });
 
   testWidgets(
     'settings and search adapt to narrow, wide and enlarged text layouts',
@@ -586,6 +624,39 @@ void main() {
       expect(tester.takeException(), isNull, reason: 'Preview at width $width');
       await unmount(tester, core);
     }
+  });
+
+  testWidgets('dock shows the audio retry status instead of a bare spinner', (
+    tester,
+  ) async {
+    final core = PreviewCore();
+    await mount(
+      tester,
+      core,
+      Scaffold(body: PlayerDock(core, onAddPlaylist: (_) {})),
+    );
+    String artistLine() => tester
+        .widget<Text>(find.byKey(const ValueKey('dock-track-artist')))
+        .data!;
+    core.playback.value = {
+      ...core.playback.value,
+      'loading': true,
+      'status': 'Відновлюємо з’єднання. Спроба 2 з 4',
+    };
+    await tester.pumpAndSettle();
+    expect(artistLine(), 'Відновлюємо з’єднання. Спроба 2 з 4');
+    core.playback.value = {...core.playback.value, 'status': ''};
+    await tester.pumpAndSettle();
+    expect(artistLine(), 'Завантажуємо…');
+    core.playback.value = {
+      ...core.playback.value,
+      'loading': false,
+      'status': '',
+    };
+    await tester.pumpAndSettle();
+    expect(artistLine(), 'Один в каное');
+    expect(tester.takeException(), isNull);
+    await unmount(tester, core);
   });
 
   testWidgets('dock utilities and keyboard work in every theme', (

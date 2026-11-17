@@ -16,6 +16,45 @@ struct Runtime {
     shell: DesktopShell,
     events: mpsc::Receiver<ShellEvent>,
     _instance: InstanceGuard,
+    transfer: StateTransfer,
+}
+
+/// Top-level replacement patches: null is a value; deletion is explicit.
+/// The baseline belongs to this open session and the first poll is always full.
+#[derive(Default)]
+struct StateTransfer {
+    enabled: bool,
+    previous: Option<Value>,
+}
+
+impl StateTransfer {
+    fn new(config: &Value) -> Self {
+        Self {
+            enabled: config["state_patch_v1"].as_bool() == Some(true),
+            previous: None,
+        }
+    }
+
+    fn poll(&mut self, state: Value, events: Vec<Value>) -> Value {
+        if !self.enabled {
+            return json!({"ok": true, "state": state, "events": events});
+        }
+        let result = match (self.previous.as_ref().and_then(Value::as_object), state.as_object()) {
+            (Some(previous), Some(current)) => {
+                let set: serde_json::Map<String, Value> = current.iter()
+                    .filter(|(key, value)| previous.get(*key) != Some(*value))
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                let remove: Vec<&String> = previous.keys()
+                    .filter(|key| !current.contains_key(*key))
+                    .collect();
+                json!({"ok": true, "state_patch": {"set": set, "remove": remove}, "events": events})
+            }
+            _ => json!({"ok": true, "state": state, "events": events}),
+        };
+        self.previous = Some(state);
+        result
+    }
 }
 
 static RUNTIME: OnceLock<Mutex<Option<Runtime>>> = OnceLock::new();
@@ -46,8 +85,11 @@ pub unsafe extern "C" fn sf_open(bytes: *const u8, length: usize) -> *mut c_char
     response(|| {
         let config = request(bytes, length)?;
         let mut lock = runtime().lock().map_err(|e| e.to_string())?;
-        if lock.is_some() {
-            return Ok(json!({"ok": true}));
+        if let Some(rt) = lock.as_mut() {
+            // Reopening also starts a new transfer baseline, including when an
+            // older client attaches after a client that requested patches.
+            rt.transfer = StateTransfer::new(&config);
+            return Ok(json!({"ok": true, "state_patch_v1": rt.transfer.enabled}));
         }
         let instance = crate::platform::initialize_process()?;
         if !instance.is_primary() {
@@ -73,16 +115,17 @@ pub unsafe extern "C" fn sf_open(bytes: *const u8, length: usize) -> *mut c_char
             shell,
             events,
             _instance: instance,
+            transfer: StateTransfer::new(&config),
         });
-        Ok(json!({"ok": true}))
+        Ok(json!({"ok": true, "state_patch_v1": config["state_patch_v1"].as_bool() == Some(true)}))
     })
 }
 
 #[no_mangle]
 pub extern "C" fn sf_poll() -> *mut c_char {
     response(|| {
-        let lock = runtime().lock().map_err(|e| e.to_string())?;
-        let rt = lock.as_ref().ok_or("Аудіоядро ще не запущене")?;
+        let mut lock = runtime().lock().map_err(|e| e.to_string())?;
+        let rt = lock.as_mut().ok_or("Аудіоядро ще не запущене")?;
         let mut events = Vec::new();
         while let Ok(event) = rt.events.try_recv() {
             match event {
@@ -98,13 +141,16 @@ pub extern "C" fn sf_poll() -> *mut c_char {
             }
         }
         let state = rt.session.snapshot_value();
+        rt.shell.set_icon_selection(
+            state["settings"]["desktop_icon"].as_str().unwrap_or("default"),
+        );
         rt.shell.hotkeys_enabled.store(
             state["settings"]["hotkeys_enabled"]
                 .as_bool()
                 .unwrap_or(true),
             Ordering::Relaxed,
         );
-        Ok(json!({"ok": true, "state": state, "events": events}))
+        Ok(rt.transfer.poll(state, events))
     })
 }
 
@@ -197,5 +243,78 @@ pub extern "C" fn sf_close() {
 pub unsafe extern "C" fn sf_free(pointer: *mut c_char) {
     if !pointer.is_null() {
         drop(CString::from_raw(pointer));
+    }
+}
+
+#[cfg(test)]
+mod state_transfer_tests {
+    use super::*;
+
+    fn apply(previous: &Value, response: &Value) -> Value {
+        if let Some(state) = response.get("state") {
+            return state.clone();
+        }
+        let mut next = previous.as_object().unwrap().clone();
+        for key in response["state_patch"]["remove"].as_array().unwrap() {
+            next.remove(key.as_str().unwrap());
+        }
+        next.extend(response["state_patch"]["set"].as_object().unwrap().clone());
+        Value::Object(next)
+    }
+
+    #[test]
+    fn patches_reconstruct_full_snapshots_with_removal_null_and_account_swap() {
+        let mut transfer = StateTransfer::new(&json!({"state_patch_v1": true}));
+        let snapshots = [
+            json!({"library": {"profile": {"id": "a"}, "tracks": [1, 2]}, "player": {"position": 1}, "temporary": true}),
+            json!({"library": {"profile": {"id": "a"}, "tracks": [1, 2]}, "player": {"position": 2}, "temporary": null}),
+            json!({"library": {"profile": {"id": "b"}}, "player": null, "added": null}),
+            json!({"library": {}, "player": null}),
+            json!({"library": {}, "player": null}),
+        ];
+        let mut reconstructed = json!({});
+        for (index, expected) in snapshots.into_iter().enumerate() {
+            let events = vec![json!({"type": "show"})];
+            let response = transfer.poll(expected.clone(), events.clone());
+            assert_eq!(response["events"], json!(events));
+            assert_eq!(response.get("state").is_some(), index == 0);
+            reconstructed = apply(&reconstructed, &response);
+            assert_eq!(reconstructed, expected);
+        }
+    }
+
+    #[test]
+    fn legacy_clients_always_receive_full_snapshots_and_new_sessions_reset() {
+        for config in [json!({}), json!({"state_patch_v1": false}), json!({"state_patch_v1": "true"})] {
+            let mut transfer = StateTransfer::new(&config);
+            for position in 0..3 {
+                let state = json!({"player": {"position": position}});
+                assert_eq!(transfer.poll(state.clone(), vec![]), json!({"ok": true, "state": state, "events": []}));
+            }
+        }
+        let config = json!({"state_patch_v1": true});
+        let mut transfer = StateTransfer::new(&config);
+        transfer.poll(json!({"old_account": true}), vec![]);
+        transfer = StateTransfer::new(&config);
+        assert_eq!(transfer.poll(json!({}), vec![])["state"], json!({}));
+    }
+
+    #[test]
+    fn large_library_position_only_patch_reduces_serialized_bytes() {
+        let tracks: Vec<Value> = (0..5000).map(|id| json!({"id": id, "title": format!("Track {id}"), "artist": "Example artist"})).collect();
+        let initial = json!({"library": {"tracks": tracks}, "player": {"position": 10}, "revision": 1});
+        let mut next = initial.clone();
+        next["player"]["position"] = json!(11);
+        next["revision"] = json!(2);
+        let mut transfer = StateTransfer::new(&json!({"state_patch_v1": true}));
+        transfer.poll(initial.clone(), vec![]);
+        let patch = transfer.poll(next.clone(), vec![]);
+        let full = json!({"ok": true, "state": next, "events": []});
+        let patch_bytes = patch.to_string().len();
+        let full_bytes = full.to_string().len();
+        println!("state transfer: full={full_bytes} bytes, patch={patch_bytes} bytes");
+        assert!(patch_bytes * 100 < full_bytes);
+        assert!(patch["state_patch"]["set"].get("library").is_none());
+        assert_eq!(apply(&initial, &patch), next);
     }
 }

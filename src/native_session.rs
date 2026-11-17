@@ -15,6 +15,16 @@ use std::{
     time::Duration,
 };
 
+/// One initial provider request plus two retries for transport-level failures.
+const STREAM_RESOLVE_ATTEMPTS: u32 = 3;
+
+/// Provider failures that a restart of the worker can genuinely resolve.
+fn transient_provider_error(message: &str) -> bool {
+    message.contains("завершив роботу")
+        || message.contains("не відповідає")
+        || message.contains("не відповів вчасно")
+}
+
 #[derive(Clone, Debug)]
 pub struct SessionSnapshot {
     pub library: Value,
@@ -30,6 +40,7 @@ pub struct SessionSnapshot {
     pub discovery: Vec<Value>,
     pub smart: Vec<Value>,
     pub downloads: Vec<Value>,
+    pub library_backups: Value,
     pub queue: Vec<Value>,
     pub queue_index: usize,
     pub matches: Vec<Value>,
@@ -66,6 +77,7 @@ impl Default for SessionSnapshot {
             discovery: Vec::new(),
             smart: Vec::new(),
             downloads: Vec::new(),
+            library_backups: Value::Null,
             queue: Vec::new(),
             queue_index: 0,
             matches: Vec::new(),
@@ -175,6 +187,9 @@ struct Shared {
     pending_settings: Mutex<serde_json::Map<String, Value>>,
     autoplay_pending: AtomicBool,
     oauth_pending: AtomicBool,
+    checkpoint_gate: Mutex<()>,
+    restored_user: Mutex<Option<String>>,
+    resume_pending: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -188,6 +203,8 @@ pub struct NativeSession {
     reports: SyncSender<ListeningReport>,
     discord: DiscordRpc,
     updater: Arc<crate::update::Updater>,
+    checkpoint_dir: PathBuf,
+    checkpoint_run: String,
 }
 
 impl NativeSession {
@@ -220,6 +237,9 @@ impl NativeSession {
                 pending_settings: Mutex::new(serde_json::Map::new()),
                 autoplay_pending: AtomicBool::new(false),
                 oauth_pending: AtomicBool::new(false),
+                checkpoint_gate: Mutex::new(()),
+                restored_user: Mutex::new(None),
+                resume_pending: AtomicBool::new(false),
             }),
             local,
             remote,
@@ -227,6 +247,8 @@ impl NativeSession {
             reports,
             discord: DiscordRpc::new(true),
             updater: crate::update::Updater::new(&data_dir, offline),
+            checkpoint_dir: data_dir.join("playback-sessions"),
+            checkpoint_run: uuid::Uuid::new_v4().to_string(),
         };
         for (name, receiver) in [
             ("soundflow-local", local_rx),
@@ -295,6 +317,19 @@ impl NativeSession {
                 }
             })
             .map_err(|error| error.to_string())?;
+        let worker = session.clone();
+        std::thread::Builder::new()
+            .name("soundflow-checkpoint".into())
+            .spawn(move || {
+                while !worker.shared.stopped.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_secs(5));
+                    if !worker.shared.stopped.load(Ordering::Acquire)
+                        && !worker.shared.account_pending.load(Ordering::Acquire) {
+                        worker.save_checkpoint();
+                    }
+                }
+            })
+            .map_err(|error| error.to_string())?;
         session.call("_refresh", vec![]);
         Ok(session)
     }
@@ -311,7 +346,8 @@ impl NativeSession {
             "feed": state.feed, "creator": state.creator,
             "profile_assets": state.profile_assets,
             "search": state.search, "discovery": state.discovery, "smart": state.smart,
-            "downloads": state.downloads, "queue": state.queue, "queue_index": state.queue_index,
+            "downloads": state.downloads, "library_backups": state.library_backups,
+            "queue": state.queue, "queue_index": state.queue_index,
             "matches": state.matches, "pending_track": state.pending_track,
             "current_user": state.current_user, "view": state.view,
             "selected_playlist": state.selected_playlist, "message": state.message,
@@ -324,7 +360,8 @@ impl NativeSession {
             "player": {
                 "track": state.player.track, "playing": state.player.playing,
                 "loading": state.player.loading, "position": state.player.position,
-                "duration": state.player.duration, "volume": state.player.volume
+                "duration": state.player.duration, "volume": state.player.volume,
+                "status": state.player.status
             }
         })
     }
@@ -421,17 +458,22 @@ impl NativeSession {
     }
 
     pub fn player_action(&self, action: &str) {
+        if self.shared.account_pending.load(Ordering::Acquire) { return; }
         match action {
             "toggle" | "play-pause" => {
-                let snapshot = self.snapshot();
-                if snapshot.player.track.is_none() {
-                    if let Some(track) = snapshot
-                        .queue
-                        .get(snapshot.queue_index)
-                        .cloned()
-                        .or_else(|| snapshot.tracks().first().cloned())
-                    {
-                        self.play(track, snapshot.tracks());
+                if self.resume_checkpoint() { return; }
+                let initial = {
+                    let state = self.state();
+                    if state.player.track.is_none() {
+                        let tracks = state.tracks();
+                        let track = state.queue.get(state.queue_index).cloned()
+                            .or_else(|| tracks.first().cloned());
+                        Some((track, tracks))
+                    } else { None }
+                };
+                if let Some((track, tracks)) = initial {
+                    if let Some(track) = track {
+                        self.play(track, tracks);
                     } else {
                         self.navigate("search");
                     }
@@ -446,6 +488,7 @@ impl NativeSession {
                 }
             }
             "play" => {
+                if self.resume_checkpoint() { return; }
                 self.shared.desired_playing.store(true, Ordering::Release);
                 self.audio.play();
             }
@@ -498,7 +541,8 @@ impl NativeSession {
             } else {
                 position.max(0.0)
             };
-            if self.shared.resolving.load(Ordering::Acquire) {
+            if self.shared.resolving.load(Ordering::Acquire)
+                || self.shared.resume_pending.load(Ordering::Acquire) {
                 self.state().player.position = position;
             } else {
                 self.audio.seek(position);
@@ -771,7 +815,10 @@ impl NativeSession {
                     state.revision += 1;
                 }
             }
-            "update-check" => self.updater.check(payload["download"].as_bool().unwrap_or(false)),
+            "update-check" => self.updater.check(
+                payload["download"].as_bool().unwrap_or(false),
+                payload["auto"].as_bool().unwrap_or(false),
+            ),
             "update-download" => self.updater.download(),
             "update-cancel" => self.updater.cancel(),
             "update-apply" => self.updater.apply_async(),
@@ -818,9 +865,84 @@ impl NativeSession {
             });
             let _ = wait.recv_timeout(Duration::from_millis(500));
         }
+        // A deliberate full exit starts the next launch with an empty player.
+        // Serialize with periodic checkpoint writes so they cannot resurrect it.
+        {
+            let _checkpoint = lock(&self.shared.checkpoint_gate);
+            let user = self.state().current_user.clone();
+            if let Err(error) = crate::playback_session::save(&self.checkpoint_dir, &user, None) {
+                self.message(format!("Не вдалося очистити стан прослуховування: {error}"), true);
+            }
+        }
         self.audio.shutdown();
         self.discord.shutdown();
         self.desktop.shutdown();
+    }
+
+    fn save_checkpoint(&self) {
+        let _checkpoint = lock(&self.shared.checkpoint_gate);
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return;
+        }
+        // Only copy checkpoint fields, never the library/feed/search snapshot.
+        let state = self.state();
+        if lock(&self.shared.restored_user).as_deref() != Some(state.current_user.as_str()) {
+            return;
+        }
+        let checkpoint = if state.settings["restore_playback_enabled"] != false {
+            state.player.track.as_ref().map(|track| {
+                let mut queue = state.queue.clone();
+                let mut index = state.queue_index;
+                if queue.get(index).map(track_key) != Some(track_key(track)) {
+                    queue.push(track.clone());
+                    index = queue.len() - 1;
+                }
+                crate::playback_session::Checkpoint { queue, index, position: state.player.position }
+            })
+        } else { None };
+        let user = state.current_user.clone();
+        drop(state); // Disk writes must not hold the UI/audio state lock.
+        if let Err(error) = crate::playback_session::save_for_run(&self.checkpoint_dir, &user, checkpoint.as_ref(), &self.checkpoint_run) {
+            self.message(format!("Не вдалося зберегти прослуховування: {error}"), true);
+        }
+    }
+
+    fn restore_checkpoint(&self) {
+        let _checkpoint = lock(&self.shared.checkpoint_gate);
+        let _playback = lock(&self.shared.playback_gate);
+        let mut state = self.state();
+        let mut restored = lock(&self.shared.restored_user);
+        if restored.as_deref() == Some(state.current_user.as_str()) { return; }
+        *restored = Some(state.current_user.clone());
+        if state.settings["restore_playback_enabled"] == false || state.player.track.is_some() { return; }
+        if let Some(saved) = crate::playback_session::load_for_run(&self.checkpoint_dir, &state.current_user, &self.checkpoint_run) {
+            state.queue = saved.queue;
+            state.queue_index = saved.index;
+            let track = state.queue[saved.index].clone();
+            state.player.duration = crate::playback::track_duration(&track);
+            state.player.track = Some(track);
+            state.player.position = if state.player.duration > 0.0 { saved.position.min(state.player.duration) } else { saved.position };
+            state.player.playing = false;
+            state.player.loading = false;
+            self.shared.resume_pending.store(true, Ordering::Release);
+            state.revision += 1;
+        }
+    }
+
+    fn resume_checkpoint(&self) -> bool {
+        if self.shared.account_pending.load(Ordering::Acquire) { return false; }
+        let _playback = lock(&self.shared.playback_gate);
+        if self.shared.account_pending.load(Ordering::Acquire)
+            || self.shared.stopped.load(Ordering::Acquire) { return false; }
+        if !self.shared.resume_pending.swap(false, Ordering::AcqRel) { return false; }
+        let (track, position) = {
+            let state = self.state();
+            (state.player.track.clone(), state.player.position)
+        };
+        if let Some(track) = track {
+            self.request_track_locked(track, position);
+            true
+        } else { false }
     }
 
     fn state(&self) -> MutexGuard<'_, SessionSnapshot> {
@@ -840,6 +962,7 @@ impl NativeSession {
             .playback_generation
             .fetch_add(1, Ordering::AcqRel);
         self.shared.resolving.store(false, Ordering::Release);
+        self.shared.resume_pending.store(false, Ordering::Release);
         self.shared.desired_playing.store(false, Ordering::Release);
         *lock(&self.shared.expected_track) = None;
         self.audio.stop();
@@ -848,10 +971,15 @@ impl NativeSession {
         state.player.loading = false;
         state.player.playing = false;
         state.player.position = 0.0;
+        state.player.status.clear();
         state.revision += 1;
     }
 
     fn request_track(&self, track: Value) {
+        self.request_track_at(track, 0.0);
+    }
+
+    fn request_track_at(&self, track: Value, position: f64) {
         if self.shared.stopped.load(Ordering::Acquire) {
             return;
         }
@@ -859,6 +987,12 @@ impl NativeSession {
             return;
         }
         let _gate = lock(&self.shared.playback_gate);
+        if self.shared.account_pending.load(Ordering::Acquire)
+            || self.shared.stopped.load(Ordering::Acquire) { return; }
+        self.request_track_locked(track, position);
+    }
+
+    fn request_track_locked(&self, track: Value, position: f64) {
         let generation = self
             .shared
             .playback_generation
@@ -873,7 +1007,9 @@ impl NativeSession {
             state.player.track = Some(track.clone());
             state.player.playing = false;
             state.player.loading = true;
-            state.player.position = 0.0;
+            state.player.position = position;
+            self.shared.resume_pending.store(false, Ordering::Release);
+            state.player.status.clear();
             state.player.duration = crate::playback::track_duration(&track);
             state.message.clear();
             state.message_error = false;
@@ -888,7 +1024,10 @@ impl NativeSession {
         };
         if self.playback.try_send(request).is_err() {
             self.shared.resolving.store(false, Ordering::Release);
-            self.state().player.loading = false;
+            let mut state = self.state();
+            state.player.loading = false;
+            state.player.status.clear();
+            drop(state);
             self.message("Зачекай, поки завершиться поточний запит", true);
         }
     }
@@ -1032,11 +1171,13 @@ impl NativeSession {
                 self.message("Зачекай, поки завершиться зміна профілю", true);
                 return false;
             }
+            self.save_checkpoint();
             self.shared
                 .profile_generation
                 .fetch_add(1, Ordering::AcqRel);
             lock(&self.shared.pending_settings).clear();
             self.stop();
+            *lock(&self.shared.restored_user) = None;
         } else if self.shared.account_pending.load(Ordering::Acquire) && profile_write(method) {
             self.message("Зачекай, поки завершиться зміна профілю", true);
             return false;
@@ -1060,6 +1201,7 @@ impl NativeSession {
             drop(state);
             if account {
                 self.shared.account_pending.store(false, Ordering::Release);
+                self.restore_checkpoint();
             }
             self.message("Зачекай, поки завершиться поточний запит", true);
             return false;
@@ -1102,6 +1244,14 @@ impl NativeSession {
                 self.desktop.call(&job.method, &job.args)
             };
             if self.relevant(&job) {
+                if job.method == "list_library_backups" {
+                    if let Ok(value) = result.as_ref() {
+                        self.state().library_backups = value.clone();
+                    }
+                }
+                if matches!(job.method.as_str(), "create_library_backup" | "restore_library_backup") && result.is_ok() {
+                    self.call("list_library_backups", vec![]);
+                }
                 if job.method == "update_settings" {
                     if let Some(patch) = job.args.first() {
                         self.finish_settings(patch);
@@ -1174,6 +1324,7 @@ impl NativeSession {
                 state.pending_track = None;
                 state.selected_playlist.clear();
                 state.stats = Value::Null;
+                state.library_backups = Value::Null;
             }
             state.revision += 1;
             changed
@@ -1182,6 +1333,7 @@ impl NativeSession {
             self.stop();
         }
         self.apply_audio_settings();
+        self.restore_checkpoint();
     }
 
     fn finish_settings(&self, patch: &Value) {
@@ -1403,6 +1555,7 @@ impl NativeSession {
                     let mut state = self.state();
                     state.pending_track = Some(original.clone());
                     state.player.loading = false;
+                    state.player.status.clear();
                     state.message = "Обери доступну версію для відтворення".into();
                     state.message_error = false;
                     self.shared.resolving.store(false, Ordering::Release);
@@ -1421,11 +1574,15 @@ impl NativeSession {
                 }
                 continue;
             }
-            let source = self.desktop.call("get_stream", &[request.track.clone()]);
+            let source = self.resolve_stream_source(&request);
             let _gate = lock(&self.shared.playback_gate);
             if !self.play_request_current(&request) {
                 continue;
             }
+            let source = match source {
+                Some(source) => source,
+                None => continue,
+            };
             match source {
                 Ok(source) => {
                     if let Some(source) = source.as_str() {
@@ -1437,17 +1594,72 @@ impl NativeSession {
                             self.audio.pause();
                         }
                     } else {
-                        self.state().player.loading = false;
+                        let mut state = self.state();
+                        state.player.loading = false;
+                        state.player.status.clear();
+                        drop(state);
                         self.message("Недійсне джерело аудіо", true);
                     }
                 }
                 Err(error) => {
-                    self.state().player.loading = false;
+                    let mut state = self.state();
+                    state.player.loading = false;
+                    state.player.status.clear();
+                    drop(state);
                     self.message(error, true);
                 }
             }
             self.shared.resolving.store(false, Ordering::Release);
         }
+    }
+
+    /// Resolves the stream URL, retrying transient provider failures with backoff.
+    /// Returns None when a newer request superseded this one while retrying.
+    fn resolve_stream_source(&self, request: &PlayRequest) -> Option<Result<Value, String>> {
+        let mut attempt = 0;
+        loop {
+            if !self.play_request_current(request) {
+                return None;
+            }
+            match self.desktop.call("get_stream", &[request.track.clone()]) {
+                Ok(source) => return Some(Ok(source)),
+                Err(error)
+                    if attempt + 1 < STREAM_RESOLVE_ATTEMPTS
+                        && transient_provider_error(&error) =>
+                {
+                    attempt += 1;
+                    self.playback_status(format!(
+                        "Відновлюємо зв’язок із музичним сервісом. Спроба {} з {}",
+                        attempt + 1,
+                        STREAM_RESOLVE_ATTEMPTS
+                    ));
+                    if !self.wait_for_playback_retry(request, attempt) {
+                        return None;
+                    }
+                }
+                Err(error) => return Some(Err(error)),
+            }
+        }
+    }
+
+    fn playback_status(&self, status: String) {
+        let mut state = self.state();
+        state.player.loading = true;
+        state.player.status = status;
+        state.revision += 1;
+    }
+
+    /// Sleeps with the retry backoff, stopping early when the request is superseded.
+    fn wait_for_playback_retry(&self, request: &PlayRequest, attempt: u32) -> bool {
+        let deadline =
+            std::time::Instant::now() + crate::playback::retry_delay(attempt.saturating_sub(1));
+        while std::time::Instant::now() < deadline {
+            if !self.play_request_current(request) {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        self.play_request_current(request)
     }
 
     fn play_request_current(&self, request: &PlayRequest) -> bool {
@@ -1465,7 +1677,9 @@ impl NativeSession {
             };
             match event {
                 AudioEvent::State(mut player) => {
-                    if self.shared.resolving.load(Ordering::Acquire) {
+                    let _gate = lock(&self.shared.playback_gate);
+                    if self.shared.resolving.load(Ordering::Acquire)
+                        || self.shared.resume_pending.load(Ordering::Acquire) {
                         continue;
                     }
                     let expected = lock(&self.shared.expected_track).clone();
@@ -1494,6 +1708,8 @@ impl NativeSession {
                 }
                 AudioEvent::Finished => {
                     if !self.shared.resolving.load(Ordering::Acquire)
+                        && !self.shared.resume_pending.load(Ordering::Acquire)
+                        && !self.shared.account_pending.load(Ordering::Acquire)
                         && !self.state().player.loading
                     {
                         self.advance(1, true);
@@ -1501,7 +1717,12 @@ impl NativeSession {
                 }
                 AudioEvent::Error(message) => {
                     if !self.shared.resolving.load(Ordering::Acquire) {
-                        self.state().player.loading = false;
+                        {
+                            let mut state = self.state();
+                            state.player.loading = false;
+                            state.player.status.clear();
+                            state.revision += 1;
+                        }
                         self.message(message, true);
                     }
                 }
@@ -1610,6 +1831,9 @@ fn account_method(method: &str) -> bool {
     matches!(
         method,
         "configure_cloud"
+            | "supabase_sign_in"
+            | "supabase_sign_up"
+            | "supabase_sign_out"
             | "restore_session"
             | "sign_in"
             | "sign_up"

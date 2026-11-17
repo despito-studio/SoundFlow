@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'anicry_motion.dart';
 
 import 'core.dart';
+import 'l10n.dart';
 import 'concentric.dart';
 
 class Paints extends ThemeExtension<Paints> {
@@ -371,39 +372,54 @@ class Artwork extends StatelessWidget {
     child: Center(child: Glyph('book-open', size: 28, color: c.paints.muted)),
   );
   @override
-  Widget build(BuildContext context) {
-    Widget art;
-    if (path.isEmpty) {
-      art = fallback(context);
-    } else if (path.startsWith('http://') || path.startsWith('https://')) {
-      art = Image.network(
-        path,
-        fit: BoxFit.cover,
-        cacheWidth: 700,
-        gaplessPlayback: true,
-        errorBuilder: (c, e, s) => fallback(c),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final logicalSize =
+          size ??
+          (constraints.maxWidth.isFinite ? constraints.maxWidth : 350.0);
+      final pixels = logicalSize * MediaQuery.devicePixelRatioOf(context);
+      // Reuse a small set of cache keys while retaining sharp HiDPI covers.
+      final decodeWidth = [
+        64,
+        128,
+        256,
+        512,
+        700,
+        1024,
+      ].firstWhere((width) => width >= pixels, orElse: () => 1024);
+      Widget art;
+      if (path.isEmpty) {
+        art = fallback(context);
+      } else if (path.startsWith('http://') || path.startsWith('https://')) {
+        art = Image.network(
+          path,
+          fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
+          gaplessPlayback: true,
+          errorBuilder: (c, e, s) => fallback(c),
+        );
+      } else {
+        final p = path.startsWith('file:')
+            ? Uri.parse(path).toFilePath()
+            : path.startsWith('cover:')
+            ? '${File(Platform.resolvedExecutable).parent.path}/resources/covers/${path.substring(6)}'
+            : path;
+        art = Image.file(
+          File(p),
+          fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
+          gaplessPlayback: true,
+          errorBuilder: (c, e, s) => fallback(c),
+        );
+      }
+      return RepaintBoundary(
+        child: ClipRRect(
+          borderRadius: corners ?? BorderRadius.circular(radius),
+          child: SizedBox(width: size, height: size, child: art),
+        ),
       );
-    } else {
-      final p = path.startsWith('file:')
-          ? Uri.parse(path).toFilePath()
-          : path.startsWith('cover:')
-          ? '${File(Platform.resolvedExecutable).parent.path}/resources/covers/${path.substring(6)}'
-          : path;
-      art = Image.file(
-        File(p),
-        fit: BoxFit.cover,
-        cacheWidth: 700,
-        gaplessPlayback: true,
-        errorBuilder: (c, e, s) => fallback(c),
-      );
-    }
-    return RepaintBoundary(
-      child: ClipRRect(
-        borderRadius: corners ?? BorderRadius.circular(radius),
-        child: SizedBox(width: size, height: size, child: art),
-      ),
-    );
-  }
+    },
+  );
 }
 
 class Heading extends StatelessWidget {
@@ -482,7 +498,7 @@ class _AlbumCardState extends State<AlbumCard> {
     child: Semantics(
       button: true,
       label:
-          '${widget.playing ? 'Пауза' : 'Відтворити'}: ${trackTitle(widget.track)}, ${trackArtist(widget.track)}',
+          '${widget.playing ? 'Пауза'.tr(context) : 'Відтворити'.tr(context)}: ${trackTitle(widget.track, context)}, ${trackArtist(widget.track, context)}',
       child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
         child: Material(
@@ -525,7 +541,7 @@ class _AlbumCardState extends State<AlbumCard> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              trackTitle(widget.track),
+                              trackTitle(widget.track, context),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -537,7 +553,7 @@ class _AlbumCardState extends State<AlbumCard> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              trackArtist(widget.track),
+                              trackArtist(widget.track, context),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -614,7 +630,7 @@ class PlaylistCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        playlist['name'] ?? 'Плейліст',
+                        playlist['name'] ?? 'Плейліст'.tr(context),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -625,7 +641,7 @@ class PlaylistCard extends StatelessWidget {
                       const SizedBox(height: 6),
                       Text(
                         playlist['subtitle']?.toString() ??
-                            trackCount(ts.length),
+                            trackCount(ts.length, context),
                         style: TextStyle(
                           color: context.paints.muted,
                           fontSize: 13,
@@ -670,9 +686,11 @@ class PlaylistCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Tooltip(
-                      message: playlist['name']?.toString() ?? 'Плейліст',
+                      message:
+                          playlist['name']?.toString() ??
+                          'Плейліст'.tr(context),
                       child: Text(
-                        playlist['name']?.toString() ?? 'Плейліст',
+                        playlist['name']?.toString() ?? 'Плейліст'.tr(context),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -684,7 +702,7 @@ class PlaylistCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      trackCount(ts.length),
+                      trackCount(ts.length, context),
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.3,
@@ -734,40 +752,46 @@ class _TrackRowState extends State<TrackRow> {
           value: 'like',
           child: Text(
             c.isLiked(widget.track)
-                ? 'Прибрати з улюбленого'
-                : 'Додати в улюблене',
+                ? 'Прибрати з улюбленого'.tr(context)
+                : 'Додати в улюблене'.tr(context),
           ),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'add_next',
-          child: Text('Відтворити наступним'),
+          child: Text('Відтворити наступним'.tr(context)),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'playlist',
-          child: Text('Додати до плейліста'),
+          child: Text('Додати до плейліста'.tr(context)),
         ),
-        const PopupMenuItem(value: 'creator', child: Text('Перейти до автора')),
-        const PopupMenuItem(value: 'download', child: Text('Завантажити')),
+        PopupMenuItem(
+          value: 'creator',
+          child: Text('Перейти до автора'.tr(context)),
+        ),
+        PopupMenuItem(
+          value: 'download',
+          child: Text('Завантажити'.tr(context)),
+        ),
         if (widget.queueIndex != null) ...[
           PopupMenuItem(
             value: 'up',
             enabled: widget.queueIndex! > c.queueIndex + 1,
-            child: const Text('Перемістити вище'),
+            child: Text('Перемістити вище'.tr(context)),
           ),
           PopupMenuItem(
             value: 'down',
             enabled: widget.queueIndex! < c.queue.length - 1,
-            child: const Text('Перемістити нижче'),
+            child: Text('Перемістити нижче'.tr(context)),
           ),
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'remove_queue',
-            child: Text('Прибрати з черги'),
+            child: Text('Прибрати з черги'.tr(context)),
           ),
         ],
         if (c.route == 'playlist')
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'remove_playlist',
-            child: Text('Прибрати з плейліста'),
+            child: Text('Прибрати з плейліста'.tr(context)),
           ),
       ],
     );
@@ -835,7 +859,7 @@ class _TrackRowState extends State<TrackRow> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              trackTitle(t),
+                              trackTitle(t, context),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -847,7 +871,7 @@ class _TrackRowState extends State<TrackRow> {
                             InkWell(
                               onTap: () => c.showCreator(t),
                               child: Text(
-                                trackArtist(t),
+                                trackArtist(t, context),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(color: p.muted, fontSize: 13),
@@ -860,7 +884,7 @@ class _TrackRowState extends State<TrackRow> {
                         SizedBox(
                           width: 100,
                           child: Text(
-                            sourceName(t),
+                            sourceName(t, context),
                             style: TextStyle(color: p.muted, fontSize: 12),
                           ),
                         ),
@@ -878,8 +902,8 @@ class _TrackRowState extends State<TrackRow> {
                         Control(
                           'heart',
                           c.isLiked(t)
-                              ? 'Прибрати з улюбленого'
-                              : 'Додати в улюблене',
+                              ? 'Прибрати з улюбленого'.tr(context)
+                              : 'Додати в улюблене'.tr(context),
                           active: c.isLiked(t),
                           color: c.isLiked(t)
                               ? p.accent
@@ -891,12 +915,14 @@ class _TrackRowState extends State<TrackRow> {
                       if (!widget.quiet)
                         Control(
                           active ? 'pause' : 'play',
-                          active ? 'Пауза' : 'Відтворити',
+                          active
+                              ? 'Пауза'.tr(context)
+                              : 'Відтворити'.tr(context),
                           onTap: widget.onPlay,
                         ),
                       Control(
                         'more',
-                        'Дії з треком',
+                        'Дії з треком'.tr(context),
                         onTap: () {
                           final r = context.findRenderObject() as RenderBox;
                           menu(
@@ -1034,7 +1060,7 @@ class ArtistCard extends StatelessWidget {
     final avatar = [data['avatar'], track['artist_avatar']]
         .map((v) => v?.toString() ?? '')
         .firstWhere((v) => v.isNotEmpty, orElse: () => '');
-    final name = data['name']?.toString() ?? trackArtist(track);
+    final name = data['name']?.toString() ?? trackArtist(track, context);
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
@@ -1084,7 +1110,7 @@ class ArtistCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                sourceName(track),
+                sourceName(track, context),
                 style: TextStyle(fontSize: 12, color: p.muted),
               ),
             ],
@@ -1160,7 +1186,7 @@ class _ErrorNoticeState extends State<ErrorNotice>
               const SizedBox(width: 12),
               Flexible(
                 child: Text(
-                  widget.message,
+                  widget.message.tr(context),
                   maxLines: 4,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 13, height: 1.4),
@@ -1169,7 +1195,7 @@ class _ErrorNoticeState extends State<ErrorNotice>
               const SizedBox(width: 12),
               Control(
                 'x',
-                'Закрити повідомлення',
+                'Закрити повідомлення'.tr(context),
                 size: 28,
                 onTap: widget.onDismiss,
               ),

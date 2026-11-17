@@ -3,10 +3,12 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 
 import 'core.dart';
+import 'l10n.dart';
 import 'connections.dart';
 import 'anicry_motion.dart';
 import 'discovery.dart';
@@ -18,11 +20,18 @@ import 'player_dock.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
 import 'update_prompt.dart';
+import 'portrait_background.dart';
 
 final designBoundary = GlobalKey();
 
 void main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Bound retained offscreen artwork; visible covers use display-sized decodes.
+  PaintingBinding.instance.imageCache
+    ..maximumSizeBytes = arguments.contains('--island')
+        ? 8 * 1024 * 1024
+        : 32 * 1024 * 1024
+    ..maximumSize = arguments.contains('--island') ? 32 : 200;
   await Anicry.load();
   if (arguments.contains('--island')) {
     final exportIndex = arguments.indexOf('--export-island');
@@ -37,6 +46,9 @@ void main(List<String> arguments) async {
   }
   final core = Core(arguments);
   runApp(RepaintBoundary(key: designBoundary, child: SoundFlow(core)));
+  // Paint the startup portrait before synchronous native initialization begins.
+  await WidgetsBinding.instance.endOfFrame;
+  await Future<void>.delayed(Duration.zero);
   core.start();
   final exportIndex = arguments.indexOf('--export-design');
   if (exportIndex >= 0 && exportIndex + 1 < arguments.length) {
@@ -66,6 +78,9 @@ class SoundFlow extends StatelessWidget {
     listenable: core,
     builder: (context, _) => MaterialApp(
       title: 'SoundFlow',
+      locale: Locale(core.language),
+      supportedLocales: const [Locale('uk'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       debugShowCheckedModeBanner: false,
       scrollBehavior: const MaterialScrollBehavior().copyWith(
         scrollbars: false,
@@ -77,9 +92,21 @@ class SoundFlow extends StatelessWidget {
           disableAnimations:
               core.reduced || MediaQuery.disableAnimationsOf(context),
         ),
-        child: child!,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: ColoredBox(
+                color: Theme.of(context).scaffoldBackgroundColor,
+              ),
+            ),
+            const Positioned.fill(child: PortraitBackground()),
+            Positioned.fill(child: child!),
+          ],
+        ),
       ),
-      home: UpdatePromptHost(core: core, child: Workspace(core)),
+      home: core.ready
+          ? UpdatePromptHost(core: core, child: Workspace(core))
+          : PortraitStartup(error: core.error),
     ),
   );
 }
@@ -153,9 +180,9 @@ class _WorkspaceState extends State<Workspace> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(
+                          Expanded(
                             child: Text(
-                              'Вибери версію треку',
+                              'Вибери версію треку'.tr(context),
                               style: TextStyle(
                                 fontFamily: SoundFlowType.heading,
                                 fontSize: 24,
@@ -165,14 +192,15 @@ class _WorkspaceState extends State<Workspace> {
                           ),
                           Control(
                             'x',
-                            'Закрити вибір',
+                            'Закрити вибір'.tr(context),
                             onTap: () => Navigator.pop(ctx),
                           ),
                         ],
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Вибери запис із YouTube або SoundCloud для відтворення.',
+                        'Вибери запис із YouTube або SoundCloud для відтворення.'
+                            .tr(context),
                         style: TextStyle(
                           color: context.paints.muted,
                           fontSize: 14,
@@ -185,10 +213,11 @@ class _WorkspaceState extends State<Workspace> {
                           child: LinearProgressIndicator(minHeight: 2),
                         ),
                       if (matches.isEmpty && c.pending == 0)
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.symmetric(vertical: 24),
                           child: Text(
-                            'Відповідний запис не знайдено. Спробуй пошук в іншому джерелі.',
+                            'Відповідний запис не знайдено. Спробуй пошук в іншому джерелі.'
+                                .tr(context),
                           ),
                         ),
                       if (matches.isNotEmpty)
@@ -208,12 +237,12 @@ class _WorkspaceState extends State<Workspace> {
                                   radius: 8,
                                 ),
                                 title: Text(
-                                  trackTitle(t),
+                                  trackTitle(t, context),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 subtitle: Text(
-                                  '${trackArtist(t)} · ${sourceName(t)}',
+                                  '${trackArtist(t, context)} · ${sourceName(t, context)}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -255,21 +284,202 @@ class _WorkspaceState extends State<Workspace> {
     super.dispose();
   }
 
+  Widget _sidebar(BuildContext context) {
+    final p = context.paints;
+    final compact = MediaQuery.sizeOf(context).width < 800;
+    final activeLibrary = [
+      'library',
+      'playlist',
+      'liked',
+      'history',
+    ].contains(c.route);
+    final playlists = c.playlists.take(5).toList();
+    Widget link(
+      String label,
+      String route, {
+      bool selected = false,
+      VoidCallback? onTap,
+    }) => Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap ?? () => navigate(route),
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            height: 38,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 15),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? p.ink : p.muted,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    return Container(
+      width: compact ? 152 : 208,
+      margin: const EdgeInsets.fromLTRB(10, 12, 0, 12),
+      padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
+      clipBehavior: Clip.hardEdge,
+      decoration: BoxDecoration(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(7, 4, 7, 14),
+            child: Text(
+              'SoundFlow',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: SoundFlowType.heading,
+                fontSize: 19,
+                fontWeight: FontWeight.w700,
+                color: p.ink,
+              ),
+            ),
+          ),
+          if (c.canBack) link('Назад'.tr(context), c.route, onTap: c.back),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(7, 10, 7, 5),
+            child: Text(
+              'НАВІГАЦІЯ'.tr(context),
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                color: p.muted,
+              ),
+            ),
+          ),
+          link('Головна'.tr(context), 'home', selected: c.route == 'home'),
+          link('Пошук'.tr(context), 'search', selected: c.route == 'search'),
+          link('Каталог'.tr(context), 'library', selected: activeLibrary),
+          if (!compact) ...[
+            const SizedBox(height: 10),
+            Divider(height: 1, color: p.ink.withValues(alpha: .08)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(7, 15, 7, 5),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'ПЛЕЙЛИСТИ'.tr(context),
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: p.muted,
+                      ),
+                    ),
+                  ),
+                  Control(
+                    'plus',
+                    'Створити плейлист'.tr(context),
+                    size: 30,
+                    onTap: () => createPlaylist(),
+                  ),
+                ],
+              ),
+            ),
+            link('Улюблене'.tr(context), 'liked', selected: c.route == 'liked'),
+            for (final playlist in playlists)
+              link(
+                playlist['name']?.toString() ?? 'Плейлист'.tr(context),
+                'playlist',
+                selected: c.selectedPlaylist == playlist['id'],
+                onTap: () => c.selectPlaylist(playlist),
+              ),
+          ],
+          const Spacer(),
+          link(
+            'Завантаження'.tr(context),
+            'downloads',
+            selected: c.route == 'downloads',
+          ),
+          link(
+            'Налаштування'.tr(context),
+            'settings',
+            selected: c.route == 'settings',
+          ),
+          const SizedBox(height: 5),
+          Divider(height: 1, color: p.ink.withValues(alpha: .08)),
+          const SizedBox(height: 5),
+          Semantics(
+            button: true,
+            label: 'Відкрити профіль'.tr(context),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => navigate('profile'),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 9,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        c.profile['name']?.toString() ?? 'Слухач'.tr(context),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: p.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Мій профіль'.tr(context),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: p.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String get title => switch (c.route) {
     'home' => 'Discovery',
-    'library' => 'Медіатека',
-    'playlist' => 'Плейліст',
-    'search' => 'Пошук',
-    'liked' => 'Улюблене',
-    'queue' => 'Черга',
-    'now' => 'Зараз звучить',
-    'settings' => 'Налаштування',
-    'downloads' => 'Завантаження',
-    'history' => 'Історія',
-    'profile' => 'Твій профіль',
-    'creator' => 'Автор',
-    'connections' => 'Підключення',
-    'stats' => 'Прослуховування',
+    'library' => 'Медіатека'.tr(context),
+    'playlist' => 'Плейліст'.tr(context),
+    'search' => 'Пошук'.tr(context),
+    'liked' => 'Улюблене'.tr(context),
+    'queue' => 'Черга'.tr(context),
+    'now' => 'Зараз звучить'.tr(context),
+    'settings' => 'Налаштування'.tr(context),
+    'downloads' => 'Завантаження'.tr(context),
+    'history' => 'Історія'.tr(context),
+    'profile' => 'Твій профіль'.tr(context),
+    'creator' => 'Автор'.tr(context),
+    'connections' => 'Підключення'.tr(context),
+    'stats' => 'Прослуховування'.tr(context),
     _ => 'SoundFlow',
   };
   void navigate(String route) {
@@ -306,7 +516,11 @@ class _WorkspaceState extends State<Workspace> {
                         ),
                       ),
                     ),
-                    Control('x', 'Закрити', onTap: () => Navigator.pop(ctx)),
+                    Control(
+                      'x',
+                      'Закрити'.tr(context),
+                      onTap: () => Navigator.pop(ctx),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -316,7 +530,7 @@ class _WorkspaceState extends State<Workspace> {
                   decoration: InputDecoration(
                     hintText: label,
                     suffixIcon: IconButton(
-                      tooltip: 'Вставити',
+                      tooltip: 'Вставити'.tr(context),
                       icon: const Icon(Icons.content_paste_rounded, size: 18),
                       onPressed: () async {
                         final data = await Clipboard.getData(
@@ -349,7 +563,7 @@ class _WorkspaceState extends State<Workspace> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     ActionButton(
-                      'Скасувати',
+                      'Скасувати'.tr(context),
                       flat: true,
                       onTap: () => Navigator.pop(ctx),
                     ),
@@ -377,7 +591,10 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   Future<void> createPlaylist([Json? track]) async {
-    final name = await textDialog('Новий плейліст', 'Назва плейліста');
+    final name = await textDialog(
+      'Новий плейліст'.tr(context),
+      'Назва плейліста'.tr(context),
+    );
     if (name != null) c.createPlaylist(name, track);
   }
 
@@ -395,16 +612,20 @@ class _WorkspaceState extends State<Workspace> {
               children: [
                 Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Додати до плейліста',
+                        'Додати до плейліста'.tr(context),
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                    Control('x', 'Закрити', onTap: () => Navigator.pop(ctx)),
+                    Control(
+                      'x',
+                      'Закрити'.tr(context),
+                      onTap: () => Navigator.pop(ctx),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 18),
@@ -415,9 +636,9 @@ class _WorkspaceState extends State<Workspace> {
                       for (final p in c.playlists)
                         ListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: Text(p['name'] ?? 'Плейліст'),
+                          title: Text(p['name'] ?? 'Плейліст'.tr(context)),
                           subtitle: Text(
-                            trackCount(objects(p['tracks']).length),
+                            trackCount(objects(p['tracks']).length, context),
                           ),
                           onTap: () => Navigator.pop(ctx, p['id'].toString()),
                         ),
@@ -426,7 +647,7 @@ class _WorkspaceState extends State<Workspace> {
                 ),
                 const SizedBox(height: 16),
                 ActionButton(
-                  'Новий плейліст',
+                  'Новий плейліст'.tr(context),
                   icon: 'plus',
                   onTap: () => Navigator.pop(ctx, '__new__'),
                 ),
@@ -443,21 +664,22 @@ class _WorkspaceState extends State<Workspace> {
     }
   }
 
+  Widget trackRow(List<Json> tracks, int i, {bool queue = false}) => TrackRow(
+    tracks[i],
+    key: ValueKey('${trackKey(tracks[i])}:$i'),
+    core: c,
+    queueIndex: queue ? i + (c.hasTrack ? c.queueIndex + 1 : 0) : null,
+    onPlay: queue
+        ? () => c.action('queue_play', {
+            'index': i + (c.hasTrack ? c.queueIndex + 1 : 0),
+          })
+        : () => c.play(tracks[i], tracks),
+    onAddPlaylist: () => addPlaylist(tracks[i]),
+  );
+
   Widget rows(List<Json> tracks, {bool queue = false}) => Column(
     children: [
-      for (var i = 0; i < tracks.length; i++)
-        TrackRow(
-          tracks[i],
-          key: ValueKey('${trackKey(tracks[i])}:$i'),
-          core: c,
-          queueIndex: queue ? i + (c.hasTrack ? c.queueIndex + 1 : 0) : null,
-          onPlay: queue
-              ? () => c.action('queue_play', {
-                  'index': i + (c.hasTrack ? c.queueIndex + 1 : 0),
-                })
-              : () => c.play(tracks[i], tracks),
-          onAddPlaylist: () => addPlaylist(tracks[i]),
-        ),
+      for (var i = 0; i < tracks.length; i++) trackRow(tracks, i, queue: queue),
     ],
   );
   Widget grid(
@@ -507,89 +729,23 @@ class _WorkspaceState extends State<Workspace> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
+          backgroundColor: Colors.transparent,
           body: Row(
             children: [
-              SizedBox(
-                width: 56,
-                child: Column(
-                  children: [
-                    const SizedBox(height: 8),
-                    if (c.canBack)
-                      Control(
-                        'arrow-left',
-                        'Назад',
-                        onTap: c.canBack ? c.back : null,
-                      )
-                    else
-                      const SizedBox(height: 36),
-                    const Spacer(),
-                    for (final n in [
-                      ('home', 'house', 'Головна'),
-                      ('search', 'search', 'Пошук'),
-                      ('library', 'book-open', 'Медіатека'),
-                    ])
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Control(
-                          n.$2,
-                          n.$3,
-                          size: 40,
-                          active:
-                              c.route == n.$1 ||
-                              (n.$1 == 'library' &&
-                                  ['playlist', 'liked'].contains(c.route)),
-                          onTap: () => navigate(n.$1),
-                        ),
-                      ),
-                    const Spacer(),
-                    Control(
-                      'download',
-                      'Завантаження',
-                      size: 40,
-                      active: c.route == 'downloads',
-                      onTap: () => navigate('downloads'),
-                    ),
-                    const SizedBox(height: 8),
-                    Control(
-                      'settings',
-                      'Налаштування',
-                      size: 40,
-                      active: c.route == 'settings',
-                      onTap: () => navigate('settings'),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
+              _sidebar(context),
               Expanded(
                 child: Stack(
                   children: [
                     LayoutBuilder(
-                      builder: (context, box) => ListView(
-                        controller: scroll,
-                        padding: EdgeInsets.fromLTRB(
-                          24,
-                          68,
-                          24,
-                          c.route == 'now' || !c.hasTrack ? 32 : 152,
+                      builder: (context, box) => AnimatedSwitcher(
+                        duration: Duration(milliseconds: c.reduced ? 0 : 220),
+                        switchInCurve: Anicry.easeOut,
+                        transitionBuilder: (child, animation) =>
+                            FadeTransition(opacity: animation, child: child),
+                        child: SizedBox.expand(
+                          key: ValueKey(c.route),
+                          child: pageViewport(box.maxWidth - 48),
                         ),
-                        children: [
-                          AnimatedSwitcher(
-                            duration: Duration(
-                              milliseconds: c.reduced ? 0 : 220,
-                            ),
-                            switchInCurve: Anicry.easeOut,
-                            transitionBuilder: (child, animation) =>
-                                FadeTransition(
-                                  opacity: animation,
-                                  child: child,
-                                ),
-                            child: KeyedSubtree(
-                              key: ValueKey(c.route),
-                              child: page(box.maxWidth - 48),
-                            ),
-                          ),
-                        ],
                       ),
                     ),
                     Positioned(
@@ -655,7 +811,9 @@ class _WorkspaceState extends State<Workspace> {
                                             ),
                                             const SizedBox(width: 10),
                                             Text(
-                                              'Трек, артист, посилання',
+                                              'Трек, артист, посилання'.tr(
+                                                context,
+                                              ),
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 color: p.muted,
@@ -671,7 +829,7 @@ class _WorkspaceState extends State<Workspace> {
                               ],
                               Control(
                                 'user-round',
-                                'Твій профіль',
+                                'Твій профіль'.tr(context),
                                 active: c.route == 'profile',
                                 onTap: () => navigate('profile'),
                               ),
@@ -695,8 +853,8 @@ class _WorkspaceState extends State<Workspace> {
                           constraints: const BoxConstraints(maxWidth: 480),
                           child: ErrorNotice(
                             c.error.isNotEmpty
-                                ? c.error
-                                : c.state['message'].toString(),
+                                ? c.error.tr(context)
+                                : c.state['message'].toString().tr(context),
                             key: ValueKey(
                               c.error.isNotEmpty ? c.error : c.state['message'],
                             ),
@@ -714,13 +872,66 @@ class _WorkspaceState extends State<Workspace> {
     );
   }
 
+  Widget pageViewport(double width) {
+    final padding = EdgeInsets.fromLTRB(
+      24,
+      68,
+      24,
+      c.route == 'now' || !c.hasTrack ? 32 : 152,
+    );
+    // Match the collection fallback in page(), leaving other page layouts intact.
+    final collection =
+        c.ready &&
+        !const {
+          'home',
+          'library',
+          'profile',
+          'creator',
+          'search',
+          'now',
+          'settings',
+          'downloads',
+          'stats',
+        }.contains(c.route);
+    if (!collection) {
+      return ListView(
+        controller: scroll,
+        padding: padding,
+        children: [page(width)],
+      );
+    }
+    final tracks = c.tracks;
+    final queue = c.route == 'queue';
+    return CustomScrollView(
+      controller: scroll,
+      slivers: [
+        SliverPadding(
+          padding: padding,
+          sliver: SliverMainAxisGroup(
+            slivers: [
+              SliverToBoxAdapter(child: collectionHeader(width, tracks)),
+              SliverFixedExtentList(
+                itemExtent:
+                    64, // TrackRow's explicit height at every text scale.
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => trackRow(tracks, index, queue: queue),
+                  childCount: tracks.length,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget page(double width) {
     if (!c.ready) {
       return EmptyState(
         c.error.isEmpty
-            ? 'Відкриваємо медіатеку…'
-            : 'Не вдалося відкрити медіатеку',
-        c.error,
+            ? 'Відкриваємо медіатеку…'.tr(context)
+            : 'Не вдалося відкрити медіатеку'.tr(context),
+        c.error.tr(context),
       );
     }
     switch (c.route) {
@@ -748,12 +959,11 @@ class _WorkspaceState extends State<Workspace> {
       case 'stats':
         return statistics();
       default:
-        return collectionPage(width);
+        return collectionHeader(width, c.tracks);
     }
   }
 
-  Widget collectionPage(double width) {
-    final ts = c.tracks;
+  Widget collectionHeader(double width, List<Json> ts) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -772,7 +982,7 @@ class _WorkspaceState extends State<Workspace> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      c.playlist['name'] ?? 'Плейліст',
+                      c.playlist['name'] ?? 'Плейліст'.tr(context),
                       style: const TextStyle(
                         fontFamily: SoundFlowType.heading,
                         fontSize: 34,
@@ -782,26 +992,26 @@ class _WorkspaceState extends State<Workspace> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      trackCount(ts.length),
+                      trackCount(ts.length, context),
                       style: TextStyle(color: context.paints.muted),
                     ),
                     const SizedBox(height: 24),
                     actions([
                       ActionButton(
-                        'Відтворити',
+                        'Відтворити'.tr(context),
                         icon: 'play',
                         primary: true,
                         onTap: ts.isEmpty ? null : () => c.play(ts.first, ts),
                       ),
                       ActionButton(
-                        'Перейменувати',
+                        'Перейменувати'.tr(context),
                         flat: true,
                         onTap: () async {
                           final value = await textDialog(
-                            'Перейменувати плейліст',
-                            'Назва',
+                            'Перейменувати плейліст'.tr(context),
+                            'Назва'.tr(context),
                             value: c.playlist['name'] ?? '',
-                            confirm: 'Зберегти',
+                            confirm: 'Зберегти'.tr(context),
                           );
                           if (value != null) {
                             c.call('rename_playlist', [
@@ -829,7 +1039,7 @@ class _WorkspaceState extends State<Workspace> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Зараз звучить',
+                      'Зараз звучить'.tr(context),
                       style: TextStyle(
                         color: context.paints.muted,
                         fontSize: 13,
@@ -837,7 +1047,7 @@ class _WorkspaceState extends State<Workspace> {
                     ),
                     const SizedBox(height: 7),
                     Text(
-                      trackTitle(c.current),
+                      trackTitle(c.current, context),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -847,7 +1057,7 @@ class _WorkspaceState extends State<Workspace> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      trackArtist(c.current),
+                      trackArtist(c.current, context),
                       style: TextStyle(color: context.paints.muted),
                     ),
                   ],
@@ -855,7 +1065,7 @@ class _WorkspaceState extends State<Workspace> {
               ),
               Control(
                 c.playing ? 'pause' : 'play',
-                c.playing ? 'Пауза' : 'Продовжити',
+                c.playing ? 'Пауза'.tr(context) : 'Продовжити'.tr(context),
                 primary: true,
                 size: 44,
                 onTap: () => c.player('toggle'),
@@ -864,9 +1074,9 @@ class _WorkspaceState extends State<Workspace> {
           ),
           const SizedBox(height: 30),
           Heading(
-            'Далі звучатиме',
+            'Далі звучатиме'.tr(context),
             action: ActionButton(
-              'Очистити наступні',
+              'Очистити наступні'.tr(context),
               flat: true,
               onTap: () => c.action('queue_clear'),
             ),
@@ -876,14 +1086,14 @@ class _WorkspaceState extends State<Workspace> {
         if (c.route != 'playlist' && c.route != 'queue') ...[
           actions([
             ActionButton(
-              'Відтворити',
+              'Відтворити'.tr(context),
               icon: 'play',
               primary: true,
               onTap: ts.isEmpty ? null : () => c.play(ts.first, ts),
             ),
             if (c.route == 'history')
               ActionButton(
-                'Статистика',
+                'Статистика'.tr(context),
                 flat: true,
                 onTap: () => navigate('stats'),
               ),
@@ -892,15 +1102,14 @@ class _WorkspaceState extends State<Workspace> {
         ],
         if (c.pending > 0 && c.route == 'flow')
           const LinearProgressIndicator(minHeight: 2),
-        if (ts.isNotEmpty) rows(ts, queue: c.route == 'queue'),
         if (ts.isEmpty && c.pending == 0)
           EmptyState(
             c.route == 'queue'
-                ? 'Наступних треків ще немає'
-                : 'Тут поки немає треків',
-            'Знайди музику або додай трек із медіатеки.',
+                ? 'Наступних треків ще немає'.tr(context)
+                : 'Тут поки немає треків'.tr(context),
+            'Знайди музику або додай трек із медіатеки.'.tr(context),
             action: ActionButton(
-              'Знайти музику',
+              'Знайти музику'.tr(context),
               onTap: () => navigate('search'),
             ),
           ),
@@ -914,10 +1123,10 @@ class _WorkspaceState extends State<Workspace> {
       final t = object(pb['track']);
       if (t.isEmpty) {
         return EmptyState(
-          'Оберіть трек',
-          'Знайди музику або відкрий медіатеку.',
+          'Оберіть трек'.tr(context),
+          'Знайди музику або відкрий медіатеку.'.tr(context),
           action: ActionButton(
-            'Знайти музику',
+            'Знайти музику'.tr(context),
             primary: true,
             onTap: () => navigate('search'),
           ),
@@ -926,6 +1135,7 @@ class _WorkspaceState extends State<Workspace> {
       final cover = math.min(480.0, width * .44),
           duration = (pb['duration'] as num?)?.toDouble() ?? 0,
           position = (pb['position'] as num?)?.toDouble() ?? 0;
+      final status = pb['status']?.toString() ?? '';
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -941,7 +1151,7 @@ class _WorkspaceState extends State<Workspace> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        trackTitle(t),
+                        trackTitle(t, context),
                         style: TextStyle(
                           fontFamily: SoundFlowType.heading,
                           fontSize: width > 950 ? 36 : 27,
@@ -953,7 +1163,7 @@ class _WorkspaceState extends State<Workspace> {
                       InkWell(
                         onTap: () => c.showCreator(t),
                         child: Text(
-                          trackArtist(t),
+                          trackArtist(t, context),
                           style: TextStyle(
                             fontSize: 18,
                             color: context.paints.muted,
@@ -977,20 +1187,22 @@ class _WorkspaceState extends State<Workspace> {
                         children: [
                           Control(
                             'shuffle',
-                            'Перемішати',
+                            'Перемішати'.tr(context),
                             active: c.settings['shuffle'] == true,
                             onTap: () => c.player('shuffle'),
                           ),
                           const Spacer(),
                           Control(
                             'skip-back',
-                            'Попередній трек',
+                            'Попередній трек'.tr(context),
                             onTap: () => c.player('previous'),
                           ),
                           SizedBox(width: width < 850 ? 8 : 20),
                           Control(
                             pb['playing'] == true ? 'pause' : 'play',
-                            pb['playing'] == true ? 'Пауза' : 'Відтворити',
+                            pb['playing'] == true
+                                ? 'Пауза'.tr(context)
+                                : 'Відтворити'.tr(context),
                             primary: true,
                             size: 62,
                             onTap: () => c.player('toggle'),
@@ -998,13 +1210,13 @@ class _WorkspaceState extends State<Workspace> {
                           SizedBox(width: width < 850 ? 8 : 20),
                           Control(
                             'skip-forward',
-                            'Наступний трек',
+                            'Наступний трек'.tr(context),
                             onTap: () => c.player('next'),
                           ),
                           const Spacer(),
                           Control(
                             'repeat',
-                            'Повтор',
+                            'Повтор'.tr(context),
                             active: c.settings['repeat'] != 'off',
                             onTap: () => c.player('repeat'),
                           ),
@@ -1017,8 +1229,8 @@ class _WorkspaceState extends State<Workspace> {
                           Control(
                             'heart',
                             c.isLiked(t)
-                                ? 'Прибрати з улюбленого'
-                                : 'Додати в улюблене',
+                                ? 'Прибрати з улюбленого'.tr(context)
+                                : 'Додати в улюблене'.tr(context),
                             active: c.isLiked(t),
                             onTap: () => c.action('like', t),
                           ),
@@ -1038,15 +1250,21 @@ class _WorkspaceState extends State<Workspace> {
                                   c.command({'type': 'volume', 'value': v}),
                             ),
                           ),
-                          Control('expand', 'Мініплеєр', onTap: c.island),
+                          Control(
+                            'expand',
+                            'Мініплеєр'.tr(context),
+                            onTap: c.island,
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
                       Center(
                         child: Text(
-                          pb['loading'] == true
-                              ? 'Завантажуємо…'
-                              : sourceName(t),
+                          status.isNotEmpty
+                              ? status.tr(context)
+                              : pb['loading'] == true
+                              ? 'Завантажуємо…'.tr(context)
+                              : sourceName(t, context),
                           style: TextStyle(
                             fontSize: 12,
                             color: context.paints.muted,
@@ -1061,9 +1279,9 @@ class _WorkspaceState extends State<Workspace> {
           ),
           const SizedBox(height: 32),
           Heading(
-            'Далі в черзі',
+            'Далі в черзі'.tr(context),
             action: ActionButton(
-              'Уся черга',
+              'Уся черга'.tr(context),
               flat: true,
               onTap: () => navigate('queue'),
             ),
@@ -1079,10 +1297,10 @@ class _WorkspaceState extends State<Workspace> {
     final jobs = objects(c.state['downloads']);
     return jobs.isEmpty
         ? EmptyState(
-            'Музика без мережі',
-            'Збережені завантаження з’являться тут.',
+            'Музика без мережі'.tr(context),
+            'Збережені завантаження з’являться тут.'.tr(context),
             action: ActionButton(
-              'Відкрити папку',
+              'Відкрити папку'.tr(context),
               onTap: () => c.call('open_downloads_directory'),
             ),
           )
@@ -1104,13 +1322,14 @@ class _WorkspaceState extends State<Workspace> {
                                 job['track'] is Map
                                     ? object(job['track'])
                                     : job,
+                                context,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 7),
                             Text(
-                              job['status']?.toString() ?? '',
+                              (job['status']?.toString() ?? '').tr(context),
                               style: TextStyle(
                                 color: context.paints.muted,
                                 fontSize: 12,
@@ -1131,7 +1350,9 @@ class _WorkspaceState extends State<Workspace> {
                       const SizedBox(width: 20),
                       Control(
                         job['status'] == 'completed' ? 'arrow-up-right' : 'x',
-                        job['status'] == 'completed' ? 'Відкрити' : 'Скасувати',
+                        job['status'] == 'completed'
+                            ? 'Відкрити'.tr(context)
+                            : 'Скасувати'.tr(context),
                         onTap: () => c.call(
                           job['status'] == 'completed'
                               ? 'reveal_download'
@@ -1150,8 +1371,10 @@ class _WorkspaceState extends State<Workspace> {
     final stats = object(c.state['stats']);
     if (stats.isEmpty) {
       return EmptyState(
-        c.pending > 0 ? 'Завантажуємо статистику…' : 'Ще немає статистики',
-        'Тут з’являться дані прослуховування.',
+        c.pending > 0
+            ? 'Завантажуємо статистику…'.tr(context)
+            : 'Ще немає статистики'.tr(context),
+        'Тут з’являться дані прослуховування.'.tr(context),
       );
     }
     return Column(
@@ -1161,16 +1384,20 @@ class _WorkspaceState extends State<Workspace> {
           Text(
             stats['message']?.toString() ??
                 stats['error']?.toString() ??
-                'Статистика доступна з SoundFlow Plus',
+                'Статистика доступна з SoundFlow Plus'.tr(context),
             style: const TextStyle(fontSize: 18),
           ),
         if (stats['locked'] != true)
           Text(
-            '${stats['plays'] ?? 0} прослуховувань\n${stats['unique_tracks'] ?? 0} треків · ${stats['unique_artists'] ?? 0} виконавців',
+            '{plays} прослуховувань\n{tracks} треків · {artists} виконавців'
+                .tr(context)
+                .replaceAll('{plays}', '${stats['plays'] ?? 0}')
+                .replaceAll('{tracks}', '${stats['unique_tracks'] ?? 0}')
+                .replaceAll('{artists}', '${stats['unique_artists'] ?? 0}'),
             style: const TextStyle(fontSize: 24, height: 1.8),
           ),
         const SizedBox(height: 32),
-        const Heading('Нещодавно слухали'),
+        Heading('Нещодавно слухали'.tr(context)),
         const SizedBox(height: 16),
         rows(c.recent.take(20).toList()),
       ],

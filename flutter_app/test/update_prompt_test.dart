@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:animate_icons/animate_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +25,7 @@ void main() {
   });
   PreviewCore fixture({String status = 'available'}) {
     final core = PreviewCore();
+    core.settings['auto_update_install'] = false;
     core.state['update'] = {
       'status': status,
       'sequence': 1,
@@ -67,6 +69,10 @@ void main() {
       RepaintBoundary(
         key: boundary,
         child: MaterialApp(
+      locale: const Locale('uk'),
+      supportedLocales: const [Locale('uk'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+
           theme: soundflowTheme(true, reduced),
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(context).copyWith(
@@ -102,7 +108,7 @@ void main() {
         core.commands.where((v) => v['action'] == 'update-check'),
         hasLength(1),
       );
-      expect(core.commands.last['payload'], {'download': false});
+      expect(core.commands.last['payload'], {'download': false, 'auto': false});
       core.dispose();
       final cached = fixture(status: 'ready');
       cached.checkForStartupUpdate(now: now);
@@ -114,6 +120,41 @@ void main() {
       offline.dispose();
     },
   );
+  test('automatic downloads are enabled by default and respect opt-out', () {
+    final core = fixture(status: 'idle');
+    core.settings.remove('auto_update_install');
+    core.checkForStartupUpdate();
+    expect(core.commands.last['payload'], {'download': true, 'auto': true});
+    core.dispose();
+
+    final disabled = fixture(status: 'idle');
+    disabled.settings['auto_update_enabled'] = false;
+    disabled.checkForStartupUpdate();
+    expect(disabled.commands, isEmpty);
+    disabled.dispose();
+  });
+
+  test('disabling automatic downloads cancels the background transfer', () {
+    final core = fixture(status: 'downloading');
+    core.setting('auto_update_install', false);
+    expect(core.commands.last['action'], 'update-cancel');
+    core.dispose();
+  });
+
+  testWidgets('background updates never open a blocking offer', (tester) async {
+    final core = fixture();
+    core.settings.remove('auto_update_install');
+    await mount(tester, core);
+    expect(find.byType(UpdatePrompt), findsNothing);
+    emit(core, 'downloading', received: 16800000);
+    await tester.pumpAndSettle();
+    emit(core, 'ready');
+    await tester.pumpAndSettle();
+    expect(find.byType(UpdatePrompt), findsNothing);
+    expect(core.commands, isEmpty);
+    await unmount(tester, core);
+  });
+
   test(
     'startup retries a failed check without duplicating an active check',
     () {
@@ -368,6 +409,10 @@ void main() {
     });
     await tester.pumpWidget(
       MaterialApp(
+      locale: const Locale('uk'),
+      supportedLocales: const [Locale('uk'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+
         theme: soundflowTheme(true, false),
         home: UpdatePromptHost(
           core: core,

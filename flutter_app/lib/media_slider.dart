@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'core.dart';
+import 'l10n.dart';
 
 class MediaSlider extends StatefulWidget {
   const MediaSlider({
@@ -152,8 +153,10 @@ class _PlaybackTimelineState extends State<PlaybackTimeline> {
       child: MediaSlider(
         value: position,
         max: max,
-        semanticFormatterCallback: (v) =>
-            '${clock(v)} із ${clock(widget.duration)}',
+        semanticFormatterCallback: (v) => '{position} із {duration}'
+            .tr(context)
+            .replaceAll('{position}', clock(v))
+            .replaceAll('{duration}', clock(widget.duration)),
         onPreview: widget.onSeek == null
             ? null
             : (v) {

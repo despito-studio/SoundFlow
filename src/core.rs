@@ -228,6 +228,7 @@ impl Core {
                 | "remove_search_query"
                 | "clear_search_history"
                 | "import_library"
+                | "restore_library_backup"
                 | "import_legacy_library"
                 | "configure_cloud"
                 | "restore_session"
@@ -388,6 +389,13 @@ impl Core {
                 &self.library.snapshot()
             )
             .map_err(|e| e.to_string())?)),
+            "list_library_backups" => self.library.list_backups(),
+            "create_library_backup" => self.library.create_backup(),
+            "restore_library_backup" => {
+                let result = self.library.restore_backup(string_arg(args, 0)?)?;
+                self.refresh_local_files();
+                Ok(result)
+            }
             "import_library" => {
                 // Другий аргумент — режим злиття (використовується синхронізацією).
                 let merge = arg(args, 1).as_bool().unwrap_or(false);
@@ -509,10 +517,9 @@ impl Core {
                 let email = arg(args, 0)["email"].as_str().unwrap_or("");
                 let password = arg(args, 0)["password"].as_str().unwrap_or("");
                 if !self.cloud.base_url().is_empty() {
-                    if let Ok(status) = self.cloud.sign_in(arg(args, 0), false) {
-                        self.switch_account()?;
-                        return Ok(status);
-                    }
+                    let status = self.cloud.sign_in(arg(args, 0), false)?;
+                    self.switch_account()?;
+                    return Ok(status);
                 }
                 let status = self.accounts.local_sign_in(email, password)?;
                 let active = self.accounts.active_id().to_string();
@@ -524,10 +531,9 @@ impl Core {
                 let email = arg(args, 0)["email"].as_str().unwrap_or("");
                 let password = arg(args, 0)["password"].as_str().unwrap_or("");
                 if !self.cloud.base_url().is_empty() {
-                    if let Ok(status) = self.cloud.sign_in(arg(args, 0), true) {
-                        self.switch_account()?;
-                        return Ok(status);
-                    }
+                    let status = self.cloud.sign_in(arg(args, 0), true)?;
+                    self.switch_account()?;
+                    return Ok(status);
                 }
                 let status = self.accounts.local_sign_up(name, email, password)?;
                 let active = self.accounts.active_id().to_string();
@@ -820,4 +826,32 @@ fn legacy_active_path() -> Option<PathBuf> {
         }
     }
     Some(guest)
+}
+
+#[cfg(test)]
+mod account_auth_tests {
+    use super::*;
+
+    #[test]
+    fn configured_cloud_auth_errors_do_not_fall_back_to_local_accounts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = Core::open(dir.path().to_path_buf(), true).unwrap();
+        // Cloud rejects this long email before any network request. Local auth must not run.
+        let email = format!("{}@example.com", "x".repeat(255));
+        let password = "password123";
+        core.accounts.local_sign_up("Local", &email, password).unwrap();
+        core.accounts.sign_out().unwrap();
+        core.cloud.configure(&json!({"base_url":"https://example.invalid"})).unwrap();
+        let error = core.local_rpc("sign_in", &[json!({
+            "email":email, "password":password
+        })]).unwrap_err();
+        assert!(error.contains("8 символів"));
+        assert_eq!(core.accounts.active_id(), "guest");
+        let error = core.local_rpc("sign_up", &[json!({
+            "name":"New", "email":format!("new{email}"), "password":password
+        })]).unwrap_err();
+        assert!(error.contains("8 символів"));
+        assert_eq!(core.accounts.active_id(), "guest");
+        assert_eq!(core.accounts.config.accounts.len(), 1);
+    }
 }

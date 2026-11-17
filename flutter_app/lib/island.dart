@@ -4,11 +4,13 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'anicry_motion.dart';
 import 'core.dart';
+import 'l10n.dart';
 import 'concentric.dart';
 import 'design.dart';
 import 'media_slider.dart';
@@ -24,6 +26,7 @@ class _IslandAppState extends State<IslandApp>
     with SingleTickerProviderStateMixin {
   final playback = ValueNotifier<Json>({});
   final boundaryKey = GlobalKey();
+  String language = 'uk';
   bool exported = false;
   bool hover = false,
       expanded = false,
@@ -45,8 +48,12 @@ class _IslandAppState extends State<IslandApp>
       if (call.method == 'state') {
         final data = object(call.arguments);
         playback.value = object(data['player']);
-        if (reduced != (data['reduced'] == true)) {
-          setState(() => reduced = data['reduced'] == true);
+        final nextLanguage = data['language'] == 'en' ? 'en' : 'uk';
+        if (reduced != (data['reduced'] == true) || language != nextLanguage) {
+          setState(() {
+            reduced = data['reduced'] == true;
+            language = nextLanguage;
+          });
         }
       } else if (call.method == 'shown') {
         dismissal?.cancel();
@@ -222,6 +229,9 @@ class _IslandAppState extends State<IslandApp>
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
+    locale: Locale(language),
+    supportedLocales: const [Locale('uk'), Locale('en')],
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
     scrollBehavior: const MaterialScrollBehavior().copyWith(scrollbars: false),
     theme: soundflowTheme(true, reduced),
     builder: (context, child) => MediaQuery(
@@ -281,6 +291,7 @@ class _IslandAppState extends State<IslandApp>
                       final track = object(pb['track']),
                           hasTrack = track.isNotEmpty;
                       final playing = pb['playing'] == true;
+                      final String status = pb['status']?.toString() ?? '';
                       return AnimatedBuilder(
                         animation: curve,
                         builder: (context, _) {
@@ -337,8 +348,13 @@ class _IslandAppState extends State<IslandApp>
                                                     children: [
                                                       Text(
                                                         hasTrack
-                                                            ? trackTitle(track)
-                                                            : 'Обери музику',
+                                                            ? trackTitle(
+                                                                track,
+                                                                context,
+                                                              )
+                                                            : 'Обери музику'.tr(
+                                                                context,
+                                                              ),
                                                         maxLines: 1,
                                                         overflow: TextOverflow
                                                             .ellipsis,
@@ -351,9 +367,15 @@ class _IslandAppState extends State<IslandApp>
                                                       ),
                                                       const SizedBox(height: 3),
                                                       Text(
-                                                        hasTrack
-                                                            ? trackArtist(track)
-                                                            : 'Відкрити пошук',
+                                                        status.isNotEmpty
+                                                            ? status.tr(context)
+                                                            : hasTrack
+                                                            ? trackArtist(
+                                                                track,
+                                                                context,
+                                                              )
+                                                            : 'Відкрити пошук'
+                                                                  .tr(context),
                                                         maxLines: 1,
                                                         overflow: TextOverflow
                                                             .ellipsis,
@@ -397,7 +419,7 @@ class _IslandAppState extends State<IslandApp>
                                             children: [
                                               Control(
                                                 'heart',
-                                                'Улюблене',
+                                                'Улюблене'.tr(context),
                                                 size: 30,
                                                 glyphSize: 17,
                                                 active: pb['liked'] == true,
@@ -414,7 +436,9 @@ class _IslandAppState extends State<IslandApp>
                                                 children: [
                                                   Control(
                                                     'skip-back',
-                                                    'Попередній трек',
+                                                    'Попередній трек'.tr(
+                                                      context,
+                                                    ),
                                                     size: 36,
                                                     glyphSize: 22,
                                                     onTap: hasTrack
@@ -426,8 +450,10 @@ class _IslandAppState extends State<IslandApp>
                                                   Control(
                                                     playing ? 'pause' : 'play',
                                                     playing
-                                                        ? 'Пауза'
-                                                        : 'Відтворити',
+                                                        ? 'Пауза'.tr(context)
+                                                        : 'Відтворити'.tr(
+                                                            context,
+                                                          ),
                                                     size: 40,
                                                     glyphSize: 27,
                                                     onTap: hasTrack
@@ -437,7 +463,9 @@ class _IslandAppState extends State<IslandApp>
                                                   const SizedBox(width: 8),
                                                   Control(
                                                     'skip-forward',
-                                                    'Наступний трек',
+                                                    'Наступний трек'.tr(
+                                                      context,
+                                                    ),
                                                     size: 36,
                                                     glyphSize: 22,
                                                     onTap: hasTrack
@@ -450,7 +478,7 @@ class _IslandAppState extends State<IslandApp>
                                                 (pb['volume'] as num?) == 0
                                                     ? 'volume-x'
                                                     : 'volume-2',
-                                                'Вимкнути звук',
+                                                'Вимкнути звук'.tr(context),
                                                 size: 30,
                                                 glyphSize: 17,
                                                 onTap: hasTrack
@@ -562,7 +590,7 @@ class _PlaybackPulseState extends State<PlaybackPulse>
 
   @override
   Widget build(BuildContext context) => Semantics(
-    label: widget.playing ? 'Відтворюється' : 'Пауза',
+    label: widget.playing ? 'Відтворюється'.tr(context) : 'Пауза'.tr(context),
     child: RepaintBoundary(
       child: SizedBox.square(
         dimension: widget.size,

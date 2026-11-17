@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'anicry_motion.dart';
 import 'core.dart';
+import 'l10n.dart';
 import 'design.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -28,11 +29,11 @@ class _SettingsPageState extends State<SettingsPage> {
             runSpacing: 8,
             children: [
               for (final tab in [
-                ('appearance', 'Вигляд'),
-                ('playback', 'Відтворення'),
-                ('controls', 'Керування'),
-                ('library', 'Медіатека'),
-                ('updates', 'Оновлення'),
+                ('appearance', 'Вигляд'.tr(context)),
+                ('playback', 'Відтворення'.tr(context)),
+                ('controls', 'Керування'.tr(context)),
+                ('library', 'Медіатека'.tr(context)),
+                ('updates', 'Оновлення'.tr(context)),
               ])
                 Semantics(
                   button: true,
@@ -44,7 +45,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     borderRadius: BorderRadius.circular(9),
                     child: AnicryTap(
                       radius: 9,
-                      onTap: () => setState(() => section = tab.$1),
+                      onTap: () {
+                        setState(() => section = tab.$1);
+                        if (section == 'library') {
+                          core.call('list_library_backups');
+                        }
+                      },
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -87,14 +93,14 @@ class _SettingsPageState extends State<SettingsPage> {
               if (core.update['status'] == 'ready')
                 ActionButton(
                   core.update['installed'] == true
-                      ? 'Перезапустити для оновлення'
-                      : 'Встановити оновлення',
+                      ? 'Перезапустити для оновлення'.tr(context)
+                      : 'Встановити оновлення'.tr(context),
                   compact: true,
                   flat: true,
                   onTap: () => core.action('update-apply'),
                 ),
               ActionButton(
-                'Про програму',
+                'Про програму'.tr(context),
                 compact: true,
                 flat: true,
                 onTap: () => showAboutDialog(
@@ -103,7 +109,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   applicationVersion:
                       core.update['current']?.toString() ?? '1.1.1',
                   children: [
-                    const Text('Музика, медіатека й мініплеєр для Windows.'),
+                    Text(
+                      'Музика, медіатека й мініплеєр для Windows.'.tr(context),
+                    ),
                   ],
                 ),
               ),
@@ -117,23 +125,43 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _appearance(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      _heading(context, 'Оформлення'),
+      _heading(context, 'Оформлення'.tr(context)),
       _group(context, [
-        _choiceRow(context, 'Тема', 'Колір інтерфейсу', _themeChoices(context)),
         _choiceRow(
           context,
-          'Іконка',
-          'На робочому столі та панелі задач',
+          'Мова'.tr(context),
+          'Мова інтерфейсу'.tr(context),
+          DropdownButton<String>(
+            value: core.language,
+            items: const [
+              DropdownMenuItem(value: 'uk', child: Text('Українська')),
+              DropdownMenuItem(value: 'en', child: Text('English')),
+            ],
+            onChanged: (value) {
+              if (value != null) core.setting('language', value);
+            },
+          ),
+        ),
+        _choiceRow(
+          context,
+          'Тема'.tr(context),
+          'Колір інтерфейсу'.tr(context),
+          _themeChoices(context),
+        ),
+        _choiceRow(
+          context,
+          'Іконка'.tr(context),
+          'На робочому столі та панелі задач'.tr(context),
           _iconChoices(context),
         ),
       ]),
       const SizedBox(height: 24),
-      _heading(context, 'Анімації'),
+      _heading(context, 'Анімації'.tr(context)),
       _group(context, [
         _toggle(
           context,
-          'Менше руху',
-          'Спокійні переходи без переміщення елементів.',
+          'Менше руху'.tr(context),
+          'Спокійні переходи без переміщення елементів.'.tr(context),
           'reduced_motion',
           false,
         ),
@@ -155,20 +183,31 @@ class _SettingsPageState extends State<SettingsPage> {
     final total = (update['total'] as num?)?.toDouble() ?? 0;
     final received = (update['received'] as num?)?.toDouble() ?? 0;
     final description = status == 'idle'
-        ? 'Перевірити, чи є нова версія SoundFlow.'
-        : update['message']?.toString() ?? '';
+        ? 'Перевірити, чи є нова версія SoundFlow.'.tr(context)
+        : (update['message']?.toString() ?? '').tr(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _heading(context, 'Оновлення SoundFlow'),
+        _heading(context, 'Оновлення SoundFlow'.tr(context)),
         _group(context, [
           _toggle(
             context,
-            'Автоматичні оновлення',
+            'Автоматичні оновлення'.tr(context),
             update['installed'] == true
-                ? 'Показувати нову версію після запуску. «Оновити» завантажить і встановить її.'
-                : 'Автооновлення доступні в готовій версії. Ця збірка призначена для розробки.',
+                ? 'Перевіряти нові версії після запуску та кожні 12 годин.'.tr(
+                    context,
+                  )
+                : 'Автооновлення доступні в готовій версії. Ця збірка призначена для розробки.'
+                      .tr(context),
             'auto_update_enabled',
+            true,
+          ),
+          _toggle(
+            context,
+            'Завантажувати оновлення автоматично'.tr(context),
+            'Завантаження у фоні, встановлення під час наступного запуску. Музика не перериватиметься. Вимкни, щоб оновлювати вручну.'
+                .tr(context),
+            'auto_update_install',
             true,
           ),
           Padding(
@@ -179,8 +218,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: _label(
                     context,
                     update['version'] == null
-                        ? 'Версія ${update['current'] ?? '1.1.1'}'
-                        : 'Доступна версія ${update['version']}',
+                        ? 'Версія {version}'
+                              .tr(context)
+                              .replaceAll(
+                                '{version}',
+                                '${update['current'] ?? '1.1.1'}',
+                              )
+                        : 'Доступна версія {version}'
+                              .tr(context)
+                              .replaceAll('{version}', '${update['version']}'),
                     description,
                   ),
                 ),
@@ -189,7 +235,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     status == 'checking' ||
                     status == 'verifying')
                   ActionButton(
-                    'Скасувати',
+                    'Скасувати'.tr(context),
                     compact: true,
                     flat: true,
                     onTap: () => core.action('update-cancel'),
@@ -198,10 +244,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   ActionButton(
                     switch (status) {
                       'available' =>
-                        update['installed'] == true ? 'Оновити' : 'Завантажити',
+                        update['installed'] == true
+                            ? 'Оновити'.tr(context)
+                            : 'Завантажити'.tr(context),
                       'ready' =>
-                        update['installed'] == true ? 'Оновити' : 'Встановити',
-                      _ => 'Перевірити',
+                        update['installed'] == true
+                            ? 'Оновити'.tr(context)
+                            : 'Встановити'.tr(context),
+                      _ => 'Перевірити'.tr(context),
                     },
                     compact: true,
                     onTap: () => core.action(switch (status) {
@@ -244,26 +294,34 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _playback(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      _heading(context, 'Відтворення'),
+      _heading(context, 'Відтворення'.tr(context)),
       _group(context, [
         _toggle(
           context,
-          'Нормалізація гучності',
-          'Рівніша гучність між треками.',
+          'Продовжити з того ж місця'.tr(context),
+          'Пам’ятати трек під час перемикання профілів. Новий запуск завжди починається з порожнього плеєра.'
+              .tr(context),
+          'restore_playback_enabled',
+          true,
+        ),
+        _toggle(
+          context,
+          'Нормалізація гучності'.tr(context),
+          'Рівніша гучність між треками.'.tr(context),
           'volume_norm_enabled',
           true,
         ),
         _toggle(
           context,
-          'Автовідтворення',
-          'Схожі треки після завершення черги.',
+          'Автовідтворення'.tr(context),
+          'Схожі треки після завершення черги.'.tr(context),
           'infinite_autoplay',
           true,
         ),
         _toggle(
           context,
-          'Статус у Discord',
-          'Показувати музику, яку ти слухаєш.',
+          'Статус у Discord'.tr(context),
+          'Показувати музику, яку ти слухаєш.'.tr(context),
           'discord_rpc_enabled',
           true,
         ),
@@ -274,31 +332,31 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _controls(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      _heading(context, 'Поведінка'),
+      _heading(context, 'Поведінка'.tr(context)),
       _group(context, [
         _toggle(
           context,
-          'Медіаклавіші та Island',
-          'Керування музикою з інших програм.',
+          'Медіаклавіші та Island'.tr(context),
+          'Керування музикою з інших програм.'.tr(context),
           'hotkeys_enabled',
           true,
         ),
         _toggle(
           context,
-          'Згортати у трей',
-          'Продовжувати слухати після закриття вікна.',
+          'Згортати у трей'.tr(context),
+          'Продовжувати слухати після закриття вікна.'.tr(context),
           'tray_enabled',
           true,
         ),
       ]),
       const SizedBox(height: 24),
-      _heading(context, 'Клавіатурні скорочення'),
+      _heading(context, 'Клавіатурні скорочення'.tr(context)),
       _group(context, [
         for (final shortcut in [
-          ('Пошук', 'Ctrl  K'),
-          ('Відтворення / пауза', 'Space'),
+          ('Пошук'.tr(context), 'Ctrl  K'),
+          ('Відтворення / пауза'.tr(context), 'Space'),
           ('Dynamic Island', 'Ctrl  Alt  M'),
-          ('Island із фокусом', 'Ctrl  Alt  Shift  M'),
+          ('Island із фокусом'.tr(context), 'Ctrl  Alt  Shift  M'),
         ])
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
@@ -324,32 +382,114 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _library(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      _heading(context, 'Медіатека'),
+      _heading(context, 'Медіатека'.tr(context)),
       _group(context, [
         _actionRow(
           context,
-          'Імпорт із сервісів',
-          'Підключені музичні профілі та плейлісти.',
-          'Підключення',
+          'Імпорт із сервісів'.tr(context),
+          'Підключені музичні профілі та плейлісти.'.tr(context),
+          'Підключення'.tr(context),
           () => core.nav('connections'),
         ),
         _actionRow(
           context,
-          'Імпорт медіатеки',
-          'Відновити медіатеку з файлу JSON.',
-          'Імпортувати',
+          'Імпорт медіатеки'.tr(context),
+          'Відновити медіатеку з файлу JSON.'.tr(context),
+          'Імпортувати'.tr(context),
           () => core.call('import_library_file', [true]),
         ),
         _actionRow(
           context,
-          'Резервна копія',
-          'Зберегти плейлісти, улюблене та налаштування.',
-          'Експортувати',
+          'Експорт у файл'.tr(context),
+          'Зберегти медіатеку окремо — наприклад, на іншому диску.'.tr(context),
+          'Експортувати'.tr(context),
           () => core.call('export_library_file'),
         ),
       ]),
+      const SizedBox(height: 24),
+      _heading(context, 'Резервні копії'.tr(context)),
+      _group(context, [
+        _actionRow(
+          context,
+          'Зберегти бібліотеку зараз'.tr(context),
+          'Автоматичні копії створюються перед змінами, не частіше разу на годину. Зберігаються 10 автоматичних і 10 ручних копій на цьому комп’ютері.'
+              .tr(context),
+          'Створити копію'.tr(context),
+          () => core.call('create_library_backup'),
+        ),
+        _actionRow(
+          context,
+          'Збережені копії'.tr(context),
+          'Відновлюються плейлісти, улюблене й історія. Профіль та налаштування залишаються поточними.'
+              .tr(context),
+          'Оновити список'.tr(context),
+          () => core.call('list_library_backups'),
+        ),
+        for (final backup in objects(
+          object(core.state['library_backups'])['backups'],
+        ))
+          _actionRow(
+            context,
+            _backupTitle(backup),
+            '{playlists} плейлістів · {liked} улюблених · {history} в історії'
+                .tr(context)
+                .replaceAll('{playlists}', '${backup['playlist_count']}')
+                .replaceAll('{liked}', '${backup['liked_count']}')
+                .replaceAll('{history}', '${backup['history_count']}'),
+            'Відновити'.tr(context),
+            () => _restoreBackup(backup),
+          ),
+        if (core.state['library_backups'] != null &&
+            objects(object(core.state['library_backups'])['backups']).isEmpty)
+          Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: Text(
+              'Копій ще немає. Створи першу кнопкою вище.'.tr(context),
+            ),
+          ),
+      ]),
     ],
   );
+
+  String _backupTitle(Json backup) {
+    final date = DateTime.fromMillisecondsSinceEpoch(
+      (((backup['created_at'] as num?)?.toDouble() ?? 0) * 1000).round(),
+    ).toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    final kind = switch (backup['kind']) {
+      'automatic' => 'Автоматична'.tr(context),
+      'before_restore' => 'Перед відновленням'.tr(context),
+      _ => 'Ручна'.tr(context),
+    };
+    return '$kind · ${two(date.day)}.${two(date.month)}.${date.year} ${two(date.hour)}:${two(date.minute)}';
+  }
+
+  Future<void> _restoreBackup(Json backup) async {
+    final accepted = await showAnicryDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Відновити бібліотеку?'.tr(context)),
+        content: Text(
+          '{backup}\n\nПлейлісти, улюблене та історію буде замінено. Перед цим SoundFlow збереже поточну бібліотеку в окрему копію.'
+              .tr(context)
+              .replaceAll('{backup}', _backupTitle(backup)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text('Скасувати'.tr(context)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text('Відновити'.tr(context)),
+          ),
+        ],
+      ),
+    );
+    if (accepted == true && mounted) {
+      core.call('restore_library_backup', [backup['id']]);
+    }
+  }
 
   Widget _heading(BuildContext context, String title) => Padding(
     padding: const EdgeInsets.only(left: 2, bottom: 12),
@@ -439,18 +579,18 @@ class _SettingsPageState extends State<SettingsPage> {
   );
 
   Widget _theme(BuildContext context, String scheme) {
-    const labels = {
-      'dark': 'Темна',
-      'light': 'Світла',
-      'rose': 'Рожева',
-      'violet': 'Фіолетова',
-      'ocean': 'Океан',
+    final labels = {
+      'dark': 'Темна'.tr(context),
+      'light': 'Світла'.tr(context),
+      'rose': 'Рожева'.tr(context),
+      'violet': 'Фіолетова'.tr(context),
+      'ocean': 'Океан'.tr(context),
     };
     final p = Paints.forScheme(scheme), selected = core.scheme == scheme;
     return Semantics(
       button: true,
       selected: selected,
-      label: '${labels[scheme]} тема',
+      label: '{theme} тема'.tr(context).replaceAll('{theme}', labels[scheme]!),
       child: AnicryTap(
         radius: 9,
         onTap: () => core.setting('theme', scheme),
@@ -526,15 +666,15 @@ class _SettingsPageState extends State<SettingsPage> {
     runSpacing: 12,
     children: [
       for (final option in [
-        ('default', 'Класика'),
-        ('rose', 'Рожева'),
-        ('violet', 'Фіолетова'),
-        ('ocean', 'Океан'),
+        ('default', 'Класика'.tr(context)),
+        ('rose', 'Рожева'.tr(context)),
+        ('violet', 'Фіолетова'.tr(context)),
+        ('ocean', 'Океан'.tr(context)),
       ])
         Semantics(
           button: true,
           selected: (core.settings['desktop_icon'] ?? 'default') == option.$1,
-          label: 'Іконка: ${option.$2}',
+          label: 'Іконка: {icon}'.tr(context).replaceAll('{icon}', option.$2),
           child: AnicryTap(
             radius: 10,
             onTap: () => core.call('set_desktop_icon', [option.$1]),

@@ -1,5 +1,7 @@
 use crate::library::{now, CoreResult};
+use argon2::{password_hash::{PasswordHash, SaltString}, Argon2, PasswordHasher, PasswordVerifier};
 use chrono::DateTime;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -98,6 +100,10 @@ pub struct AccountEntry {
     pub created_at: f64,
     #[serde(default)]
     pub subscription: SubscriptionState,
+    // PHC string includes the algorithm, parameters, random salt and hash.
+    // Older local profiles intentionally remain passwordless until migrated explicitly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_hash: Option<String>,
 }
 
 fn default_provider() -> String {
@@ -202,6 +208,7 @@ impl AccountsStore {
                                 provider: "local".into(),
                                 created_at: now(),
                                 subscription,
+                                password_hash: None,
                             });
                         }
                     }
@@ -427,6 +434,9 @@ impl AccountsStore {
             .iter()
             .position(|a| a.email.to_lowercase() == email || a.name.to_lowercase() == clean_handle.to_lowercase());
         if let Some(idx) = existing_index {
+            if self.config.accounts[idx].provider != "github" || self.config.accounts[idx].password_hash.is_some() {
+                return Err("Цей профіль використовує інший спосіб входу. Увійдіть за допомогою його пароля або провайдера.".into());
+            }
             self.config.active_id = self.config.accounts[idx].id.clone();
             if !name.trim().is_empty() {
                 self.config.accounts[idx].name = display_name;
@@ -455,6 +465,7 @@ impl AccountsStore {
                 provider: "github".into(),
                 created_at: now(),
                 subscription: sub,
+                password_hash: None,
             };
             self.config.accounts.push(entry);
             self.config.active_id = id;
@@ -477,6 +488,9 @@ impl AccountsStore {
 
         let existing_index = self.config.accounts.iter().position(|a| a.email.to_lowercase() == email);
         if let Some(idx) = existing_index {
+            if self.config.accounts[idx].provider != "google" || self.config.accounts[idx].password_hash.is_some() {
+                return Err("Цей профіль використовує інший спосіб входу. Увійдіть за допомогою його пароля або провайдера.".into());
+            }
             self.config.active_id = self.config.accounts[idx].id.clone();
             if !name.trim().is_empty() {
                 self.config.accounts[idx].name = display_name;
@@ -507,6 +521,7 @@ impl AccountsStore {
                 provider: "google".into(),
                 created_at: now(),
                 subscription: sub,
+                password_hash: None,
             };
             self.config.accounts.push(entry);
             self.config.active_id = id;
@@ -517,23 +532,33 @@ impl AccountsStore {
     }
 
     pub fn local_sign_in(&mut self, email: &str, password: &str) -> CoreResult<Value> {
+        if password.len() > 1024 {
+            return Err("Пароль не може перевищувати 1024 байти.".into());
+        }
         let email = email.trim().to_lowercase();
         if email.is_empty() || !email.contains('@') {
             return Err("Вкажіть коректний email".into());
         }
-        let existing = self.config.accounts.iter().find(|a| a.email.to_lowercase() == email);
-        if let Some(acc) = existing {
-            self.config.active_id = acc.id.clone();
-            self.save()?;
-            Ok(self.status())
-        } else {
-            // Auto create account if not yet exists
-            let name = email.split('@').next().unwrap_or("User");
-            self.local_sign_up(name, &email, password)
+        let acc = self.config.accounts.iter().find(|a| a.email.to_lowercase() == email)
+            .ok_or("Невірний email або пароль. Для нового акаунта оберіть реєстрацію.")?;
+        if acc.provider != "local" {
+            return Err("Скористайтеся провайдером, через який створено цей акаунт.".into());
         }
+        let encoded = acc.password_hash.as_deref().ok_or(
+            "Це старий локальний профіль без пароля. Вхід за паролем недоступний; створіть новий акаунт з іншою адресою. Дані старого профілю збережено."
+        )?;
+        let hash = PasswordHash::new(encoded).map_err(|_| "Пошкоджені дані пароля акаунта".to_string())?;
+        Argon2::default().verify_password(password.as_bytes(), &hash)
+            .map_err(|_| "Невірний email або пароль".to_string())?;
+        self.config.active_id = acc.id.clone();
+        self.save()?;
+        Ok(self.status())
     }
 
-    pub fn local_sign_up(&mut self, name: &str, email: &str, _password: &str) -> CoreResult<Value> {
+    pub fn local_sign_up(&mut self, name: &str, email: &str, password: &str) -> CoreResult<Value> {
+        if password.len() > 1024 {
+            return Err("Пароль не може перевищувати 1024 байти.".into());
+        }
         let email = email.trim().to_lowercase();
         if email.is_empty() || !email.contains('@') {
             return Err("Вкажіть коректний email".into());
@@ -544,11 +569,15 @@ impl AccountsStore {
             name.trim().to_string()
         };
 
-        if let Some(existing) = self.config.accounts.iter().find(|a| a.email.to_lowercase() == email) {
-            self.config.active_id = existing.id.clone();
-            self.save()?;
-            return Ok(self.status());
+        if self.config.accounts.iter().any(|a| a.email.to_lowercase() == email) {
+            return Err("Акаунт з цим email вже існує. Скористайтеся входом.".into());
         }
+        if password.chars().count() < 8 {
+            return Err("Пароль має містити щонайменше 8 символів.".into());
+        }
+        let salt = SaltString::generate(&mut OsRng);
+        let password_hash = Argon2::default().hash_password(password.as_bytes(), &salt)
+            .map_err(|e| format!("Не вдалося захистити пароль: {e}"))?.to_string();
 
         let id = format!("usr_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
         let mut sub = self.config.guest_subscription.clone();
@@ -572,6 +601,7 @@ impl AccountsStore {
             provider: "local".into(),
             created_at: now(),
             subscription: sub,
+            password_hash: Some(password_hash),
         };
         self.config.accounts.push(entry);
         self.config.active_id = id;
@@ -583,7 +613,10 @@ impl AccountsStore {
         let user_id = user_id.trim();
         if user_id == "guest" {
             self.config.active_id = "guest".into();
-        } else if self.config.accounts.iter().any(|a| a.id == user_id) {
+        } else if let Some(account) = self.config.accounts.iter().find(|a| a.id == user_id) {
+            if account.password_hash.is_some() && self.config.active_id != user_id {
+                return Err("Для входу в цей акаунт введіть email і пароль.".into());
+            }
             self.config.active_id = user_id.to_string();
         } else {
             return Err("Акаунт не знайдено".into());
@@ -651,5 +684,98 @@ impl AccountsStore {
             "subscription": self.get_subscription().to_value(),
             "accounts": self.list_accounts()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_password_survives_reload_and_wrong_password_cannot_sign_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AccountsStore::open(dir.path()).unwrap();
+        store.local_sign_up("Alice", " Alice@Example.com ", "correct horse").unwrap();
+        let id = store.active_id().to_owned();
+        let encoded = store.active_account().unwrap().password_hash.clone().unwrap();
+        assert!(encoded.starts_with("$argon2id$"));
+        assert!(!store.status().to_string().contains(&encoded));
+        assert!(!fs::read_to_string(dir.path().join("accounts.json")).unwrap().contains("correct horse"));
+        store.sign_out().unwrap();
+        let mut store = AccountsStore::open(dir.path()).unwrap();
+        assert!(store.local_sign_in("alice@example.com", "wrong password").is_err());
+        assert_eq!(store.active_id(), "guest");
+        store.local_sign_in("ALICE@example.com", "correct horse").unwrap();
+        assert_eq!(store.active_id(), id);
+    }
+
+    #[test]
+    fn registration_requires_password_and_duplicate_does_not_change_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AccountsStore::open(dir.path()).unwrap();
+        assert!(store.local_sign_up("Alice", "alice@example.com", "").is_err());
+        assert!(store.local_sign_up("Alice", "alice@example.com", "short").is_err());
+        assert!(store.local_sign_up("Alice", "alice@example.com", &"x".repeat(1025)).is_err());
+        assert!(store.local_sign_in("alice@example.com", &"x".repeat(1025)).is_err());
+        assert!(store.local_sign_in("missing@example.com", "password123").is_err());
+        assert!(store.config.accounts.is_empty());
+        store.local_sign_up("Alice", "alice@example.com", "password123").unwrap();
+        let first_hash = store.active_account().unwrap().password_hash.clone();
+        store.sign_out().unwrap();
+        assert!(store.local_sign_up("Imposter", " ALICE@example.com ", "different password").is_err());
+        assert_eq!(store.active_id(), "guest");
+        assert_eq!(store.config.accounts.len(), 1);
+        assert_eq!(store.config.accounts[0].password_hash, first_hash);
+        store.local_sign_up("Bob", "bob@example.com", "password123").unwrap();
+        assert_ne!(store.active_account().unwrap().password_hash, first_hash);
+    }
+
+    #[test]
+    fn protected_account_cannot_be_selected_or_claimed_by_oauth() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AccountsStore::open(dir.path()).unwrap();
+        store.local_sign_up("alice", "alice@example.com", "password123").unwrap();
+        let id = store.active_id().to_owned();
+        store.switch_account(&id).unwrap(); // already authenticated
+        store.switch_account("guest").unwrap();
+        assert!(store.switch_account(&id).is_err());
+        assert!(store.google_sign_in("alice@example.com", "New name", "avatar").is_err());
+        assert!(store.github_sign_in("alice@example.com", "New name").is_err());
+        assert!(store.github_sign_in("alice", "New name").is_err());
+        assert_eq!(store.active_id(), "guest");
+        assert_eq!(store.config.accounts.len(), 1);
+        assert_eq!(store.config.accounts[0].name, "alice");
+        store.local_sign_in("alice@example.com", "password123").unwrap();
+    }
+
+    #[test]
+    fn legacy_passwordless_profiles_are_readable_but_not_password_authenticatable() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("accounts.json"), r#"{
+            "active_id":"guest", "accounts":[{
+                "id":"old", "name":"Old", "email":"old@example.com"
+            }]
+        }"#).unwrap();
+        let mut store = AccountsStore::open(dir.path()).unwrap();
+        assert!(store.config.accounts[0].password_hash.is_none());
+        let error = store.local_sign_in("old@example.com", "any password").unwrap_err();
+        assert!(error.contains("без пароля"));
+        assert_eq!(store.active_id(), "guest");
+        assert!(store.local_sign_up("Old", "old@example.com", "new password").is_err());
+        assert!(store.google_sign_in("old@example.com", "Old", "").is_err());
+    }
+
+    #[test]
+    fn malformed_hash_and_oauth_account_reject_password_login() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AccountsStore::open(dir.path()).unwrap();
+        store.google_sign_in("google@example.com", "Google", "").unwrap();
+        store.sign_out().unwrap();
+        assert!(store.local_sign_in("google@example.com", "password123").is_err());
+        store.local_sign_up("Alice", "alice@example.com", "password123").unwrap();
+        store.active_account_mut().unwrap().password_hash = Some("invalid".into());
+        store.sign_out().unwrap();
+        assert!(store.local_sign_in("alice@example.com", "password123").is_err());
+        assert_eq!(store.active_id(), "guest");
     }
 }

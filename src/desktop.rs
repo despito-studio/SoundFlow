@@ -79,7 +79,13 @@ impl Desktop {
         // (синхронізація підключених акаунтів) ще до першого входу.
         crate::supabase::configure(crate::supabase::SupabaseConfig::load(&data_dir));
         crate::supabase_auth::load(&data_dir);
-        let core = Core::open(data_dir.clone(), offline)?;
+        let mut core = Core::open(data_dir.clone(), offline)?;
+        if let Some(session) = crate::supabase_auth::current() {
+            if uuid::Uuid::parse_str(&session.user_id).is_ok() {
+                core.switch_to_user(&session.user_id)?;
+                core.library.update_profile(&json!({"email":session.email}))?;
+            }
+        }
         let audio_listening =
             crate::listening::ListeningStore::open(&data_dir.join("listening.sqlite3"))?;
         Ok(Self {
@@ -96,6 +102,45 @@ impl Desktop {
             return Err("Недійсний запит SoundFlow".into());
         }
         match method {
+            "supabase_sign_in" | "supabase_sign_up" => {
+                let config = crate::supabase::current_config();
+                let fields = args.first().ok_or("Вкажи дані акаунта")?;
+                let email = fields["email"].as_str().unwrap_or("");
+                let password = fields["password"].as_str().unwrap_or("");
+                let result = if method == "supabase_sign_up" {
+                    crate::supabase_auth::email_sign_up(&config, &self.data_dir,
+                        fields["name"].as_str().unwrap_or(""), email, password)?
+                } else {
+                    crate::supabase_auth::email_sign_in(&config, &self.data_dir, email, password)?
+                };
+                if result["authenticated"] == true {
+                    let user = result["user_id"].as_str().ok_or("Відсутній ID користувача")?;
+                    // Server UUIDs select a separate library, never an email-matched local identity.
+                    uuid::Uuid::parse_str(user).map_err(|_| "Недійсний ID користувача")?;
+                    let mut core = self.core.lock().map_err(lock_error)?;
+                    if let Err(error) = core.switch_to_user(user) {
+                        crate::supabase_auth::clear(&self.data_dir);
+                        return Err(error);
+                    }
+                    core.library.update_profile(&json!({"email":email}))?;
+                }
+                Ok(result)
+            }
+            "get_supabase_admin_status" => crate::supabase_auth::admin_status(
+                &crate::supabase::current_config(), &self.data_dir),
+            "supabase_sign_out" => {
+                crate::supabase_auth::clear(&self.data_dir);
+                let mut core = self.core.lock().map_err(lock_error)?;
+                let user = core.accounts.active_id().to_string();
+                core.switch_to_user(&user)?;
+                Ok(json!({"ok":true}))
+            }
+            "sign_in" | "sign_up" | "switch_account" | "sign_out" => {
+                // Do not keep a different server identity attached to a local profile.
+                let result = self.core.lock().map_err(lock_error)?.local_rpc(method, args)?;
+                crate::supabase_auth::clear(&self.data_dir);
+                Ok(result)
+            }
             "get_home_feed" => {
                 let seeds = {
                     let core = self.core.lock().map_err(lock_error)?;

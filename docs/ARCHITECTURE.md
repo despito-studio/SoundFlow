@@ -10,6 +10,8 @@ Flutter renders icons from the full licensed AnimateIcons catalog. Artwork is de
 
 Provider extraction and network work remain outside the UI thread. NativeSession preserves generation checks for stale playback requests, account boundaries, duplicate queue occurrences and bounded asynchronous command queues. The optional bundled Node worker is contained by the existing Windows Job object.
 
+Stream resolution retries transient worker failures twice with a 400 ms then 800 ms pause before surfacing an error. Audio downloads retry transient transport failures up to four attempts total (400 ms, 800 ms, 1.6 s) and drop an undecodable cache entry so the next attempt fetches fresh bytes. A superseded attempt stays silent: only a failure of the current generation reaches the UI. Retry progress is carried as `player.status` in the polled snapshot, so the Dock, preview, Island and Now Playing screen describe the attempt instead of an indefinite spinner.
+
 Cargo produces a library; the user-facing executable is built from flutter_app/windows.
 
 `NativeSession` owns an independent `update::Updater`. Its worker serializes release checks,

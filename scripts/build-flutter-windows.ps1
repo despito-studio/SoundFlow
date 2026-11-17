@@ -8,6 +8,12 @@ $ninja = Join-Path $projectRoot 'output/toolchain/python-build/bin/ninja.exe'
 if (-not (Test-Path -LiteralPath $flutter)) { $flutter = (Get-Command flutter.bat -ErrorAction Stop).Source }
 if (-not (Test-Path -LiteralPath $cmake)) { $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source }
 if (-not (Test-Path -LiteralPath $ninja)) { $ninja = (Get-Command ninja.exe -ErrorAction Stop).Source }
+# Refuse an incomplete bundle instead of silently omitting the music engine.
+foreach ($relative in @('resources/runtime/soundflow-node.exe','resources/runtime/NODE-LICENSE.txt','media-provider/dist/worker.cjs','media-provider/dist/THIRD-PARTY-LICENSES.txt')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $projectRoot $relative) -PathType Leaf)) {
+        throw "Missing media dependency: $relative. Run scripts/build-provider.mjs first."
+    }
+}
 $buildDir = Join-Path $appRoot 'build/windows-ninja'
 $bundle = [IO.Path]::GetFullPath((Join-Path $projectRoot $BundlePath))
 if (-not $bundle.StartsWith($projectRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Bundle must stay within the checkout.' }

@@ -1,0 +1,7 @@
+{
+  "version": "1.1.1",
+  "build": "7773a52d8d83",
+  "installer": "downloads/SoundFlow-1.1.1-7773a52d8d83-Setup.exe",
+  "installer_sha256": "7773a52d8d836f85f6fb07fb9893d973b525662b75fc0ea91c87a4725e21d3e3",
+  "portable": "downloads/SoundFlow-1.1.1-7773a52d8d83-portable.zip"
+}

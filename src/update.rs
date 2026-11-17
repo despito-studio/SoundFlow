@@ -27,6 +27,7 @@ const MAX_PACKAGE: u64 = 512 * 1024 * 1024;
 #[no_mangle]
 pub extern "C" fn sf_velopack_startup() {
     velopack::VelopackApp::build()
+        // Apply through our verified receipt path after the session opens.
         .set_auto_apply_on_startup(false)
         .run();
 }
@@ -281,6 +282,9 @@ pub struct Updater {
     assets: Arc<Mutex<Vec<VelopackAsset>>>,
     cancel: Arc<AtomicBool>,
     busy: AtomicBool,
+    /// Set for the duration of one operation: download without asking, apply at
+    /// the next launch. The user can still install immediately from Settings.
+    auto_install: AtomicBool,
     sequence: AtomicU64,
     record: PathBuf,
     offline: bool,
@@ -316,6 +320,7 @@ impl Updater {
             assets,
             cancel,
             busy: AtomicBool::new(false),
+            auto_install: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             record: data.join("updates/velopack-ready.json"),
             offline,
@@ -348,7 +353,7 @@ impl Updater {
         if let Some(info) = restore() {
             self.set(
                 "ready",
-                "Оновлення готове",
+                self.ready_message(),
                 Some(&info.TargetFullRelease),
                 info.TargetFullRelease.Size,
             );
@@ -427,8 +432,31 @@ impl Updater {
             worker.busy.store(false, Ordering::Release);
         });
     }
-    pub fn check(self: &Arc<Self>, download: bool) {
+    /// Message shown once a verified package waits on disk.
+    fn ready_message(&self) -> &'static str {
+        if self.auto_install.load(Ordering::Acquire) {
+            "Оновлення встановиться після перезапуску SoundFlow"
+        } else {
+            "Оновлення готове"
+        }
+    }
+    /// True when the recorded package still matches the offered release, so a
+    /// periodic check never downloads or verifies the same bytes again.
+    fn prepared(&self, info: &UpdateInfo) -> bool {
+        let Some(receipt) = self.read_receipt() else {
+            return false;
+        };
+        if !same_identity(&receipt.target, &info.TargetFullRelease) {
+            return false;
+        }
+        self.package_path(&info.TargetFullRelease)
+            .ok()
+            .and_then(|path| fs::metadata(path).ok())
+            .is_some_and(|metadata| metadata.len() == receipt.package.size)
+    }
+    pub fn check(self: &Arc<Self>, download: bool, auto: bool) {
         self.start(move |worker| {
+            worker.auto_install.store(auto, Ordering::Release);
             if worker.offline {
                 return Err(Error::NotSupported("Офлайн-режим".into()));
             }
@@ -448,7 +476,14 @@ impl Updater {
                         Some(&info.TargetFullRelease),
                         0,
                     );
-                    if download {
+                    if download && worker.prepared(&info) {
+                        worker.set(
+                            "ready",
+                            worker.ready_message(),
+                            Some(&info.TargetFullRelease),
+                            info.TargetFullRelease.Size,
+                        );
+                    } else if download {
                         worker.fetch(&info)?;
                     }
                 }
@@ -600,11 +635,14 @@ impl Updater {
         record
             .persist(&self.record)
             .map_err(|e| Error::Io(e.error))?;
-        self.set("ready", "Оновлення готове", Some(asset), asset.Size);
+        self.set("ready", self.ready_message(), Some(asset), asset.Size);
         Ok(())
     }
     pub fn download(self: &Arc<Self>) {
-        self.start(|worker| worker.fetch(&worker.selected()?));
+        self.start(|worker| {
+            worker.auto_install.store(false, Ordering::Release);
+            worker.fetch(&worker.selected()?)
+        });
     }
     fn apply(&self, info: &UpdateInfo) -> Result<(), Error> {
         let manager = self
@@ -644,6 +682,7 @@ impl Updater {
     }
     pub fn install_async(self: &Arc<Self>) {
         self.start(|worker| {
+            worker.auto_install.store(false, Ordering::Release);
             let info = worker.selected()?;
             worker.fetch(&info)?;
             cancelled(&worker.cancel)?;
@@ -915,6 +954,7 @@ mod tests {
             assets: Arc::new(Mutex::new(Vec::new())),
             cancel: Arc::new(AtomicBool::new(false)),
             busy: AtomicBool::new(false),
+            auto_install: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             record: temp.path().join("data/ready.json"),
             offline: false,
@@ -976,6 +1016,7 @@ mod tests {
             assets: Arc::new(Mutex::new(Vec::new())),
             cancel: Arc::new(AtomicBool::new(false)),
             busy: AtomicBool::new(false),
+            auto_install: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             record: temp.path().join("ready.json"),
             offline: true,

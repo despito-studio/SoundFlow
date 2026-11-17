@@ -1,5 +1,6 @@
 import { Innertube, Platform, Log } from 'youtubei.js/web';
 import vm from 'node:vm';
+import { feedQueries, diverseTracks } from './feed-selection.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -299,20 +300,22 @@ export class MediaProvider {
   }
   rememberSC(raw) { if(raw?.id) { if(this.scRaw.size>=256)this.scRaw.delete(this.scRaw.keys().next().value);this.scRaw.set(raw.permalink_url,raw); }return scTrack(raw); }
   async homeFeed(seeds=[],refresh=false) {
-    const artists=[...new Set(seeds.map(t=>text(t.artist,100)).filter(Boolean))].slice(0,2);
+    const artists=[...new Set(seeds.map(t=>text(t.artist,100)).filter(Boolean))].slice(0,12);
     const key=JSON.stringify(artists);
     if(!refresh && this.homeCache?.key===key && Date.now()-this.homeCache.time<1800000)return this.homeCache.feed;
-    const query=artists[0]||'українська музика';
+    const previous=this.homeCache?.feed;
+    this.homeRound=(this.homeRound ?? Math.floor(Date.now()/86400000))+(refresh ? 1 : 0);
+    const queries=feedQueries(artists.map(artist=>({artist})),this.homeRound);
     const feed={loaded:false,personalized:artists.length>0,seed_artist:artists[0]||'',youtube:[],soundcloud:[],recommendations:[],errors:[]};
     this.homeCache={key,time:Date.now(),feed};
     const tasks=[
-      this.search(query,'youtube',12),
-      this.search(artists[1]||query,'soundcloud',12),
-      artists.length ? this.search(`${artists.join(' ')} music`,'all',16) : this.search('new music official audio','youtube',12)
+      this.search(queries.youtube,'youtube',20),
+      this.search(queries.soundcloud,'soundcloud',20),
+      this.search(queries.discovery,'all',20)
     ];
     const names=['youtube','soundcloud','recommendations'];
     let settled=0;
-    tasks.forEach((task,i)=>Promise.resolve(task).then(value=>{feed[names[i]]=value;},()=>{feed.errors.push(names[i]);}).finally(()=>{settled++;feed.loaded=settled===tasks.length;}));
+    tasks.forEach((task,i)=>Promise.resolve(task).then(value=>{feed[names[i]]=diverseTracks(value,previous?.[names[i]]||[]).slice(0,12);},()=>{feed.errors.push(names[i]);}).finally(()=>{settled++;feed.loaded=settled===tasks.length;}));
     return feed;
   }
   async profileAssets(input={}) {

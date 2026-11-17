@@ -1,10 +1,11 @@
-param([string]$Destination, [switch]$SkipInstaller, [switch]$SkipZip, [string]$TermsUrl, [switch]$RequireTermsUrl, [string]$PreviousFeed)
+param([string]$Destination, [switch]$SkipInstaller, [switch]$SkipZip, [string]$TermsUrl, [switch]$RequireTermsUrl, [string]$PreviousFeed, [string]$BundlePath = 'output/flutter-preview')
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $versionMatch = [regex]::Match((Get-Content -LiteralPath (Join-Path $projectRoot 'Cargo.toml') -Raw), '(?m)^version\s*=\s*"([^"]+)"\s*$')
 if (-not $versionMatch.Success) { throw 'The package version is missing from Cargo.toml.' }
 $version = $versionMatch.Groups[1].Value
-$releaseRoot = Join-Path $projectRoot 'output/flutter-preview'
+$releaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot $BundlePath))
+if (-not $releaseRoot.StartsWith($projectRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Bundle must stay within checkout.' }
 $releaseExe = Join-Path $releaseRoot 'SoundFlow.exe'
 if (-not $Destination) { $Destination = Join-Path $projectRoot 'dist/windows-x64' }
 $destinationPath = [IO.Path]::GetFullPath($Destination)

@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
     mpsc::Sender,
     Arc,
 };
@@ -91,6 +91,7 @@ pub struct DesktopShell {
     tray_available: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     window: Arc<AtomicUsize>,
+    icon_selection: Arc<AtomicU8>,
     thread: Option<std::thread::JoinHandle<()>>,
     _media_keys: crate::media_keys::MediaKeys,
 }
@@ -124,13 +125,15 @@ impl DesktopShell {
         let tray_available = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let window = Arc::new(AtomicUsize::new(0));
+        let icon_selection = Arc::new(AtomicU8::new(0));
         #[cfg(windows)]
         let thread = {
             let finish = stop.clone();
             let available = tray_available.clone();
             let handle = window.clone();
+            let selection = icon_selection.clone();
             Some(std::thread::spawn(move || {
-                windows::run(events, finish, available, handle, island_hotkeys);
+                windows::run(events, finish, available, handle, selection, island_hotkeys);
             }))
         };
         #[cfg(not(windows))]
@@ -146,9 +149,21 @@ impl DesktopShell {
             tray_available,
             stop,
             window,
+            icon_selection,
             thread,
             _media_keys: media_keys,
         }
+    }
+
+    /// The shell thread consumes only the latest selection; polling never allocates HICONs.
+    pub fn set_icon_selection(&self, name: &str) {
+        let selection = match name {
+            "rose" => 1,
+            "violet" => 2,
+            "ocean" => 3,
+            _ => 0,
+        };
+        self.icon_selection.store(selection, Ordering::Release);
     }
 
     pub fn tray_available(&self) -> bool {
@@ -268,6 +283,7 @@ pub fn restore_foreground(previous: usize) {
 mod windows {
     use super::{Events, IslandBackdrop, ShellEvent};
     use std::{
+        cell::Cell,
         ffi::c_void,
         mem::size_of,
         ptr::{null, null_mut},
@@ -292,7 +308,7 @@ mod windows {
             },
             Shell::{
                 Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD,
-                NIM_DELETE, NIM_SETVERSION, NINF_KEY, NIN_SELECT, NOTIFYICONDATAW,
+                NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NINF_KEY, NIN_SELECT, NOTIFYICONDATAW,
                 NOTIFYICON_VERSION_4,
             },
             WindowsAndMessaging::*,
@@ -501,9 +517,104 @@ mod windows {
         events: Events,
         stop: Arc<AtomicBool>,
         available: Arc<AtomicBool>,
-        icon: HICON,
+        icon: Cell<HICON>,
         taskbar_created: u32,
         verification: bool,
+    }
+
+    impl Drop for Context {
+        fn drop(&mut self) {
+            // Context is created and dropped on the shell window thread, after NIM_DELETE.
+            let icon = self.icon.get();
+            if !icon.is_null() {
+                unsafe { DestroyIcon(icon) };
+            }
+        }
+    }
+
+    unsafe fn load_tray_icon(selection: u8) -> HICON {
+        // The Flutter EXE and Rust DLL have different resource tables. Embed the
+        // actual assets instead of assuming resource 1 belongs to the executable.
+        let bytes: &[u8] = match selection {
+            1 => include_bytes!("../resources/icon-rose.ico"),
+            2 => include_bytes!("../resources/icon-violet.ico"),
+            3 => include_bytes!("../resources/icon-ocean.ico"),
+            _ => include_bytes!("../resources/icon.ico"),
+        };
+        let width = GetSystemMetrics(SM_CXSMICON).max(16);
+        let height = GetSystemMetrics(SM_CYSMICON).max(16);
+        let Some(header) = bytes.get(..6) else {
+            return null_mut();
+        };
+        if header[..4] != [0, 0, 1, 0] {
+            return null_mut();
+        }
+        let count = u16::from_le_bytes([header[4], header[5]]) as usize;
+        let mut images = Vec::new();
+        for index in 0..count {
+            let Some(entry) = bytes.get(6 + index * 16..6 + (index + 1) * 16) else {
+                break;
+            };
+            let size = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
+            let offset = u32::from_le_bytes(entry[12..16].try_into().unwrap()) as usize;
+            let Some(end) = offset.checked_add(size) else {
+                continue;
+            };
+            let Some(image) = bytes.get(offset..end) else {
+                continue;
+            };
+            let image_width = if entry[0] == 0 { 256 } else { i32::from(entry[0]) };
+            let image_height = if entry[1] == 0 { 256 } else { i32::from(entry[1]) };
+            // Prefer the closest size, and downscaling over upscaling on ties.
+            images.push((
+                (image_width - width).abs() + (image_height - height).abs(),
+                image_width < width || image_height < height,
+                image,
+            ));
+        }
+        images.sort_by_key(|(distance, upscale, _)| (*distance, *upscale));
+        for (_, _, image) in images {
+            let icon = CreateIconFromResourceEx(
+                image.as_ptr(), image.len() as u32, 1, 0x0003_0000, width, height, 0,
+            );
+            if !icon.is_null() {
+                return icon;
+            }
+        }
+        null_mut()
+    }
+
+    unsafe fn update_tray_icon(window: HWND, context: &Context, selection: u8) {
+        let icon = load_tray_icon(selection);
+        if icon.is_null() {
+            context.events.send(ShellEvent::Error(
+                "Не вдалося завантажити іконку SoundFlow".into(),
+            ));
+            return;
+        }
+        let old = context.icon.replace(icon);
+        if !context.verification {
+            if context.available.load(Ordering::Acquire) {
+                let data = NOTIFYICONDATAW {
+                    cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+                    hWnd: window,
+                    uID: 1,
+                    uFlags: NIF_ICON,
+                    hIcon: icon,
+                    ..Default::default()
+                };
+                if Shell_NotifyIconW(NIM_MODIFY, &data) == 0 {
+                    context.available.store(false, Ordering::Release);
+                    add_tray(window, context);
+                }
+            } else {
+                add_tray(window, context);
+            }
+        }
+        // Shell_NotifyIcon copies the icon; keep the current handle for Explorer restarts.
+        if !old.is_null() {
+            DestroyIcon(old);
+        }
     }
 
     fn wide(value: &str) -> Vec<u16> {
@@ -520,7 +631,7 @@ mod windows {
         data.uID = 1;
         data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
         data.uCallbackMessage = TRAY_MESSAGE;
-        data.hIcon = context.icon;
+        data.hIcon = context.icon.get();
         for (target, ch) in data.szTip.iter_mut().zip("SoundFlow".encode_utf16()) {
             *target = ch;
         }
@@ -655,6 +766,7 @@ mod windows {
         stop: Arc<AtomicBool>,
         available: Arc<AtomicBool>,
         handle: Arc<AtomicUsize>,
+        icon_selection: Arc<AtomicU8>,
         island_hotkeys: bool,
     ) {
         unsafe {
@@ -674,15 +786,17 @@ mod windows {
                 )));
                 return;
             }
-            let mut icon = LoadIconW(instance, 1usize as *const u16);
+            let mut applied_selection = icon_selection.load(Ordering::Acquire);
+            let mut icon = load_tray_icon(applied_selection);
             if icon.is_null() {
-                icon = LoadIconW(null_mut(), IDI_APPLICATION);
+                // Copy the shared fallback so every stored handle has the same ownership.
+                icon = CopyIcon(LoadIconW(null_mut(), IDI_APPLICATION));
             }
             let mut context = Box::new(Context {
                 events,
                 stop: stop.clone(),
                 available: available.clone(),
-                icon,
+                icon: Cell::new(icon),
                 taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
                 verification,
             });
@@ -735,6 +849,11 @@ mod windows {
                 }
             }
             while !stop.load(Ordering::Acquire) {
+                let selection = icon_selection.load(Ordering::Acquire);
+                if selection != applied_selection {
+                    applied_selection = selection;
+                    update_tray_icon(window, &context, selection);
+                }
                 let mut message = MSG::default();
                 while PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) != 0 {
                     if message.message == WM_QUIT {
@@ -766,6 +885,22 @@ mod windows {
                 DestroyWindow(window);
             }
             UnregisterClassW(class_name.as_ptr(), instance);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn bundled_tray_icons_create_owned_windows_handles() {
+            for (selection, name) in [(0, "default"), (1, "rose"), (2, "violet"), (3, "ocean")] {
+                unsafe {
+                    let icon = load_tray_icon(selection);
+                    assert!(!icon.is_null(), "Windows could not decode the {name} tray icon");
+                    assert_ne!(DestroyIcon(icon), 0, "Could not release the {name} tray icon");
+                }
+            }
         }
     }
 

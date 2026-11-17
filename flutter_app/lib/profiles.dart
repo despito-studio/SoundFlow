@@ -1,3 +1,5 @@
+import 'l10n.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -5,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'core.dart';
 import 'design.dart';
 import 'anicry_motion.dart';
+import 'account_login.dart';
 
 Future<void> editProfile(BuildContext context, Core core) async {
   final result = await showAnicryDialog<Json>(
@@ -74,7 +77,9 @@ class _ProfileEditorState extends State<ProfileEditor> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Heading(
-                  cover ? 'Обкладинка за посиланням' : 'Фото за посиланням',
+                  cover
+                      ? 'Обкладинка за посиланням'.tr(context)
+                      : 'Фото за посиланням'.tr(context),
                 ),
                 const SizedBox(height: 20),
                 TextField(
@@ -89,7 +94,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: ActionButton(
-                    'Застосувати',
+                    'Застосувати'.tr(context),
                     primary: true,
                     onTap: () => Navigator.pop(ctx, field.text.trim()),
                   ),
@@ -111,7 +116,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
             avatar = value;
           }
         } else {
-          error = 'Потрібне посилання HTTPS на зображення.';
+          error = 'Потрібне посилання HTTPS на зображення.'.tr(context);
         }
       });
     }
@@ -135,13 +140,13 @@ class _ProfileEditorState extends State<ProfileEditor> {
                 AnicryTap(
                   onTap: () => Navigator.pop(ctx, 'link'),
                   icon: 'link',
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                     child: Row(
                       children: [
                         Glyph('link', size: 18),
                         SizedBox(width: 12),
-                        Text('Вставити посилання'),
+                        Text('Вставити посилання'.tr(context)),
                       ],
                     ),
                   ),
@@ -159,7 +164,11 @@ class _ProfileEditorState extends State<ProfileEditor> {
                         children: [
                           const Glyph('trash-2', size: 18),
                           const SizedBox(width: 12),
-                          Text(cover ? 'Прибрати обкладинку' : 'Прибрати фото'),
+                          Text(
+                            cover
+                                ? 'Прибрати обкладинку'.tr(context)
+                                : 'Прибрати фото'.tr(context),
+                          ),
                         ],
                       ),
                     ),
@@ -186,7 +195,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
 
   void save() {
     if (name.text.trim().isEmpty) {
-      setState(() => error = 'Вкажи ім’я профілю.');
+      setState(() => error = 'Вкажи ім’я профілю.'.tr(context));
       return;
     }
     Navigator.pop(context, {
@@ -215,8 +224,12 @@ class _ProfileEditorState extends State<ProfileEditor> {
             children: [
               Row(
                 children: [
-                  const Expanded(child: Heading('Редагувати профіль')),
-                  Control('x', 'Закрити', onTap: () => Navigator.pop(context)),
+                  Expanded(child: Heading('Редагувати профіль'.tr(context))),
+                  Control(
+                    'x',
+                    'Закрити'.tr(context),
+                    onTap: () => Navigator.pop(context),
+                  ),
                 ],
               ),
               const SizedBox(height: 18),
@@ -244,7 +257,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
                                   child: Align(
                                     alignment: Alignment.bottomRight,
                                     child: Text(
-                                      'Обкладинка профілю',
+                                      'Обкладинка профілю'.tr(context),
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: p.muted.withValues(alpha: .6),
@@ -263,8 +276,8 @@ class _ProfileEditorState extends State<ProfileEditor> {
                         children: [
                           ActionButton(
                             banner.isEmpty
-                                ? 'Додати обкладинку'
-                                : 'Змінити обкладинку',
+                                ? 'Додати обкладинку'.tr(context)
+                                : 'Змінити обкладинку'.tr(context),
                             compact: true,
                             icon: 'image',
                             onTap: choosing ? null : () => choose(true),
@@ -272,7 +285,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
                           const SizedBox(width: 6),
                           Control(
                             'more',
-                            'Дії з обкладинкою',
+                            'Дії з обкладинкою'.tr(context),
                             size: 32,
                             glyphSize: 18,
                             surface: true,
@@ -323,7 +336,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
                       child: Row(
                         children: [
                           ActionButton(
-                            'Змінити фото',
+                            'Змінити фото'.tr(context),
                             compact: true,
                             icon: 'camera',
                             onTap: choosing ? null : () => choose(false),
@@ -331,7 +344,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
                           const SizedBox(width: 6),
                           Control(
                             'more',
-                            'Дії з фото',
+                            'Дії з фото'.tr(context),
                             size: 32,
                             glyphSize: 18,
                             surface: true,
@@ -344,7 +357,10 @@ class _ProfileEditorState extends State<ProfileEditor> {
                 ),
               ),
               const SizedBox(height: 20),
-              Text('Ім’я', style: TextStyle(fontSize: 12, color: p.muted)),
+              Text(
+                'Ім’я'.tr(context),
+                style: TextStyle(fontSize: 12, color: p.muted),
+              ),
               const SizedBox(height: 7),
               TextField(
                 controller: name,
@@ -353,11 +369,14 @@ class _ProfileEditorState extends State<ProfileEditor> {
                 decoration: InputDecoration(
                   fillColor: p.canvas,
                   counterText: '',
-                  hintText: 'Як до тебе звертатися',
+                  hintText: 'Як до тебе звертатися'.tr(context),
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Про тебе', style: TextStyle(fontSize: 12, color: p.muted)),
+              Text(
+                'Про тебе'.tr(context),
+                style: TextStyle(fontSize: 12, color: p.muted),
+              ),
               const SizedBox(height: 7),
               TextField(
                 controller: bio,
@@ -367,14 +386,14 @@ class _ProfileEditorState extends State<ProfileEditor> {
                 decoration: InputDecoration(
                   fillColor: p.canvas,
                   counterText: '',
-                  hintText: 'Кілька слів про себе й музику',
+                  hintText: 'Кілька слів про себе й музику'.tr(context),
                 ),
               ),
               if (error.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(
-                    error,
+                    error.tr(context),
                     style: const TextStyle(
                       fontSize: 13,
                       color: Color(0xffedb0a7),
@@ -386,13 +405,13 @@ class _ProfileEditorState extends State<ProfileEditor> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   ActionButton(
-                    'Скасувати',
+                    'Скасувати'.tr(context),
                     flat: true,
                     onTap: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 10),
                   ActionButton(
-                    'Зберегти',
+                    'Зберегти'.tr(context),
                     primary: true,
                     onTap: choosing ? null : save,
                   ),
@@ -512,7 +531,10 @@ class _UserProfileState extends State<UserProfile> {
   Widget build(BuildContext context) {
     final p = context.paints, profile = core.profile;
     final user = object(object(core.state['cloud'])['user']);
-    final name = firstText([profile['name'], user['name']], 'Твій профіль');
+    final name = firstText([
+      profile['name'],
+      user['name'],
+    ], 'Твій профіль'.tr(context));
     final avatar = profile['avatar_hidden'] == true
         ? ''
         : firstText([
@@ -530,13 +552,13 @@ class _UserProfileState extends State<UserProfile> {
     final authorKeys = <String>{};
     final authors =
         saved
-            .where((t) => authorKeys.add('${t['source']}:${trackArtist(t)}'))
+            .where((t) => authorKeys.add('${t['source']}:${trackArtist(t, context)}'))
             .toList()
           ..sort(
             (a, b) =>
-                trackArtist(a)
+                trackArtist(a, context)
                     .toLowerCase()
-                    .compareTo(trackArtist(b).toLowerCase()),
+                    .compareTo(trackArtist(b, context).toLowerCase()),
           );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -593,7 +615,7 @@ class _UserProfileState extends State<UserProfile> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Профіль слухача',
+                            'Профіль слухача'.tr(context),
                             style: TextStyle(fontSize: 12, color: p.muted),
                           ),
                           const SizedBox(height: 8),
@@ -610,7 +632,16 @@ class _UserProfileState extends State<UserProfile> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            '${core.playlists.length} плейлістів · ${trackCount(saved.length)} у медіатеці',
+                            '{playlists} плейлістів · {tracks} у медіатеці'
+                                .tr(context)
+                                .replaceAll(
+                                  '{playlists}',
+                                  core.playlists.length.toString(),
+                                )
+                                .replaceAll(
+                                  '{tracks}',
+                                  trackCount(saved.length, context),
+                                ),
                             style: TextStyle(fontSize: 13, color: p.muted),
                           ),
                           if (bio.isNotEmpty) ...[
@@ -632,12 +663,22 @@ class _UserProfileState extends State<UserProfile> {
                             runSpacing: 8,
                             children: [
                               ActionButton(
-                                'Редагувати профіль',
+                                'Редагувати профіль'.tr(context),
                                 icon: 'pencil',
                                 onTap: () => editProfile(context, core),
                               ),
                               ActionButton(
-                                'Підключення',
+                                object(core.state['cloud'])['signed_in'] == true
+                                    ? 'Змінити акаунт'.tr(context)
+                                    : 'Увійти / Зареєструватися'.tr(context),
+                                flat: true,
+                                onTap: () => showAnicryDialog<void>(
+                                  context: context,
+                                  builder: (_) => AccountLogin(core),
+                                ),
+                              ),
+                              ActionButton(
+                                'Підключення'.tr(context),
                                 icon: 'link',
                                 flat: true,
                                 onTap: () => core.nav('connections'),
@@ -657,9 +698,9 @@ class _UserProfileState extends State<UserProfile> {
         Row(
           children: [
             for (final entry in [
-              ('playlists', 'Плейлісти'),
-              ('artists', 'Автори'),
-              ('recent', 'Нещодавні'),
+              ('playlists', 'Плейлісти'.tr(context)),
+              ('artists', 'Автори'.tr(context)),
+              ('recent', 'Нещодавні'.tr(context)),
             ])
               Padding(
                 padding: const EdgeInsets.only(right: 8),
@@ -688,7 +729,7 @@ class _UserProfileState extends State<UserProfile> {
               ),
             const Spacer(),
             ActionButton(
-              'Медіатека',
+              'Медіатека'.tr(context),
               icon: 'arrow-right',
               flat: true,
               onTap: () => core.nav('library'),
@@ -704,9 +745,9 @@ class _UserProfileState extends State<UserProfile> {
             child: switch (tab) {
               'artists' =>
                 authors.isEmpty
-                    ? const EmptyState(
-                        'Поки немає авторів',
-                        'Збережи музику в медіатеку.',
+                    ? EmptyState(
+                        'Поки немає авторів'.tr(context),
+                        'Збережи музику в медіатеку.'.tr(context),
                       )
                     : LayoutBuilder(
                         builder: (context, box) => GridView.builder(
@@ -729,16 +770,17 @@ class _UserProfileState extends State<UserProfile> {
                       ),
               'recent' =>
                 core.recent.isEmpty
-                    ? const EmptyState(
-                        'Історія ще порожня',
-                        'Тут з’явиться музика, яку ти слухаєш.',
+                    ? EmptyState(
+                        'Історія ще порожня'.tr(context),
+                        'Тут з’явиться музика, яку ти слухаєш.'.tr(context),
                       )
                     : widget.trackRows(core.recent.take(30).toList()),
               _ =>
                 core.playlists.isEmpty
-                    ? const EmptyState(
-                        'Твої плейлісти',
-                        'Створи плейліст або збережи його з музичного сервісу.',
+                    ? EmptyState(
+                        'Твої плейлісти'.tr(context),
+                        'Створи плейліст або збережи його з музичного сервісу.'
+                            .tr(context),
                       )
                     : LayoutBuilder(
                         builder: (context, box) => GridView.builder(
@@ -784,7 +826,7 @@ class CreatorProfile extends StatelessWidget {
         profile['url']?.toString() ?? seed['artist_url']?.toString() ?? '';
     final fallback = core.allTracks
         .where(
-          (t) => t['source'] == source && trackArtist(t) == trackArtist(seed),
+          (t) => t['source'] == source && trackArtist(t, context) == trackArtist(seed, context),
         )
         .toList();
     return Column(
@@ -794,31 +836,38 @@ class CreatorProfile extends StatelessWidget {
           name: firstText([
             profile['name'],
             core.artistData(seed)['name'],
-          ], trackArtist(seed)),
+          ], trackArtist(seed, context)),
           avatar: firstText([
             profile['avatar'],
             seed['artist_avatar'],
             core.artistData(seed)['avatar'],
           ]),
           banner: profile['banner']?.toString() ?? '',
-          label: sourceName({'source': source}),
+          label: sourceName({'source': source}, context),
           details: [
             if (profile['followers'] is num)
-              '${profile['followers']} підписників',
+              '{count} підписників'
+                  .tr(context)
+                  .replaceAll('{count}', profile['followers'].toString()),
             if (profile['location']?.toString().isNotEmpty == true)
               profile['location'].toString(),
           ].join(' · '),
           actions: [
             if (tracks.isNotEmpty)
               ActionButton(
-                'Слухати',
+                'Слухати'.tr(context),
                 icon: 'play',
                 primary: true,
                 onTap: () => core.play(tracks.first, tracks),
               ),
             if (url.isNotEmpty)
               ActionButton(
-                'Відкрити в ${sourceName({'source': source})}',
+                'Відкрити в {source}'
+                    .tr(context)
+                    .replaceAll(
+                      '{source}',
+                      sourceName({'source': source}, context),
+                    ),
                 onTap: () => core.call('open_external_url', [url]),
               ),
           ],
@@ -832,30 +881,34 @@ class CreatorProfile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          'Не вдалося завантажити дані автора.',
+                          'Не вдалося завантажити дані автора.'.tr(context),
                           style: TextStyle(color: context.paints.muted),
                         ),
                       ),
                       ActionButton(
-                        'Повторити',
+                        'Повторити'.tr(context),
                         onTap: () => core.call('get_creator_profile', [seed]),
                       ),
                     ],
                   ),
           ),
         const SizedBox(height: 36),
-        Heading(tracks.isEmpty ? 'У твоїй медіатеці' : 'Треки автора'),
+        Heading(
+          tracks.isEmpty
+              ? 'У твоїй медіатеці'.tr(context)
+              : 'Треки автора'.tr(context),
+        ),
         const SizedBox(height: 16),
         if (tracks.isNotEmpty || fallback.isNotEmpty)
           trackRows(tracks.isEmpty ? fallback : tracks)
         else if (profile.isNotEmpty)
           Text(
-            'Джерело не надало доступних треків.',
+            'Джерело не надало доступних треків.'.tr(context),
             style: TextStyle(color: context.paints.muted),
           ),
         if (description.isNotEmpty) ...[
           const SizedBox(height: 36),
-          const Heading('Про автора'),
+          Heading('Про автора'.tr(context)),
           const SizedBox(height: 16),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 800),

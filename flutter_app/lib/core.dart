@@ -4,11 +4,12 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:animate_icons/animate_icons.dart';
 
 import 'anicry_motion.dart';
+import 'l10n.dart';
 
 typedef Json = Map<String, dynamic>;
 typedef _RequestNative = Pointer<Utf8> Function(Pointer<Uint8>, IntPtr);
@@ -24,12 +25,17 @@ List<Json> objects(dynamic value) =>
     value is List ? value.map(object).toList() : [];
 String trackKey(Json t) => '${t['source']}:${t['id']}';
 bool onlineTrack(Json t) => t['source'] != 'local' && t['is_local'] != true;
-String trackTitle(Json t) => t['title']?.toString() ?? 'Без назви';
-String trackArtist(Json t) =>
-    (t['artist'] ?? t['uploader'] ?? 'Невідомий виконавець').toString();
+String trackTitle(Json t, [BuildContext? context]) =>
+    t['title']?.toString() ??
+    (context == null ? 'Без назви' : 'Без назви'.tr(context));
+String trackArtist(Json t, [BuildContext? context]) =>
+    (t['artist'] ?? t['uploader'])?.toString() ??
+    (context == null
+        ? 'Невідомий виконавець'
+        : 'Невідомий виконавець'.tr(context));
 String trackCover(Json t) => (t['thumbnail'] ?? t['cover'] ?? '').toString();
-String sourceName(Json t) => switch (t['source']) {
-  'local' => 'Локально',
+String sourceName(Json t, [BuildContext? context]) => switch (t['source']) {
+  'local' => context == null ? 'Локально' : 'Локально'.tr(context),
   'youtube' => 'YouTube',
   'soundcloud' => 'SoundCloud',
   'spotify' => 'Spotify',
@@ -40,12 +46,60 @@ String clock(num seconds) {
   return '${n ~/ 60}:${(n % 60).toString().padLeft(2, '0')}';
 }
 
-String trackCount(int n) =>
-    '$n ${n % 100 >= 11 && n % 100 <= 14 ? 'треків' : switch (n % 10) {
-            1 => 'трек',
-            2 || 3 || 4 => 'треки',
-            _ => 'треків',
-          }}';
+String trackCount(int n, [BuildContext? context]) =>
+    context != null && Localizations.localeOf(context).languageCode == 'en'
+    ? (n == 1 ? '{count} трек' : '{count} треків')
+          .tr(context)
+          .replaceAll('{count}', '$n')
+    : '$n ${n % 100 >= 11 && n % 100 <= 14 ? 'треків' : switch (n % 10) {
+              1 => 'трек',
+              2 || 3 || 4 => 'треки',
+              _ => 'треків',
+            }}';
+
+/// Reconstruct a poll before consumers compute signatures or read state.
+/// Each set value replaces the complete top-level field, including nested maps.
+/// Explicit removals keep null values distinct from absent keys.
+Json reconstructSnapshot(Json previous, Json response) {
+  if (response.containsKey('state')) return object(response['state']);
+  final patch = object(response['state_patch']);
+  final next = Map<String, dynamic>.from(previous);
+  for (final key in (patch['remove'] as List? ?? const [])) {
+    next.remove(key);
+  }
+  next.addAll(object(patch['set']));
+  // Rust's JSON objects are key-sorted. Preserve full-snapshot signature order
+  // even when a patch introduces a new field or removes and re-adds one.
+  return {for (final key in next.keys.toList()..sort()) key: next[key]};
+}
+
+/// Native snapshot fields are immutable between replacements. Cache their JSON
+/// separately so a playback tick need not traverse the unchanged library.
+class SnapshotSignature {
+  Json _previous = {};
+  Map<String, String> _encoded = {};
+
+  bool update(Json snapshot) {
+    final encoded = <String, String>{};
+    var changed = snapshot.length != _encoded.length;
+    for (final entry in snapshot.entries) {
+      final value = _previous.containsKey(entry.key) &&
+              identical(_previous[entry.key], entry.value)
+          ? _encoded[entry.key]!
+          : jsonEncode(entry.value);
+      encoded[entry.key] = value;
+      if (_encoded[entry.key] != value) changed = true;
+    }
+    _previous = Map<String, dynamic>.from(snapshot);
+    _encoded = encoded;
+    return changed;
+  }
+
+  String encode(Json snapshot) {
+    update(snapshot);
+    return '{${snapshot.keys.map((key) => '${jsonEncode(key)}:${_encoded[key]}').join(',')}}';
+  }
+}
 
 class Core extends ChangeNotifier {
   Core(this.arguments);
@@ -69,7 +123,7 @@ class Core extends ChangeNotifier {
   final List<String> _history = [];
   Json? _addAfterCreate;
   String _oldPlaylist = '';
-  String _lastSnapshot = '';
+  final _snapshotSignature = SnapshotSignature();
   String? _captionTheme;
   String? _windowIcon;
   bool _homeRequested = false;
@@ -80,6 +134,9 @@ class Core extends ChangeNotifier {
   bool _updateQuitting = false;
   bool _startupUpdateChecked = false;
   Json get update => object(state['update']);
+
+  /// Background update install: download without asking and apply at next launch.
+  bool get autoUpdateInstall => settings['auto_update_install'] != false;
   bool updatePromptOpen = false;
   void closeUpdatePrompt() {
     updatePromptOpen = false;
@@ -114,7 +171,10 @@ class Core extends ChangeNotifier {
     }
     _startupUpdateChecked = true;
     _updatePoll = time;
-    action('update-check', {'download': false});
+    action('update-check', {
+      'download': autoUpdateInstall,
+      'auto': autoUpdateInstall,
+    });
   }
 
   Json get library => object(state['library']);
@@ -135,10 +195,12 @@ class Core extends ChangeNotifier {
     return {...p, 'tracks': objects(p['tracks']).where(onlineTrack).toList()};
   }
 
+  String get language => settings['language'] == 'en' ? 'en' : 'uk';
   String get scheme => settings['theme']?.toString() ?? 'dark';
   bool get dark => scheme != 'light';
   bool get reduced => settings['reduced_motion'] == true;
   bool get playing => playback.value['playing'] == true;
+  String get playerStatus => playback.value['status']?.toString() ?? '';
   bool get hasTrack => current.isNotEmpty;
   bool get canBack => _history.isNotEmpty;
   int get pending => (state['pending'] as num?)?.toInt() ?? 0;
@@ -208,6 +270,7 @@ class Core extends ChangeNotifier {
       final result = _request(_open, {
         'resources': resources,
         'offline': arguments.contains('--offline'),
+        'state_patch_v1': true,
       });
       if (result['secondary'] == true) {
         await window.invokeMethod('quit');
@@ -278,7 +341,7 @@ class Core extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final next = object(result['state']);
+    final next = reconstructSnapshot(state, result);
     final player = object(next['player']);
     final reportedVolume = (player['volume'] as num?)?.toDouble() ?? .8;
     if (_volumeIntent != null &&
@@ -295,10 +358,11 @@ class Core extends ChangeNotifier {
       'track': trackKey(object(playback.value['track'])),
       'playing': playing,
       'loading': playback.value['loading'],
+      'status': playback.value['status'] ?? '',
     };
     stable['settings'] = Map<String, dynamic>.from(object(stable['settings']))
       ..remove('volume');
-    final signature = jsonEncode(stable);
+    final snapshotChanged = _snapshotSignature.update(stable);
     state = next;
     settings = object(next['settings']);
     if (update['status'] == 'restarting' && !_updateQuitting) {
@@ -322,8 +386,7 @@ class Core extends ChangeNotifier {
     final nextRoute = next['view']?.toString() ?? route;
     final routeChanged = route != nextRoute;
     route = nextRoute;
-    if (signature != _lastSnapshot || routeChanged) {
-      _lastSnapshot = signature;
+    if (snapshotChanged || routeChanged) {
       notifyListeners();
     }
     final theme = dark ? 'dark' : 'light';
@@ -363,6 +426,7 @@ class Core extends ChangeNotifier {
     window.invokeMethod('island-state', {
       'player': {...playback.value, 'liked': isLiked(current)},
       'reduced': reduced,
+      'language': language,
     });
     if ((!_homeRequested ||
             (route == 'home' &&
@@ -478,7 +542,10 @@ class Core extends ChangeNotifier {
       'type': 'settings',
       'patch': {key: value},
     });
-    if (key == 'auto_update_enabled' && value == false) action('update-cancel');
+    if ((key == 'auto_update_enabled' || key == 'auto_update_install') &&
+        value == false) {
+      action('update-cancel');
+    }
   }
 
   void search(String query, String source) =>

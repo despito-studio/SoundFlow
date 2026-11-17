@@ -84,14 +84,12 @@ fn icon_path(name: &str, app_dir: Option<&std::path::Path>) -> Result<String, St
         return Err("Невідома іконка".into());
     }
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    if name == "default" {
-        return Ok(exe.display().to_string());
-    }
     let directory = app_dir
         .map(std::path::Path::to_path_buf)
         .or_else(|| exe.parent().map(std::path::Path::to_path_buf))
         .ok_or("Не вдалося визначити каталог застосунку")?;
-    let candidate = directory.join("resources").join(format!("icon-{name}.ico"));
+    let filename = if name == "default" { "icon.ico".to_string() } else { format!("icon-{name}.ico") };
+    let candidate = directory.join("resources").join(filename);
     if candidate.is_file() {
         Ok(candidate.display().to_string())
     } else {
@@ -134,6 +132,11 @@ fn set_icon_from(name: &str, app_dir: Option<&std::path::Path>) -> Result<usize,
     }
     if updated == 0 {
         return Err(format!("Не вдалося оновити ярлик: {last_error}"));
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+        SHChangeNotify(SHCNE_ASSOCCHANGED as i32, SHCNF_IDLIST, std::ptr::null(), std::ptr::null());
     }
     Ok(updated)
 }

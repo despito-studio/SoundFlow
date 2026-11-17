@@ -12,6 +12,7 @@ mod media_keys;
 pub mod native_session;
 pub mod platform;
 pub mod playback;
+mod playback_session;
 pub mod shortcut;
 pub mod soundcloud;
 pub mod supabase;

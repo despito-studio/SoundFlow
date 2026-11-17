@@ -16,8 +16,9 @@ use std::{
     time::Duration,
 };
 
-pub const DEFAULT_SUPABASE_URL: &str = "https://soundflow.supabase.co";
-pub const DEFAULT_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.soundflow_anon";
+pub const DEFAULT_SUPABASE_URL: &str = "https://ieafdutkxpyqwmfedwqy.supabase.co";
+// Public client key; administrative secrets must never be embedded here.
+pub const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_UJ7kEzA4zWNf234jJpbl9A_pF4UlHue";
 pub const DEFAULT_GOOGLE_CLIENT_ID: &str = "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com";
 pub const DEFAULT_GOOGLE_CLIENT_SECRET: &str = "d-FL95Q19q7MQmFpd7hHD0Ty";
 pub const OAUTH_PORT: u16 = 43821;

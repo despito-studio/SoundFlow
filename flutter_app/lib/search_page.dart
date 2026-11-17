@@ -1,3 +1,5 @@
+import 'l10n.dart';
+
 import 'package:flutter/material.dart';
 
 import 'anicry_motion.dart';
@@ -61,7 +63,8 @@ class _SearchPageState extends State<SearchPage> {
     }
     if (source == 'spotify' && draft.isNotEmpty && !spotifyLink(draft)) {
       setState(
-        () => validation = 'Встав посилання на трек Spotify або обери YouTube чи SoundCloud для пошуку за назвою.',
+        () => validation = 'Встав посилання на трек Spotify або обери YouTube чи SoundCloud для пошуку за назвою.'
+            .tr(context),
       );
       return;
     }
@@ -113,7 +116,7 @@ class _SearchPageState extends State<SearchPage> {
         ? <Json>[]
         : c.allTracks
               .where(
-                (t) => '${trackTitle(t)} ${trackArtist(t)}'
+                (t) => '${trackTitle(t, context)} ${trackArtist(t, context)}'
                     .toLowerCase()
                     .contains(draft.toLowerCase()),
               )
@@ -160,8 +163,8 @@ class _SearchPageState extends State<SearchPage> {
                   onTapOutside: (_) {},
                   decoration: InputDecoration(
                     hintText: source == 'spotify'
-                        ? 'Посилання на трек Spotify'
-                        : 'Назва треку, автор або посилання',
+                        ? 'Посилання на трек Spotify'.tr(context)
+                        : 'Назва треку, автор або посилання'.tr(context),
                     counterText: '',
                     filled: false,
                     border: InputBorder.none,
@@ -177,7 +180,7 @@ class _SearchPageState extends State<SearchPage> {
               if (draft.isNotEmpty)
                 Control(
                   'x',
-                  'Очистити пошук',
+                  'Очистити пошук'.tr(context),
                   size: 32,
                   glyphSize: 17,
                   onTap: () {
@@ -188,7 +191,7 @@ class _SearchPageState extends State<SearchPage> {
                 ),
               const SizedBox(width: 8),
               ActionButton(
-                'Знайти',
+                'Знайти'.tr(context),
                 primary: true,
                 onTap: draft.isEmpty ? null : search,
               ),
@@ -201,10 +204,10 @@ class _SearchPageState extends State<SearchPage> {
           runSpacing: 8,
           children: [
             for (final option in [
-              ('all', 'Усюди'),
+              ('all', 'Усюди'.tr(context)),
               ('youtube', 'YouTube'),
               ('soundcloud', 'SoundCloud'),
-              ('spotify', 'Spotify · посилання'),
+              ('spotify', 'Spotify · посилання'.tr(context)),
             ])
               _SourceChip(
                 option.$2,
@@ -216,7 +219,10 @@ class _SearchPageState extends State<SearchPage> {
         if (source == 'spotify' || validation.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(
-            validation.isNotEmpty ? validation : 'Spotify: встав посилання на пісню. Для пошуку за назвою обери інше джерело.',
+            validation.isNotEmpty
+                ? validation
+                : 'Spotify: встав посилання на пісню. Для пошуку за назвою обери інше джерело.'
+                      .tr(context),
             style: TextStyle(
               fontSize: 12,
               height: 1.5,
@@ -235,17 +241,17 @@ class _SearchPageState extends State<SearchPage> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Шукаємо «$submitted»…',
+            'Шукаємо «{query}»…'.tr(context).replaceAll('{query}', submitted),
             style: TextStyle(fontSize: 13, color: p.muted),
           ),
         ],
         if (active && !busy && error.isNotEmpty) ...[
           const SizedBox(height: 28),
           EmptyState(
-            'Не вдалося виконати пошук',
-            error,
+            'Не вдалося виконати пошук'.tr(context),
+            error.tr(context),
             action: ActionButton(
-              'Спробувати ще раз',
+              'Спробувати ще раз'.tr(context),
               icon: 'rotate-cw',
               onTap: search,
             ),
@@ -256,8 +262,10 @@ class _SearchPageState extends State<SearchPage> {
           const SizedBox(height: 30),
           _sectionHeading(
             context,
-            'Треки',
-            subtitle: '${results.length} знайдено',
+            'Треки'.tr(context),
+            subtitle: '{count} знайдено'
+                .tr(context)
+                .replaceAll('{count}', results.length.toString()),
           ),
           const SizedBox(height: 12),
           for (final t in results)
@@ -272,17 +280,19 @@ class _SearchPageState extends State<SearchPage> {
         ] else if (active && !busy && error.isEmpty) ...[
           const SizedBox(height: 28),
           EmptyState(
-            'За запитом «$submitted» нічого не знайшли',
-            'Спробуй коротшу назву, ім’я автора або інше джерело.',
+            'За запитом «{query}» нічого не знайшли'
+                .tr(context)
+                .replaceAll('{query}', submitted),
+            'Спробуй коротшу назву, ім’я автора або інше джерело.'.tr(context),
           ),
         ] else if (!active) ...[
           if (history.isNotEmpty) ...[
             const SizedBox(height: 26),
             _sectionHeading(
               context,
-              'Останні запити',
+              'Останні запити'.tr(context),
               action: ActionButton(
-                'Очистити',
+                'Очистити'.tr(context),
                 flat: true,
                 compact: true,
                 onTap: () => c.call('clear_search_history'),
@@ -313,21 +323,25 @@ class _SearchPageState extends State<SearchPage> {
                 children: [
                   _sectionHeading(
                     context,
-                    draft.isEmpty ? 'Нещодавно слухали' : 'З твоєї медіатеки',
+                    draft.isEmpty
+                        ? 'Нещодавно слухали'.tr(context)
+                        : 'З твоєї медіатеки'.tr(context),
                     subtitle: draft.isEmpty
                         ? null
-                        : 'Збіги за назвою або автором',
+                        : 'Збіги за назвою або автором'.tr(context),
                   ),
                   const SizedBox(height: 16),
                   if (recent.isEmpty)
                     _HintCard(
                       icon: 'audio-lines',
                       title: draft.isEmpty
-                          ? 'Нещодавніх треків ще немає'
-                          : 'Шукай більше музики',
+                          ? 'Нещодавніх треків ще немає'.tr(context)
+                          : 'Шукай більше музики'.tr(context),
                       description: draft.isEmpty
                           ? 'Введи назву, ім’я автора або встав посилання на трек.'
-                          : 'Натисни Enter або «Знайти», щоб переглянути результати з музичних сервісів.',
+                                .tr(context)
+                          : 'Натисни Enter або «Знайти», щоб переглянути результати з музичних сервісів.'
+                                .tr(context),
                     )
                   else
                     LayoutBuilder(
@@ -419,10 +433,10 @@ class _SearchPageState extends State<SearchPage> {
         children: [
           _sectionHeading(
             context,
-            'Твої добірки',
+            'Твої добірки'.tr(context),
             action: Control(
               'arrow-up-right',
-              'Відкрити медіатеку',
+              'Відкрити медіатеку'.tr(context),
               size: 30,
               glyphSize: 17,
               onTap: () => c.nav('library'),
@@ -433,11 +447,13 @@ class _SearchPageState extends State<SearchPage> {
             _HintCard(
               icon: 'list',
               title: draft.isEmpty
-                  ? 'Плейлістів ще немає'
-                  : 'Плейлістів із такою назвою немає',
-              description: 'Збирай знахідки в плейлісти у своїй медіатеці.',
+                  ? 'Плейлістів ще немає'.tr(context)
+                  : 'Плейлістів із такою назвою немає'.tr(context),
+              description: 'Збирай знахідки в плейлісти у своїй медіатеці.'.tr(
+                context,
+              ),
               action: ActionButton(
-                'Медіатека',
+                'Медіатека'.tr(context),
                 flat: true,
                 compact: true,
                 icon: 'arrow-right',
@@ -469,7 +485,8 @@ class _SearchPageState extends State<SearchPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                playlist['name']?.toString() ?? 'Плейліст',
+                                playlist['name']?.toString() ??
+                                    'Плейліст'.tr(context),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -479,7 +496,10 @@ class _SearchPageState extends State<SearchPage> {
                               ),
                               const SizedBox(height: 5),
                               Text(
-                                trackCount(objects(playlist['tracks']).length),
+                                trackCount(
+                                  objects(playlist['tracks']).length,
+                                  context,
+                                ),
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: context.paints.muted,
@@ -508,7 +528,7 @@ class _SearchPageState extends State<SearchPage> {
     final top = results.first;
     final authors = <String, Json>{};
     for (final t in results) {
-      authors.putIfAbsent('${t['source']}:${trackArtist(t)}', () => t);
+      authors.putIfAbsent('${t['source']}:${trackArtist(t, context)}', () => t);
     }
     final best = Container(
       padding: const EdgeInsets.all(20),
@@ -520,7 +540,7 @@ class _SearchPageState extends State<SearchPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Найкращий збіг',
+            'Найкращий збіг'.tr(context),
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -537,7 +557,7 @@ class _SearchPageState extends State<SearchPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      trackTitle(top),
+                      trackTitle(top, context),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -548,7 +568,7 @@ class _SearchPageState extends State<SearchPage> {
                     ),
                     const SizedBox(height: 7),
                     Text(
-                      trackArtist(top),
+                      trackArtist(top, context),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -558,7 +578,7 @@ class _SearchPageState extends State<SearchPage> {
                     ),
                     const SizedBox(height: 7),
                     Text(
-                      sourceName(top),
+                      sourceName(top, context),
                       style: TextStyle(
                         fontSize: 11,
                         color: context.paints.muted,
@@ -573,7 +593,7 @@ class _SearchPageState extends State<SearchPage> {
           Row(
             children: [
               ActionButton(
-                'Слухати',
+                'Слухати'.tr(context),
                 icon: 'play',
                 primary: true,
                 onTap: () => c.play(top, results),
@@ -581,7 +601,9 @@ class _SearchPageState extends State<SearchPage> {
               const Spacer(),
               Control(
                 'heart',
-                c.isLiked(top) ? 'Прибрати з улюбленого' : 'Додати в улюблене',
+                c.isLiked(top)
+                    ? 'Прибрати з улюбленого'.tr(context)
+                    : 'Додати в улюблене'.tr(context),
                 active: c.isLiked(top),
                 onTap: () => c.action('like', top),
               ),
@@ -593,7 +615,7 @@ class _SearchPageState extends State<SearchPage> {
     final artists = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionHeading(context, 'Автори в результатах'),
+        _sectionHeading(context, 'Автори в результатах'.tr(context)),
         const SizedBox(height: 16),
         Wrap(
           spacing: 10,
@@ -601,7 +623,7 @@ class _SearchPageState extends State<SearchPage> {
           children: [
             for (final t in authors.values.take(6))
               _SourceChip(
-                trackArtist(t),
+                trackArtist(t, context),
                 selected: false,
                 onTap: () => c.showCreator(t),
               ),
@@ -719,7 +741,7 @@ class _HistoryChip extends StatelessWidget {
           ),
           Control(
             'x',
-            'Прибрати запит «$query»',
+            'Прибрати запит «{query}»'.tr(context).replaceAll('{query}', query),
             size: 28,
             glyphSize: 13,
             onTap: onRemove,
@@ -754,7 +776,7 @@ class _QuickTrack extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    trackTitle(track),
+                    trackTitle(track, context),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -764,7 +786,7 @@ class _QuickTrack extends StatelessWidget {
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    trackArtist(track),
+                    trackArtist(track, context),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: context.paints.muted),
