@@ -35,18 +35,25 @@ pub(crate) fn account_file(data_dir: &Path, user: &str) -> PathBuf {
     if user == "guest" {
         data_dir.join("library.json")
     } else {
-        let direct = data_dir.join(format!("library_{user}.json"));
-        if direct.is_file() {
-            return direct;
+        let safe_direct = !user.is_empty()
+            && user.len() <= 128
+            && user
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        if safe_direct {
+            let direct = data_dir.join(format!("library_{user}.json"));
+            if direct.is_file() {
+                return direct;
+            }
         }
         let hash_name = data_dir.join(format!(
             "library_{:x}.json",
             Sha256::digest(user.as_bytes())
         ));
-        if hash_name.is_file() {
+        if hash_name.is_file() || !safe_direct {
             return hash_name;
         }
-        direct
+        data_dir.join(format!("library_{user}.json"))
     }
 }
 
@@ -853,5 +860,19 @@ mod account_auth_tests {
         assert!(error.contains("8 символів"));
         assert_eq!(core.accounts.active_id(), "guest");
         assert_eq!(core.accounts.config.accounts.len(), 1);
+    }
+
+    #[test]
+    fn account_file_hashes_unsafe_user_ids_inside_data_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        for unsafe_id in ["../escape", "..\\escape", "a/b", "", "user:name"] {
+            let path = account_file(dir.path(), unsafe_id);
+            assert_eq!(path.parent(), Some(dir.path()));
+            let name = path.file_name().unwrap().to_str().unwrap();
+            assert!(name.starts_with("library_") && name.ends_with(".json"));
+            assert!(!name.contains(".."));
+        }
+        let safe = account_file(dir.path(), "usr_1234-abc");
+        assert_eq!(safe, dir.path().join("library_usr_1234-abc.json"));
     }
 }

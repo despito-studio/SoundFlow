@@ -82,9 +82,9 @@ abstract final class InstallerDesign {
   static const compactControl = SoundFlowCorners.compactControl;
   static const control = SoundFlowCorners.control;
 
-  // The reference's black surface and blue action are installer roles.
-  static const background = Color(0xff131315);
-  static const blue = Color(0xff0a84ff);
+  // Deep Obsidian 2.0 surface and rose-magenta progress accent.
+  static const background = Color(0xff111114);
+  static const blue = Color(0xfff15c7a);
   static final ink = Paints.night.ink;
   static final muted = Paints.night.muted;
 

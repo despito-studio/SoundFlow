@@ -291,28 +291,36 @@ impl NativeSession {
         std::thread::Builder::new()
             .name("soundflow-downloads".into())
             .spawn(move || {
+                /// Shut down the isolated Node media worker after 30s of inactivity
+                /// when no downloads or provider requests are in flight.
+                const PROVIDER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
                 while !worker.shared.stopped.load(Ordering::Acquire) {
                     std::thread::sleep(Duration::from_secs(2));
-                    let poll = {
+                    let (poll, has_active_downloads, has_pending) = {
                         let state = worker.state();
-                        state.pending < 4
-                            && (state.view == "downloads"
-                                || state.downloads.iter().any(|job| {
-                                    matches!(
-                                        job["status"].as_str(),
-                                        Some(
-                                            "queued"
-                                                | "downloading"
-                                                | "processing"
-                                                | "cancelling"
-                                                | "running"
-                                                | "resolving"
-                                        )
-                                    )
-                                }))
+                        let active = state.downloads.iter().any(|job| {
+                            matches!(
+                                job["status"].as_str(),
+                                Some(
+                                    "queued"
+                                        | "downloading"
+                                        | "processing"
+                                        | "cancelling"
+                                        | "running"
+                                        | "resolving"
+                                )
+                            )
+                        });
+                        (
+                            state.pending < 4 && (state.view == "downloads" || active),
+                            active,
+                            state.pending > 0,
+                        )
                     };
                     if poll {
                         worker.call("get_downloads", vec![]);
+                    } else if !has_active_downloads && !has_pending {
+                        worker.desktop.trim_idle_provider(PROVIDER_IDLE_TIMEOUT);
                     }
                 }
             })
@@ -364,6 +372,136 @@ impl NativeSession {
                 "status": state.player.status
             }
         })
+    }
+
+    /// Computes a top-level state diff directly against `previous` by reference so
+    /// unchanged collections (`library`, `feed`, `queue`, etc.) are never cloned.
+    /// Also returns `(desktop_icon, hotkeys_enabled)` for shell sync without cloning settings.
+    pub fn diff_snapshot(
+        &self,
+        previous: &mut serde_json::Map<String, Value>,
+    ) -> (serde_json::Map<String, Value>, String, bool) {
+        fn sync_value(
+            previous: &mut serde_json::Map<String, Value>,
+            set: &mut serde_json::Map<String, Value>,
+            key: &str,
+            value: &Value,
+        ) {
+            if previous.get(key) != Some(value) {
+                let cloned = value.clone();
+                previous.insert(key.to_string(), cloned.clone());
+                set.insert(key.to_string(), cloned);
+            }
+        }
+        fn sync_vec(
+            previous: &mut serde_json::Map<String, Value>,
+            set: &mut serde_json::Map<String, Value>,
+            key: &str,
+            items: &[Value],
+        ) {
+            let same = previous
+                .get(key)
+                .and_then(Value::as_array)
+                .is_some_and(|prev| prev.as_slice() == items);
+            if !same {
+                let cloned = Value::Array(items.to_vec());
+                previous.insert(key.to_string(), cloned.clone());
+                set.insert(key.to_string(), cloned);
+            }
+        }
+        fn sync_str(
+            previous: &mut serde_json::Map<String, Value>,
+            set: &mut serde_json::Map<String, Value>,
+            key: &str,
+            text: &str,
+        ) {
+            if previous.get(key).and_then(Value::as_str) != Some(text) {
+                let cloned = Value::String(text.to_string());
+                previous.insert(key.to_string(), cloned.clone());
+                set.insert(key.to_string(), cloned);
+            }
+        }
+        fn sync_bool(
+            previous: &mut serde_json::Map<String, Value>,
+            set: &mut serde_json::Map<String, Value>,
+            key: &str,
+            flag: bool,
+        ) {
+            if previous.get(key).and_then(Value::as_bool) != Some(flag) {
+                let cloned = Value::Bool(flag);
+                previous.insert(key.to_string(), cloned.clone());
+                set.insert(key.to_string(), cloned);
+            }
+        }
+        fn sync_u64(
+            previous: &mut serde_json::Map<String, Value>,
+            set: &mut serde_json::Map<String, Value>,
+            key: &str,
+            number: u64,
+        ) {
+            if previous.get(key).and_then(Value::as_u64) != Some(number) {
+                let cloned = json!(number);
+                previous.insert(key.to_string(), cloned.clone());
+                set.insert(key.to_string(), cloned);
+            }
+        }
+
+        let update = self.updater.snapshot();
+        let state = self.state();
+        let desktop_icon = state.settings["desktop_icon"]
+            .as_str()
+            .unwrap_or("default")
+            .to_string();
+        let hotkeys_enabled = state.settings["hotkeys_enabled"].as_bool().unwrap_or(true);
+        let mut set = serde_json::Map::new();
+
+        sync_value(previous, &mut set, "library", &state.library);
+        sync_value(previous, &mut set, "settings", &state.settings);
+        sync_value(previous, &mut set, "cloud", &state.cloud);
+        sync_value(previous, &mut set, "stats", &state.stats);
+        sync_value(previous, &mut set, "accounts", &state.accounts);
+        sync_vec(previous, &mut set, "home", &state.home);
+        sync_value(previous, &mut set, "feed", &state.feed);
+        sync_value(previous, &mut set, "creator", &state.creator);
+        sync_value(previous, &mut set, "profile_assets", &state.profile_assets);
+        sync_vec(previous, &mut set, "search", &state.search);
+        sync_vec(previous, &mut set, "discovery", &state.discovery);
+        sync_vec(previous, &mut set, "smart", &state.smart);
+        sync_vec(previous, &mut set, "downloads", &state.downloads);
+        sync_value(previous, &mut set, "library_backups", &state.library_backups);
+        sync_vec(previous, &mut set, "queue", &state.queue);
+        sync_u64(previous, &mut set, "queue_index", state.queue_index as u64);
+        sync_vec(previous, &mut set, "matches", &state.matches);
+        match state.pending_track.as_ref() {
+            Some(track) => sync_value(previous, &mut set, "pending_track", track),
+            None => sync_value(previous, &mut set, "pending_track", &Value::Null),
+        }
+        sync_str(previous, &mut set, "current_user", &state.current_user);
+        sync_str(previous, &mut set, "view", &state.view);
+        sync_str(previous, &mut set, "selected_playlist", &state.selected_playlist);
+        sync_str(previous, &mut set, "message", &state.message);
+        sync_bool(previous, &mut set, "message_error", state.message_error);
+        sync_u64(previous, &mut set, "pending", state.pending as u64);
+        sync_str(previous, &mut set, "search_query", &state.search_query);
+        sync_str(previous, &mut set, "search_source", &state.search_source);
+        sync_bool(previous, &mut set, "search_loading", state.search_loading);
+        sync_str(previous, &mut set, "search_error", &state.search_error);
+        sync_str(previous, &mut set, "last_method", &state.last_method);
+        sync_value(previous, &mut set, "last_result", &state.last_result);
+        sync_u64(previous, &mut set, "revision", state.revision);
+        sync_value(previous, &mut set, "update", &update);
+        let player = json!({
+            "track": state.player.track,
+            "playing": state.player.playing,
+            "loading": state.player.loading,
+            "position": state.player.position,
+            "duration": state.player.duration,
+            "volume": state.player.volume,
+            "status": state.player.status
+        });
+        sync_value(previous, &mut set, "player", &player);
+
+        (set, desktop_icon, hotkeys_enabled)
     }
 
     pub fn navigate(&self, view: &str) {

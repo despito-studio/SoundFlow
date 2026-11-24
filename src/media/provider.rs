@@ -7,11 +7,17 @@ use std::{
     path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc::{self, Receiver},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const MAX_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 const MAX_REPLY_BYTES: usize = 16 * 1024 * 1024;
+/// Tight V8 heap limits for the isolated Node media worker (extraction/search/downloads).
+const NODE_MAX_OLD_SPACE_ARG: &str = "--max-old-space-size=64";
+/// Reduces V8 young-generation semi-space footprint from 16-32 MiB down to ~4 MiB.
+const NODE_MAX_SEMI_SPACE_ARG: &str = "--max-semi-space-size=2";
+/// Biases V8 garbage collection toward minimal resident memory.
+const NODE_OPTIMIZE_FOR_SIZE_ARG: &str = "--optimize-for-size";
 
 fn read_reply(reader: &mut impl BufRead) -> CoreResult<Option<Value>> {
     let mut bytes = Vec::new();
@@ -87,6 +93,7 @@ struct WorkerProcess {
     input: ChildStdin,
     replies: Receiver<CoreResult<Value>>,
     next_id: u64,
+    last_used: Instant,
     #[cfg(windows)]
     _job: WindowsJob,
 }
@@ -181,7 +188,11 @@ impl ProviderBridge {
         .find(|p| p.is_file());
         if let (Some(node), Some(script)) = (node, script) {
             let mut command = Command::new(node);
-            command.arg(script);
+            command
+                .arg(NODE_MAX_OLD_SPACE_ARG)
+                .arg(NODE_MAX_SEMI_SPACE_ARG)
+                .arg(NODE_OPTIMIZE_FOR_SIZE_ARG)
+                .arg(script);
             return Ok(command);
         }
         #[cfg(debug_assertions)]
@@ -200,7 +211,11 @@ impl ProviderBridge {
                 } else {
                     PathBuf::from("node")
                 });
-                command.arg(script);
+                command
+                    .arg(NODE_MAX_OLD_SPACE_ARG)
+                    .arg(NODE_MAX_SEMI_SPACE_ARG)
+                    .arg(NODE_OPTIMIZE_FOR_SIZE_ARG)
+                    .arg(script);
                 return Ok(command);
             }
         }
@@ -269,14 +284,35 @@ impl ProviderBridge {
             input,
             replies,
             next_id: 1,
+            last_used: Instant::now(),
             #[cfg(windows)]
             _job: job,
         });
         Ok(())
     }
+    pub fn stop_if_idle(&mut self, max_idle: Duration) -> bool {
+        let should_stop = self
+            .process
+            .as_ref()
+            .is_some_and(|process| process.last_used.elapsed() >= max_idle);
+        if should_stop {
+            self.stop();
+        }
+        should_stop
+    }
     pub fn call(&mut self, method: &str, args: &[Value]) -> CoreResult<Value> {
         if !METHODS.contains(&method) {
             return Err("Непідтримуваний метод музичного рушія".into());
+        }
+        if let Some(process) = self.process.as_mut() {
+            if process
+                .child
+                .try_wait()
+                .map_err(|e| e.to_string())?
+                .is_some()
+            {
+                self.process = None;
+            }
         }
         if self.process.is_none() {
             self.start()?
@@ -284,15 +320,7 @@ impl ProviderBridge {
         let Some(process) = self.process.as_mut() else {
             return Err("Не вдалося запустити музичний рушій".into());
         };
-        if process
-            .child
-            .try_wait()
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            self.process = None;
-            return Err("Музичний рушій завершив роботу. Повторіть запит.".into());
-        }
+        process.last_used = Instant::now();
         let id = process.next_id;
         process.next_id += 1;
         let request = encode_request(id, method, args)?;
@@ -317,6 +345,7 @@ impl ProviderBridge {
                 return Err("Музичний сервіс не відповів вчасно. Повторіть запит.".into());
             }
         };
+        process.last_used = Instant::now();
         if reply["id"].as_u64() != Some(id) {
             self.stop();
             return Err("Порушено порядок відповідей музичного рушія".into());
@@ -339,6 +368,7 @@ impl ProviderBridge {
                 input,
                 replies: _,
                 next_id: _,
+                last_used: _,
                 #[cfg(windows)]
                 _job,
             } = process;

@@ -11,27 +11,28 @@ import 'core.dart';
 import 'l10n.dart';
 import 'connections.dart';
 import 'anicry_motion.dart';
+import 'cider_shell.dart';
 import 'discovery.dart';
 import 'profiles.dart';
 import 'design.dart';
 import 'island.dart';
 import 'media_slider.dart';
-import 'player_dock.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
 import 'update_prompt.dart';
 import 'portrait_background.dart';
+import 'visualizer.dart';
 
 final designBoundary = GlobalKey();
 
 void main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Bound retained offscreen artwork; visible covers use display-sized decodes.
+  // Tight low-RAM image cache cap (8 MiB main, 3 MiB island).
   PaintingBinding.instance.imageCache
     ..maximumSizeBytes = arguments.contains('--island')
-        ? 8 * 1024 * 1024
-        : 32 * 1024 * 1024
-    ..maximumSize = arguments.contains('--island') ? 32 : 200;
+        ? 3 * 1024 * 1024
+        : 8 * 1024 * 1024
+    ..maximumSize = arguments.contains('--island') ? 16 : 64;
   await Anicry.load();
   if (arguments.contains('--island')) {
     final exportIndex = arguments.indexOf('--export-island');
@@ -75,7 +76,7 @@ class SoundFlow extends StatelessWidget {
   final Core core;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: core,
+    listenable: Listenable.merge([core, redesignPrefs]),
     builder: (context, _) => MaterialApp(
       title: 'SoundFlow',
       locale: Locale(core.language),
@@ -99,7 +100,6 @@ class SoundFlow extends StatelessWidget {
                 color: Theme.of(context).scaffoldBackgroundColor,
               ),
             ),
-            const Positioned.fill(child: PortraitBackground()),
             Positioned.fill(child: child!),
           ],
         ),
@@ -282,187 +282,6 @@ class _WorkspaceState extends State<Workspace> {
     searchFocus.dispose();
     scroll.dispose();
     super.dispose();
-  }
-
-  Widget _sidebar(BuildContext context) {
-    final p = context.paints;
-    final compact = MediaQuery.sizeOf(context).width < 800;
-    final activeLibrary = [
-      'library',
-      'playlist',
-      'liked',
-      'history',
-    ].contains(c.route);
-    final playlists = c.playlists.take(5).toList();
-    Widget link(
-      String label,
-      String route, {
-      bool selected = false,
-      VoidCallback? onTap,
-    }) => Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap ?? () => navigate(route),
-          borderRadius: BorderRadius.circular(6),
-          child: SizedBox(
-            height: 38,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 15),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: selected ? p.ink : p.muted,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    return Container(
-      width: compact ? 152 : 208,
-      margin: const EdgeInsets.fromLTRB(10, 12, 0, 12),
-      padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
-      clipBehavior: Clip.hardEdge,
-      decoration: BoxDecoration(
-        color: p.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(7, 4, 7, 14),
-            child: Text(
-              'SoundFlow',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontFamily: SoundFlowType.heading,
-                fontSize: 19,
-                fontWeight: FontWeight.w700,
-                color: p.ink,
-              ),
-            ),
-          ),
-          if (c.canBack) link('Назад'.tr(context), c.route, onTap: c.back),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(7, 10, 7, 5),
-            child: Text(
-              'НАВІГАЦІЯ'.tr(context),
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: p.muted,
-              ),
-            ),
-          ),
-          link('Головна'.tr(context), 'home', selected: c.route == 'home'),
-          link('Пошук'.tr(context), 'search', selected: c.route == 'search'),
-          link('Каталог'.tr(context), 'library', selected: activeLibrary),
-          if (!compact) ...[
-            const SizedBox(height: 10),
-            Divider(height: 1, color: p.ink.withValues(alpha: .08)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(7, 15, 7, 5),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'ПЛЕЙЛИСТИ'.tr(context),
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: p.muted,
-                      ),
-                    ),
-                  ),
-                  Control(
-                    'plus',
-                    'Створити плейлист'.tr(context),
-                    size: 30,
-                    onTap: () => createPlaylist(),
-                  ),
-                ],
-              ),
-            ),
-            link('Улюблене'.tr(context), 'liked', selected: c.route == 'liked'),
-            for (final playlist in playlists)
-              link(
-                playlist['name']?.toString() ?? 'Плейлист'.tr(context),
-                'playlist',
-                selected: c.selectedPlaylist == playlist['id'],
-                onTap: () => c.selectPlaylist(playlist),
-              ),
-          ],
-          const Spacer(),
-          link(
-            'Завантаження'.tr(context),
-            'downloads',
-            selected: c.route == 'downloads',
-          ),
-          link(
-            'Налаштування'.tr(context),
-            'settings',
-            selected: c.route == 'settings',
-          ),
-          const SizedBox(height: 5),
-          Divider(height: 1, color: p.ink.withValues(alpha: .08)),
-          const SizedBox(height: 5),
-          Semantics(
-            button: true,
-            label: 'Відкрити профіль'.tr(context),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () => navigate('profile'),
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 9,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        c.profile['name']?.toString() ?? 'Слухач'.tr(context),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: p.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Мій профіль'.tr(context),
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: p.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   String get title => switch (c.route) {
@@ -705,7 +524,7 @@ class _WorkspaceState extends State<Workspace> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.paints;
+    final screenW = MediaQuery.sizeOf(context).width;
     showMatchPicker();
     if (_route != c.route) {
       _route = c.route;
@@ -719,8 +538,16 @@ class _WorkspaceState extends State<Workspace> {
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyK, control: true): () {
+          redesignPrefs.setImmersive(false);
           navigate('search');
           searchFocus.requestFocus();
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (redesignPrefs.immersiveOpen) {
+            redesignPrefs.setImmersive(false);
+          } else if (redesignPrefs.miniPlayerOpen) {
+            redesignPrefs.toggleMiniPlayer();
+          }
         },
         const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): c.back,
         const SingleActivator(LogicalKeyboardKey.space): () =>
@@ -729,142 +556,121 @@ class _WorkspaceState extends State<Workspace> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
-          backgroundColor: Colors.transparent,
-          body: Row(
+          backgroundColor: const Color(0xff141417),
+          body: Stack(
             children: [
-              _sidebar(context),
-              Expanded(
-                child: Stack(
-                  children: [
-                    LayoutBuilder(
-                      builder: (context, box) => AnimatedSwitcher(
-                        duration: Duration(milliseconds: c.reduced ? 0 : 220),
-                        switchInCurve: Anicry.easeOut,
-                        transitionBuilder: (child, animation) =>
-                            FadeTransition(opacity: animation, child: child),
-                        child: SizedBox.expand(
-                          key: ValueKey(c.route),
-                          child: pageViewport(box.maxWidth - 48),
+              Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        CiderIconRail(
+                          core: c,
+                          onOpenConnections: showConnections,
                         ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: 68,
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [p.canvas, p.canvas.withValues(alpha: 0)],
-                            ),
+                        if (redesignPrefs.showLibrarySidebar && screenW >= 780)
+                          CiderLibraryPanel(
+                            core: c,
+                            onCreatePlaylist: () => createPlaylist(),
                           ),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: SizedBox(
-                        height: 56,
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 24, right: 24),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontFamily: SoundFlowType.heading,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w600,
+                        Expanded(
+                          child: Container(
+                            color: const Color(0xff18181c),
+                            child: Stack(
+                              children: [
+                                LayoutBuilder(
+                                  builder: (context, box) => AnimatedSwitcher(
+                                    duration: Duration(
+                                      milliseconds: c.reduced ? 0 : 180,
+                                    ),
+                                    switchInCurve: Anicry.easeOut,
+                                    transitionBuilder: (child, animation) =>
+                                        FadeTransition(
+                                          opacity: animation,
+                                          child: child,
+                                        ),
+                                    child: SizedBox.expand(
+                                      key: ValueKey(c.route),
+                                      child: pageViewport(box.maxWidth - 40),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              if (MediaQuery.sizeOf(context).width > 960 &&
-                                  c.route != 'search') ...[
-                                SizedBox(
-                                  width: 246,
-                                  height: 34,
-                                  child: Material(
-                                    color: p.surface,
-                                    borderRadius: BorderRadius.circular(17),
-                                    child: InkWell(
-                                      onTap: () => navigate('search'),
-                                      borderRadius: BorderRadius.circular(17),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 13,
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Glyph(
-                                              'search',
-                                              size: 17,
-                                              color: p.muted,
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Text(
-                                              'Трек, артист, посилання'.tr(
-                                                context,
-                                              ),
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: p.muted,
-                                              ),
-                                            ),
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  height: 56,
+                                  child: IgnorePointer(
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topCenter,
+                                          end: Alignment.bottomCenter,
+                                          colors: [
+                                            const Color(
+                                              0xff18181c,
+                                            ).withValues(alpha: .94),
+                                            const Color(
+                                              0xff18181c,
+                                            ).withValues(alpha: 0),
                                           ],
                                         ),
                                       ),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 16),
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: CiderTopBar(
+                                    core: c,
+                                    onCreatePlaylist: () => createPlaylist(),
+                                    onOpenConnections: showConnections,
+                                  ),
+                                ),
+                                if (c.error.isNotEmpty ||
+                                    (c.state['message_error'] == true &&
+                                        !(c.route == 'search' &&
+                                            c.state['search_error'] ==
+                                                c.state['message'])))
+                                  Positioned(
+                                    left: 20,
+                                    bottom: 16,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 460,
+                                      ),
+                                      child: ErrorNotice(
+                                        c.error.isNotEmpty
+                                            ? c.error.tr(context)
+                                            : c.state['message']
+                                                  .toString()
+                                                  .tr(context),
+                                        key: ValueKey(
+                                          c.error.isNotEmpty
+                                              ? c.error
+                                              : c.state['message'],
+                                        ),
+                                        onDismiss: c.clearError,
+                                      ),
+                                    ),
+                                  ),
                               ],
-                              Control(
-                                'user-round',
-                                'Твій профіль'.tr(context),
-                                active: c.route == 'profile',
-                                onTap: () => navigate('profile'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (c.route != 'now' && c.hasTrack)
-                      Positioned.fill(
-                        child: PlayerDock(c, onAddPlaylist: addPlaylist),
-                      ),
-                    if (c.error.isNotEmpty ||
-                        (c.state['message_error'] == true &&
-                            !(c.route == 'search' &&
-                                c.state['search_error'] == c.state['message'])))
-                      Positioned(
-                        left: 24,
-                        bottom: c.hasTrack && c.route != 'now' ? 144 : 24,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 480),
-                          child: ErrorNotice(
-                            c.error.isNotEmpty
-                                ? c.error.tr(context)
-                                : c.state['message'].toString().tr(context),
-                            key: ValueKey(
-                              c.error.isNotEmpty ? c.error : c.state['message'],
                             ),
-                            onDismiss: c.clearError,
                           ),
                         ),
-                      ),
-                  ],
-                ),
+                        if (redesignPrefs.showQueuePanel && screenW >= 1040)
+                          CiderQueuePanel(core: c),
+                      ],
+                    ),
+                  ),
+                  CiderBottomBar(core: c, onAddPlaylist: addPlaylist),
+                ],
               ),
+              if (redesignPrefs.miniPlayerOpen)
+                CiderMiniPlayerCard(core: c, onAddPlaylist: addPlaylist),
+              if (redesignPrefs.immersiveOpen) CiderImmersiveOverlay(core: c),
             ],
           ),
         ),
@@ -873,12 +679,7 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   Widget pageViewport(double width) {
-    final padding = EdgeInsets.fromLTRB(
-      24,
-      68,
-      24,
-      c.route == 'now' || !c.hasTrack ? 32 : 152,
-    );
+    const padding = EdgeInsets.fromLTRB(20, 60, 20, 28);
     // Match the collection fallback in page(), leaving other page layouts intact.
     final collection =
         c.ready &&
@@ -967,67 +768,43 @@ class _WorkspaceState extends State<Workspace> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (c.route == 'playlist') ...[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Artwork(
-                ts.isEmpty ? '' : trackCover(ts.first),
-                size: width < 760 ? 144 : 184,
-                radius: 18,
-              ),
-              const SizedBox(width: 28),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      c.playlist['name'] ?? 'Плейліст'.tr(context),
-                      style: const TextStyle(
-                        fontFamily: SoundFlowType.heading,
-                        fontSize: 34,
-                        height: 1.15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      trackCount(ts.length, context),
-                      style: TextStyle(color: context.paints.muted),
-                    ),
-                    const SizedBox(height: 24),
-                    actions([
-                      ActionButton(
-                        'Відтворити'.tr(context),
-                        icon: 'play',
-                        primary: true,
-                        onTap: ts.isEmpty ? null : () => c.play(ts.first, ts),
-                      ),
-                      ActionButton(
-                        'Перейменувати'.tr(context),
-                        flat: true,
-                        onTap: () async {
-                          final value = await textDialog(
-                            'Перейменувати плейліст'.tr(context),
-                            'Назва'.tr(context),
-                            value: c.playlist['name'] ?? '',
-                            confirm: 'Зберегти'.tr(context),
-                          );
-                          if (value != null) {
-                            c.call('rename_playlist', [
-                              c.selectedPlaylist,
-                              value,
-                            ]);
-                          }
-                        },
-                      ),
-                    ]),
-                  ],
-                ),
-              ),
+        if (c.route == 'playlist' || c.route == 'liked') ...[
+          CiderHeroHeader(
+            core: c,
+            cover: ts.isEmpty ? '' : trackCover(ts.first),
+            title: c.route == 'liked'
+                ? 'Favorite Songs'
+                : (c.playlist['name']?.toString() ?? 'Playlist'),
+            subtitle: c.profile['name']?.toString() ?? 'SoundFlow Library',
+            ambientKey: c.route == 'liked'
+                ? 'favorite_songs'
+                : c.selectedPlaylist,
+            pills: [
+              'Playlist',
+              '${ts.length} tracks',
             ],
+            onPlay: ts.isEmpty ? null : () => c.play(ts.first, ts),
+            onShuffle: ts.isEmpty
+                ? null
+                : () {
+                    final s = [...ts]..shuffle();
+                    c.play(s.first, s);
+                  },
+            onMore: c.route == 'playlist'
+                ? () async {
+                    final value = await textDialog(
+                      'Rename playlist',
+                      'Name',
+                      value: c.playlist['name'] ?? '',
+                      confirm: 'Save',
+                    );
+                    if (value != null) {
+                      c.call('rename_playlist', [c.selectedPlaylist, value]);
+                    }
+                  }
+                : null,
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 22),
         ],
         if (c.route == 'queue' && c.hasTrack) ...[
           Row(

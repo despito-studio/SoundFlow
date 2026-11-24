@@ -685,6 +685,12 @@ impl Desktop {
             provider.stop();
         }
     }
+    pub fn trim_idle_provider(&self, max_idle: std::time::Duration) -> bool {
+        if let Ok(mut provider) = self.provider.try_lock() {
+            return provider.stop_if_idle(max_idle);
+        }
+        false
+    }
     pub fn record_audio(&self, report: &crate::playback::ListeningReport) -> CoreResult<Value> {
         // Persist heard time before acquiring Core, which may be waiting on a
         // cloud response. Holding the barrier through the SQLite write orders

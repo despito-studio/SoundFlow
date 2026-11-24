@@ -20,11 +20,11 @@ class Paints extends ThemeExtension<Paints> {
   );
   final Color canvas, surface, hover, ink, muted, accent;
   static const night = Paints(
-    Color(0xff181818),
-    Color(0xff242424),
-    Color(0xff333333),
+    Color(0xff111113),
+    Color(0xff18181c),
+    Color(0xff24242b),
     Color(0xfff5f5f7),
-    Color(0xffb8b8b8),
+    Color(0xff94949e),
     Color(0xff9bbcff),
   );
   static const day = Paints(
@@ -378,15 +378,13 @@ class Artwork extends StatelessWidget {
           size ??
           (constraints.maxWidth.isFinite ? constraints.maxWidth : 350.0);
       final pixels = logicalSize * MediaQuery.devicePixelRatioOf(context);
-      // Reuse a small set of cache keys while retaining sharp HiDPI covers.
+      // Reuse a small set of cache keys capped at 512px to keep bitmap RAM low.
       final decodeWidth = [
         64,
         128,
         256,
         512,
-        700,
-        1024,
-      ].firstWhere((width) => width >= pixels, orElse: () => 1024);
+      ].firstWhere((width) => width >= pixels, orElse: () => 512);
       Widget art;
       if (path.isEmpty) {
         art = fallback(context);
@@ -412,11 +410,9 @@ class Artwork extends StatelessWidget {
           errorBuilder: (c, e, s) => fallback(c),
         );
       }
-      return RepaintBoundary(
-        child: ClipRRect(
-          borderRadius: corners ?? BorderRadius.circular(radius),
-          child: SizedBox(width: size, height: size, child: art),
-        ),
+      return ClipRRect(
+        borderRadius: corners ?? BorderRadius.circular(radius),
+        child: SizedBox(width: size, height: size, child: art),
       );
     },
   );
@@ -492,105 +488,159 @@ class AlbumCard extends StatefulWidget {
 class _AlbumCardState extends State<AlbumCard> {
   bool hover = false;
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    onEnter: (_) => setState(() => hover = true),
-    onExit: (_) => setState(() => hover = false),
-    child: Semantics(
-      button: true,
-      label:
-          '${widget.playing ? 'Пауза'.tr(context) : 'Відтворити'.tr(context)}: ${trackTitle(widget.track, context)}, ${trackArtist(widget.track, context)}',
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: Material(
-          color: context.paints.surface,
-          child: InkWell(
-            onTap: widget.onTap,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                AnimatedScale(
-                  scale: hover ? 1.035 : 1,
-                  duration: Duration(milliseconds: widget.reduced ? 0 : 300),
-                  curve: Curves.easeOutCubic,
-                  child: Artwork(trackCover(widget.track), radius: 0),
-                ),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment(0, -.4),
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Color(0xb3000000),
-                        Color(0xf2000000),
-                      ],
-                      stops: [0, .35, 1],
+  Widget build(BuildContext context) {
+    final p = context.paints;
+    final src = sourceName(widget.track, context);
+    return MouseRegion(
+      onEnter: (_) => setState(() => hover = true),
+      onExit: (_) => setState(() => hover = false),
+      child: Semantics(
+        button: true,
+        label:
+            '${widget.playing ? 'Пауза'.tr(context) : 'Відтворити'.tr(context)}: ${trackTitle(widget.track, context)}, ${trackArtist(widget.track, context)}',
+        child: AnimatedContainer(
+          duration: Duration(milliseconds: widget.reduced ? 0 : 180),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: widget.playing
+                  ? p.accent
+                  : hover
+                  ? Colors.white.withValues(alpha: .18)
+                  : Colors.white.withValues(alpha: .08),
+              width: widget.playing ? 1.5 : 1,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(19),
+            child: Material(
+              color: p.surface,
+              child: InkWell(
+                onTap: widget.onTap,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    AnimatedScale(
+                      scale: hover ? 1.04 : 1,
+                      duration: Duration(milliseconds: widget.reduced ? 0 : 280),
+                      curve: Curves.easeOutCubic,
+                      child: Artwork(trackCover(widget.track), radius: 0),
                     ),
-                  ),
-                ),
-                Positioned(
-                  left: 20,
-                  right: 20,
-                  bottom: 20,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              trackTitle(widget.track, context),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 20,
-                                height: 1.2,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              trackArtist(widget.track, context),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                height: 1.3,
-                                color: Color(0xffdddddf),
-                              ),
-                            ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment(0, -.25),
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0x05000000),
+                            Color(0xb80a0a0c),
+                            Color(0xf50a0a0c),
                           ],
+                          stops: [0, .55, 1],
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Glyph(
-                            widget.playing ? 'pause' : 'play',
-                            size: 20,
-                            color: const Color(0xff17181b),
+                    ),
+                    if (src.isNotEmpty)
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xb00e0e12),
+                            borderRadius: BorderRadius.circular(7),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: .08),
+                            ),
+                          ),
+                          child: Text(
+                            src,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xe6ffffff),
+                            ),
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  trackTitle(widget.track, context),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontFamily: SoundFlowType.heading,
+                                    fontSize: 17,
+                                    height: 1.18,
+                                    letterSpacing: -0.3,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  trackArtist(widget.track, context),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    height: 1.3,
+                                    color: Color(0xb8ffffff),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          AnimatedScale(
+                            scale: hover ? 1.06 : 1,
+                            duration: Duration(
+                              milliseconds: widget.reduced ? 0 : 160,
+                            ),
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: widget.playing ? p.accent : Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Glyph(
+                                  widget.playing ? 'pause' : 'play',
+                                  filled: true,
+                                  size: 19,
+                                  color: const Color(0xff111113),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class PlaylistCard extends StatelessWidget {

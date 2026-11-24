@@ -73,6 +73,15 @@ class InstallerCanvas {
   void end() { check(target_->EndDraw()); }
   void opacity(float value){opacity_=std::clamp(value,0.f,1.f);}
   void clear(Color value) { target_->Clear(color(value)); }
+  void radial_glow(RectF area,float cx,float cy,float rx,float ry,Color inner,Color outer) {
+    D2D1_GRADIENT_STOP stops[2]={{0.0f,color(inner)},{1.0f,color(outer)}};
+    Ptr<ID2D1GradientStopCollection> collection;
+    if(FAILED(target_->CreateGradientStopCollection(stops,2,&collection)))return;
+    Ptr<ID2D1RadialGradientBrush> gradient;
+    auto props=D2D1::RadialGradientBrushProperties(D2D1::Point2F(cx,cy),D2D1::Point2F(0,0),rx,ry);
+    if(FAILED(target_->CreateRadialGradientBrush(props,collection.Get(),&gradient)))return;
+    target_->FillRectangle(rect(area),gradient.Get());
+  }
   void rounded(RectF value,float radius,Color fill,float stroke=0,Color outline=Color(0,0,0,0)) {
     D2D1_ROUNDED_RECT shape{rect(value),radius,radius};
     if (fill.GetA()) target_->FillRoundedRectangle(shape,brush(fill));

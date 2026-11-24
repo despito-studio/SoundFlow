@@ -140,7 +140,7 @@ void package(const fs::path& output) {
   auto resource = FindResourceW(app.instance, MAKEINTRESOURCEW(501), RT_RCDATA);
   if (!resource) throw std::runtime_error("Пошкоджено інсталяційний файл");
   else {
-    send(Phase::Extract, L"Готуємо файли…");
+    send(Phase::Extract, L"Preparing files...");
     auto data = static_cast<const char*>(LockResource(LoadResource(app.instance, resource)));
     const DWORD size = SizeofResource(app.instance, resource);
     if (!data || size != SF_PACKAGE_SIZE) throw std::runtime_error("Пошкоджено інсталяційний файл");
@@ -333,7 +333,7 @@ void install() {
     Transaction transaction(target);
     IntegrationBackup registration;
     wait_for_app(target);cancel_check();
-    app.committing=true;send(Phase::Commit,L"Встановлення…");
+    app.committing=true;send(Phase::Commit,L"Installing SoundFlow...");
     transaction.commit();
     try{
       auto result=run_payload(payload,target,temporary/L"velopack.log",retain_temporary);
@@ -350,7 +350,7 @@ void install() {
     // Velopack owns uninstall registration and shortcuts. Keep any previous folder
     // as a recoverable backup, including user-added files.
     transaction.finish();
-    send(Phase::Success, L"Готово. Приємного прослуховування");
+    send(Phase::Success, L"Ready. Enjoy your music");
     // Let the library's completion reveal finish before the app takes focus.
     if(!app.reduced_motion)Sleep(sf_vectors::circle_check.duration);
     launch(target);
@@ -430,12 +430,12 @@ struct LabelMotion {
   bool active()const{return started&&GetTickCount64()-started<sf_vectors::revealMs+sf_vectors::contentDelayMs;}
 } detail_label,title_label,action_label;
 std::wstring detail_for(Phase value,const std::wstring& message){
-  if(value==Phase::Home||value==Phase::Success)return L"Музичний плеєр\nдля Windows";
-  if(value==Phase::Consent)return L"Ознайомся з умовами на сайті SoundFlow\nта підтвердь згоду, щоб продовжити.";
-  return message.empty()?L"Встановлення…":message;
+  if(value==Phase::Home||value==Phase::Success)return L"Studio music player\nfor Windows";
+  if(value==Phase::Consent)return L"Review the terms on the SoundFlow site\nand confirm to continue.";
+  return message.empty()?L"Installing...":message;
 }
-std::wstring title_for(Phase value){return value==Phase::Consent?L"Перед початком":value==Phase::Error?L"Не вдалося завершити":L"SoundFlow";}
-std::wstring action_for(Phase value){return value==Phase::Home?L"Завантажити":value==Phase::Consent?L"Погодитись і продовжити":value==Phase::Error?L"Спробувати ще раз":app.cancelled?L"Скасовуємо…":L"Скасувати";}
+std::wstring title_for(Phase value){return value==Phase::Consent?L"Before you start":value==Phase::Error?L"Setup failed":L"SoundFlow";}
+std::wstring action_for(Phase value){return value==Phase::Home?L"Install":value==Phase::Consent?L"Accept & Continue":value==Phase::Error?L"Try again":app.cancelled?L"Cancelling...":L"Cancel";}
 
 // Live windows and exports share one renderer, one physical-pixel surface and one layout.
 Color background(sf_design::background), ink(sf_design::ink), muted(sf_design::muted), blue(sf_design::blue);
@@ -510,12 +510,15 @@ void draw_button(InstallerCanvas& g,int id,const Layout& frame,bool focus=false)
   const bool enabled=id!=1||app.phase!=Phase::Consent||(app.checked&&wcslen(SF_TERMS_URL)>0);
   g.opacity(alpha);
   if(id==1){
-    auto fill=blend(blue,background,frame.outline);
-    fill=blend(fill,ink,.05f*hover+.05f*pressed);
-    g.rounded(bounds,frame.actionRadius,enabled?fill:Color(255,40,50,64),.65f*frame.outline,muted);
-    animated_text(g,action_label,action_for(app.phase),bounds,9.2f,enabled?ink:muted,false,true,alpha);
+    const Color primary_white(255,245,245,247);
+    const Color primary_dark(255,17,17,20);
+    auto fill=blend(primary_white,background,frame.outline);
+    fill=blend(fill,frame.outline>.5f?ink:Color(255,215,215,222),.08f*hover+.10f*pressed);
+    auto label_color=blend(primary_dark,ink,frame.outline);
+    g.rounded(bounds,frame.actionRadius,enabled?fill:Color(255,40,42,48),.75f*frame.outline,Color(120,255,255,255));
+    animated_text(g,action_label,action_for(app.phase),bounds,9.2f,enabled?label_color:muted,true,true,alpha);
   }else if(id==2){
-    rounded(g,bounds,sf_design::folderRadius,blend(Color(255,42,42,46),ink,.05f*hover+.05f*pressed));glyph(g,601,RectF(bounds.X+4.5f,bounds.Y+4.5f,13,13),ink);
+    rounded(g,bounds,sf_design::folderRadius,blend(Color(255,34,34,40),ink,.08f*hover+.08f*pressed),.6f);glyph(g,601,RectF(bounds.X+4.5f,bounds.Y+4.5f,13,13),ink);
   }else if(id==3||id==6){
     glyph(g,id==3?604:605,RectF(bounds.X+3.5f,bounds.Y+3.5f,10,10),muted);
   }else if(id==4){
@@ -531,29 +534,35 @@ void draw_button(InstallerCanvas& g,int id,const Layout& frame,bool focus=false)
 }
 void paint(InstallerCanvas& g,const Layout& frame){
   g.clear(background);
+  // Atmospheric dual radial glow matching SoundFlow 2.0 Cider/Apple aesthetic (zero blur overhead).
+  const RectF card(0,0,frame.width,frame.height);
+  g.radial_glow(card,frame.logo.x+frame.logo.width*.55f,frame.logo.y+frame.logo.height*.45f,frame.width*.72f,frame.height*.85f,Color(84,156,53,214),Color(0,17,17,20));
+  g.radial_glow(card,frame.width*.82f,frame.height*.18f,frame.width*.55f,frame.height*.65f,Color(46,241,92,122),Color(0,17,17,20));
+  // Subtle glass-obsidian specular rim along the morphing card edge.
+  g.rounded(RectF(.6f,.6f,frame.width-1.2f,frame.height-1.2f),std::max(1.f,std::min(frame.radius,frame.height/2)-.6f),Color(0,0,0,0),.85f,Color(34,255,255,255));
   // One retained logo and title, at the current interpolated geometry.
   icon(g,frame.logo.x,frame.logo.y,frame.logo.width);
   animated_text(g,title_label,title_for(app.phase),rect(frame.title),frame.titleSize,ink,true);
   animated_text(g,detail_label,detail_for(app.phase,app.text),rect(frame.detail),8.6f,muted);
   g.opacity(frame.metadata*frame.metadata*frame.metadata);
-  text(g,L"SoundFlow",RectF(93,43,117,12),7.8f,Color(255,156,149,216));
+  text(g,L"Studio Edition",RectF(93,43,117,12),7.8f,Color(255,241,116,144),true);
   g.opacity(frame.metadata);
-  text(g,SF_VERSION,RectF(15,99,58,17),7.6f,ink,false,true);
-  text(g,L"Версія",RectF(15,118,58,13),7.2f,muted,false,true);
-  g.line(76,105,76,121,Color(255,49,49,53),.8f);g.line(154,105,154,121,Color(255,49,49,53),.8f);
-  glyph(g,603,RectF(110,99,14,14),muted);
-  text(g,L"Автооновлення",RectF(80,118,70,13),7.2f,muted,false,true);
+  text(g,SF_VERSION,RectF(15,99,58,17),7.8f,ink,true,true);
+  text(g,L"Version",RectF(15,118,58,13),7.2f,muted,false,true);
+  g.line(76,105,76,121,Color(42,255,255,255),.75f);g.line(154,105,154,121,Color(42,255,255,255),.75f);
+  glyph(g,603,RectF(110,99,14,14),Color(255,241,116,144));
+  text(g,L"Auto-update",RectF(80,118,70,13),7.2f,muted,false,true);
   glyph(g,602,RectF(181,99,14,14),muted);
-  std::wostringstream size;size<<std::fixed<<std::setprecision(1)<<(SF_PACKAGE_SIZE/1048576.0)<<L" МБ";
+  std::wostringstream size;size<<std::fixed<<std::setprecision(1)<<(SF_PACKAGE_SIZE/1048576.0)<<L" MB";
   text(g,size.str(),RectF(162,118,52,13),7.2f,muted,false,true);
   g.opacity(frame.ring);
   if(frame.ring>.001f){
     auto x=frame.logo.x+frame.logo.width/2-24,y=frame.logo.y+frame.logo.height/2-24;
-    g.ellipse(x,y,48,48,Color(255,48,48,54),1.8f);
+    g.ellipse(x,y,48,48,Color(45,255,255,255),1.8f);
     const float start=app.progress<0?app.reduced_motion?-90:static_cast<float>((GetTickCount64()/4)%360):-90;
-    g.arc(x,y,48,48,start,app.progress<0?100.f:std::max(0.f,display_progress())*360,blue,1.8f);
+    g.arc(x,y,48,48,start,app.progress<0?100.f:std::max(0.f,display_progress())*360,blue,2.0f);
   }
-  g.opacity(frame.check);if(frame.check>.001f)glyph(g,607,RectF(241,29,20,20),ink);
+  g.opacity(frame.check);if(frame.check>.001f)glyph(g,607,RectF(241,29,20,20),Color(255,114,224,168));
   g.opacity(1);
   HWND buttons[]={app.primary,app.folder,app.close,app.link,app.consent,app.back};
   for(int id=1;id<=6;++id)if(id==1||id==2||visible(id))draw_button(g,id,frame,app.keyboard_focus&&(app.preview?id==1:GetFocus()==buttons[id-1]));
@@ -589,7 +598,7 @@ void layout() {
   EnableWindow(app.primary,!morph.active&&(app.phase != Phase::Consent || (app.checked && wcslen(SF_TERMS_URL)>0)));
   EnableWindow(app.folder,!morph.active);
   EnableWindow(app.consent,wcslen(SF_TERMS_URL)>0);
-  SetWindowTextW(app.primary,app.phase==Phase::Consent?L"Погодитись і продовжити":app.phase==Phase::Home?L"Завантажити":app.phase==Phase::Error?L"Спробувати ще раз":L"Скасувати");
+  SetWindowTextW(app.primary,app.phase==Phase::Consent?L"Accept & Continue":app.phase==Phase::Home?L"Install":app.phase==Phase::Error?L"Try again":L"Cancel");
   InvalidateRect(app.window,nullptr,FALSE);
 }
 void phase(Phase value,const std::wstring& message=L"",double progress=-1){
@@ -608,7 +617,7 @@ void phase(Phase value,const std::wstring& message=L"",double progress=-1){
   detail_label.set(detail_for(value,message),changed);
   action_label.set(action_for(value),changed);
   if(changed){app.hover=0;app.pressed=0;controls_changed();}
-  SetWindowTextW(app.window,(message.empty()?L"SoundFlow — Встановлення":L"SoundFlow — "+message).c_str());
+  SetWindowTextW(app.window,(message.empty()?L"SoundFlow 2.0 Setup":L"SoundFlow: "+message).c_str());
   if(value==Phase::Success)SetTimer(app.window,2,1800,nullptr);
   layout();
   repaint_window(app.window);
@@ -623,7 +632,7 @@ void pick_folder() {
   IFileDialog* dialog=nullptr;
   if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))) {
     DWORD options=0;dialog->GetOptions(&options);dialog->SetOptions(options|FOS_PICKFOLDERS|FOS_FORCEFILESYSTEM|FOS_PATHMUSTEXIST);
-    dialog->SetTitle(L"Обери папку — SoundFlow буде встановлено всередині");dialog->SetOkButtonLabel(L"Обрати");
+    dialog->SetTitle(L"Choose folder (SoundFlow will be installed inside)");dialog->SetOkButtonLabel(L"Select");
     if (SUCCEEDED(dialog->Show(app.window))) {
       IShellItem* item=nullptr;
       if (SUCCEEDED(dialog->GetResult(&item))) { PWSTR path=nullptr; if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH,&path))) {
@@ -797,12 +806,12 @@ int self_test() {
   }catch (...) { std::error_code error;if(!retain_root)fs::remove_all(root,error);return 7; }
 }
 bool verify_surface() {
-  // Regression for parent repaints erasing the blue button and the folder glyph.
+  // Regression for parent repaints erasing the primary Install pill and the folder glyph.
   const float original=app.dpi;
   for(float dpi:{1.f,1.25f,1.5f,2.f}) {
     app.dpi=kContentScale*dpi;app.hover=0;app.pressed=0;app.keyboard_focus=false;layout();render_surface(true);auto baseline=surface.hash();
     auto sample=surface.pixel(static_cast<int>((26+40)*app.dpi),static_cast<int>((2+154)*app.dpi));
-    if(((sample>>16)&255)>60||((sample>>8)&255)<90||((sample>>8)&255)>180||(sample&255)<220){app.dpi=original;return false;}
+    if(((sample>>16)&255)<220||((sample>>8)&255)<220||(sample&255)<220){app.dpi=original;return false;}
     int folder_ink=0;
     for(int y=static_cast<int>((2+148)*app.dpi);y<static_cast<int>((2+160)*app.dpi);++y)
       for(int x=static_cast<int>((26+197)*app.dpi);x<static_cast<int>((26+211)*app.dpi);++x){auto pixel=surface.pixel(x,y);if(((pixel>>16)&255)>170&&((pixel>>8)&255)>170&&(pixel&255)>170)++folder_ink;}

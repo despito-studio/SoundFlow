@@ -63,6 +63,12 @@ class FlutterWindow : public Win32Window {
   void HideIsland();
   void PlaceOnDesktop(bool notify = false);
   void CloakIsland(bool value);
+  void ScheduleIslandRelease();
+  void CancelIslandRelease();
+  void ScheduleWorkingSetTrim(UINT delay_ms);
+  void TrimWorkingSet();
+  void NotifyWindowVisibility(bool visible);
+  bool IsExportingIsland() const;
   void BindDesktopEvents();
   static void CALLBACK ForegroundEvent(HWINEVENTHOOK hook, DWORD event, HWND window,
       LONG object, LONG child, DWORD thread, DWORD time);

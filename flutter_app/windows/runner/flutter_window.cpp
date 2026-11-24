@@ -11,6 +11,9 @@
 
 namespace {
 FlutterWindow* main_window = nullptr;
+constexpr UINT_PTR kIslandReleaseTimerId = 4101;
+constexpr UINT_PTR kWorkingSetTrimTimerId = 4102;
+constexpr UINT kIslandIdleReleaseMs = 15000;
 using Value = flutter::EncodableValue;
 void CloseAudio() {
   auto module = GetModuleHandleW(L"soundflow_lib.dll");
@@ -120,6 +123,7 @@ bool FlutterWindow::OnCreate() {
       main_started_ = true;
       Show();
       if (island_) island_->PlaceOnDesktop(true);
+      ScheduleWorkingSetTrim(5000);
     }
   });
   flutter_controller_->ForceRedraw();
@@ -134,6 +138,9 @@ void FlutterWindow::HandleMethod(
   if (name == "show") {
     ShowWindow(GetHandle(), SW_RESTORE);
     SetForegroundWindow(GetHandle());
+    NotifyWindowVisibility(true);
+  } else if (name == "trim-memory") {
+    TrimWorkingSet();
   } else if (name == "quit") {
     auto owner = main_window ? main_window : this;
     owner->quitting_ = true;
@@ -143,7 +150,7 @@ void FlutterWindow::HandleMethod(
   } else if (name == "theme") {
     BOOL dark = Boolean(args);
     DwmSetWindowAttribute(GetHandle(), 20, &dark, sizeof(dark));
-    COLORREF caption = dark ? RGB(24,24,24) : RGB(245,245,247);
+    COLORREF caption = dark ? RGB(16,16,18) : RGB(245,245,247);
     DwmSetWindowAttribute(GetHandle(), 35, &caption, sizeof(caption));
   } else if (name == "pick-image") {
     wchar_t path[32768]{};
@@ -157,7 +164,11 @@ void FlutterWindow::HandleMethod(
     else result->Success(Value());
     return;
   } else if (name == "show-main") {
-    if (main_window) { ShowWindow(main_window->GetHandle(), SW_RESTORE); SetForegroundWindow(main_window->GetHandle()); }
+    if (main_window) {
+      ShowWindow(main_window->GetHandle(), SW_RESTORE);
+      SetForegroundWindow(main_window->GetHandle());
+      main_window->NotifyWindowVisibility(true);
+    }
   } else if (name == "island-shortcuts" && !is_island_) {
     for (int id : {3101,3102,3103}) UnregisterHotKey(GetHandle(), id);
     flutter::EncodableMap registered;
@@ -285,6 +296,8 @@ void FlutterWindow::ShapeIsland(double logical_height) {
 void FlutterWindow::PrepareIsland() {
   if (!island_) {
     flutter::DartProject project(L"data");
+    project.set_gpu_preference(flutter::GpuPreference::LowPowerPreference);
+    project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnPlatformThread);
     std::vector<std::string> arguments{"--island"};
     const auto& parent_arguments = project_.dart_entrypoint_arguments();
     auto export_flag = std::find(parent_arguments.begin(), parent_arguments.end(), "--export-island");
@@ -308,6 +321,7 @@ void FlutterWindow::PrepareIsland() {
 }
 
 void FlutterWindow::ShowIsland(bool keyboard) {
+  CancelIslandRelease();
   HWND foreground = GetForegroundWindow();
   if (!island_ || foreground != island_->GetHandle()) previous_foreground_ = foreground;
   island_requested_ = true;
@@ -380,6 +394,10 @@ void FlutterWindow::PlaceOnDesktop(bool notify) {
   if (show) SetWindowPos(GetHandle(), HWND_TOPMOST, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   CloakIsland(!show);
+  if (main_window) {
+    if (show || main_window->island_requested_) main_window->CancelIslandRelease();
+    else main_window->ScheduleIslandRelease();
+  }
   if ((notify || changed) && main_window) {
     const auto& arguments = main_window->project_.dart_entrypoint_arguments();
     if (std::find(arguments.begin(), arguments.end(), "--trace-island") != arguments.end()) {
@@ -418,11 +436,46 @@ void CALLBACK FlutterWindow::ForegroundEvent(HWINEVENTHOOK, DWORD event, HWND wi
   else island->PlaceOnDesktop();
 }
 
+bool FlutterWindow::IsExportingIsland() const {
+  const auto& arguments = project_.dart_entrypoint_arguments();
+  return std::find(arguments.begin(), arguments.end(), "--export-island") != arguments.end();
+}
+
+void FlutterWindow::ScheduleIslandRelease() {
+  if (is_island_ || !island_ || island_requested_ || IsExportingIsland() || !GetHandle()) return;
+  SetTimer(GetHandle(), kIslandReleaseTimerId, kIslandIdleReleaseMs, nullptr);
+}
+
+void FlutterWindow::CancelIslandRelease() {
+  if (is_island_ || !GetHandle()) return;
+  KillTimer(GetHandle(), kIslandReleaseTimerId);
+}
+
+void FlutterWindow::ScheduleWorkingSetTrim(UINT delay_ms) {
+  if (is_island_ || !GetHandle()) return;
+  SetTimer(GetHandle(), kWorkingSetTrimTimerId, delay_ms, nullptr);
+}
+
+void FlutterWindow::TrimWorkingSet() {
+  HeapCompact(GetProcessHeap(), 0);
+  SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1));
+}
+
+void FlutterWindow::NotifyWindowVisibility(bool visible) {
+  if (is_island_ || !channel_) return;
+  if (visible && GetHandle()) KillTimer(GetHandle(), kWorkingSetTrimTimerId);
+  channel_->InvokeMethod("window-visibility", std::make_unique<Value>(visible));
+}
+
 void FlutterWindow::OnDestroy() {
   if (destroying_) return;
   destroying_ = true;
   if (channel_) channel_->SetMethodCallHandler(nullptr);
   if (!is_island_) {
+    if (GetHandle()) {
+      KillTimer(GetHandle(), kIslandReleaseTimerId);
+      KillTimer(GetHandle(), kWorkingSetTrimTimerId);
+    }
     if (foreground_hook_) { UnhookWinEvent(foreground_hook_); foreground_hook_ = nullptr; }
     if (minimize_hook_) { UnhookWinEvent(minimize_hook_); minimize_hook_ = nullptr; }
     if (shell_hook_) { UnhookWinEvent(shell_hook_); shell_hook_ = nullptr; }
@@ -468,8 +521,34 @@ LRESULT FlutterWindow::MessageHandler(HWND hwnd, UINT message, WPARAM wparam, LP
     if (main_window) main_window->HideIsland();
     return 0;
   }
+  if (!is_island_ && message == WM_TIMER) {
+    if (wparam == kIslandReleaseTimerId) {
+      KillTimer(hwnd, kIslandReleaseTimerId);
+      if (island_ && !island_requested_ && !IsExportingIsland() &&
+          (!island_->desktop_mode_ || !island_->desktop_visible_)) {
+        island_.reset();
+        TrimWorkingSet();
+      }
+      return 0;
+    }
+    if (wparam == kWorkingSetTrimTimerId) {
+      KillTimer(hwnd, kWorkingSetTrimTimerId);
+      TrimWorkingSet();
+      return 0;
+    }
+  }
+  if (!is_island_ && message == WM_SIZE) {
+    if (wparam == SIZE_MINIMIZED) {
+      NotifyWindowVisibility(false);
+      ScheduleWorkingSetTrim(500);
+    } else if (wparam == SIZE_RESTORED || wparam == SIZE_MAXIMIZED) {
+      NotifyWindowVisibility(true);
+    }
+  }
   if (message == WM_CLOSE && !is_island_ && close_to_tray_ && !quitting_) {
     ShowWindow(hwnd, SW_HIDE);
+    NotifyWindowVisibility(false);
+    ScheduleWorkingSetTrim(500);
     return 0;
   }
   if (message == WM_MOUSEACTIVATE && is_island_ && !keyboard_) return MA_NOACTIVATE;

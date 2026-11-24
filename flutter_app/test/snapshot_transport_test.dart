@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/core.dart';
+import 'package:soundflow/core.dart';
 
 // Mirrors the wire contract, with sorted keys like serde_json::Map.
 Json full(Json state) => object(

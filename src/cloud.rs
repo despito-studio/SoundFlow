@@ -131,13 +131,22 @@ impl CloudClient {
             self.token = None;
             self.revision = None;
         }
+        let mut current: Value = fs::read_to_string(&self.config_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .filter(|v: &Value| v.is_object())
+            .unwrap_or_else(|| json!({}));
+        current["base_url"] = json!(base);
         let mut temp = tempfile::NamedTempFile::new_in(
             self.config_path
                 .parent()
                 .ok_or("Недійсний шлях конфігурації")?,
         )
         .map_err(|e| e.to_string())?;
-        write!(temp, "{}", json!({"base_url":base})).map_err(|e| e.to_string())?;
+        let serialized = serde_json::to_string_pretty(&current).map_err(|e| e.to_string())?;
+        temp.write_all(serialized.as_bytes())
+            .map_err(|e| e.to_string())?;
+        temp.as_file().sync_all().map_err(|e| e.to_string())?;
         temp.persist(&self.config_path)
             .map_err(|e| e.error.to_string())?;
         self.base = base;
@@ -361,4 +370,37 @@ fn expiry(value: &Value) -> CoreResult<f64> {
             .map_err(|_| "Недійсна дата завершення".into());
     }
     Err("Недійсна дата завершення".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configure_preserves_existing_supabase_settings_in_cloud_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("cloud.json");
+        fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&json!({
+                "supabase_url": "https://example.supabase.co",
+                "supabase_anon_key": "sb_publishable_demo",
+                "google_client_id": "custom-client"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut client = CloudClient::open(dir.path(), true).unwrap();
+        client
+            .configure(&json!({"base_url": "https://cloud.example.com"}))
+            .unwrap();
+
+        let saved: Value =
+            serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(saved["base_url"], "https://cloud.example.com");
+        assert_eq!(saved["supabase_url"], "https://example.supabase.co");
+        assert_eq!(saved["supabase_anon_key"], "sb_publishable_demo");
+        assert_eq!(saved["google_client_id"], "custom-client");
+    }
 }

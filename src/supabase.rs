@@ -3,9 +3,11 @@
 //! and cloud sync of connected music accounts (YouTube Music, SoundCloud, Spotify).
 
 use crate::library::CoreResult;
+use rand_core::{OsRng, RngCore};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::{BufRead, BufReader, Read, Write},
@@ -151,7 +153,12 @@ impl SupabaseConfig {
         Ok(())
     }
 
-    pub fn build_google_oauth_url(&self, redirect_uri: &str, state: &str) -> String {
+    pub fn build_google_oauth_url(
+        &self,
+        redirect_uri: &str,
+        state: &str,
+        code_challenge: Option<&str>,
+    ) -> String {
         let client_id = if !self.google_client_id.trim().is_empty() {
             self.google_client_id.trim()
         } else {
@@ -161,12 +168,21 @@ impl SupabaseConfig {
         let encoded_redirect: String = url::form_urlencoded::byte_serialize(redirect_uri.as_bytes()).collect();
         let encoded_state: String = url::form_urlencoded::byte_serialize(state.as_bytes()).collect();
 
-        format!(
+        let mut url = format!(
             "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=openid%20email%20profile&access_type=offline&prompt=select_account&state={}",
             encoded_client_id,
             encoded_redirect,
             encoded_state
-        )
+        );
+        if let Some(challenge) = code_challenge.filter(|c| !c.is_empty()) {
+            let encoded_challenge: String =
+                url::form_urlencoded::byte_serialize(challenge.as_bytes()).collect();
+            url.push_str(&format!(
+                "&code_challenge={}&code_challenge_method=S256",
+                encoded_challenge
+            ));
+        }
+        url
     }
 }
 
@@ -219,10 +235,14 @@ impl SupabaseClient {
             .map_err(|e| format!("Не вдалося налаштувати сервер: {e}"))?;
 
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
-        let state = uuid::Uuid::new_v4().simple().to_string();
+        let state = random_url_token(24);
+        let code_verifier = random_url_token(32);
+        let code_challenge = pkce_challenge(&code_verifier);
 
         // ALWAYS open Google's actual OAuth 2.0 authorization screen directly!
-        let auth_url = self.config.build_google_oauth_url(&redirect_uri, &state);
+        let auth_url =
+            self.config
+                .build_google_oauth_url(&redirect_uri, &state, Some(&code_challenge));
 
         let (tx, rx) = mpsc::channel();
         let config = self.config.clone();
@@ -230,7 +250,18 @@ impl SupabaseClient {
         let data_dir = self.data_dir.clone();
 
         thread::spawn(move || {
-            run_oauth_listener(listener, tx, config, client, port, redirect_uri, data_dir);
+            run_oauth_listener(
+                listener,
+                tx,
+                config,
+                client,
+                port,
+                redirect_uri,
+                state,
+                code_verifier,
+                code_challenge,
+                data_dir,
+            );
         });
 
         Ok((auth_url, rx))
@@ -345,10 +376,12 @@ impl SupabaseClient {
         if self.config.supabase_url.is_empty() || !self.config.supabase_url.contains('.') {
             return Ok(json!({}));
         }
+        let encoded_user: String =
+            url::form_urlencoded::byte_serialize(user_id.as_bytes()).collect();
         let url = format!(
             "{}/rest/v1/connected_accounts?user_id=eq.{}",
             self.config.supabase_url.trim_end_matches('/'),
-            user_id
+            encoded_user
         );
 
         let res = with_api_key(self.client.get(&url), &self.config)
@@ -376,26 +409,37 @@ pub fn exchange_google_auth_code(
     config: &SupabaseConfig,
     code: &str,
     redirect_uri: &str,
+    code_verifier: Option<&str>,
 ) -> CoreResult<GoogleUserSession> {
     let token_endpoint = "https://oauth2.googleapis.com/token";
-    let client_id = if !config.google_client_id.trim().is_empty() {
-        config.google_client_id.trim()
+    let custom_client_id = config.google_client_id.trim();
+    let (client_id, client_secret) = if !custom_client_id.is_empty() {
+        let custom_secret = config.google_client_secret.trim();
+        (
+            custom_client_id,
+            (!custom_secret.is_empty()).then_some(custom_secret),
+        )
     } else {
-        DEFAULT_GOOGLE_CLIENT_ID
-    };
-    let client_secret = if !config.google_client_secret.trim().is_empty() {
-        config.google_client_secret.trim()
-    } else {
-        DEFAULT_GOOGLE_CLIENT_SECRET
+        let secret = if !config.google_client_secret.trim().is_empty() {
+            config.google_client_secret.trim()
+        } else {
+            DEFAULT_GOOGLE_CLIENT_SECRET
+        };
+        (DEFAULT_GOOGLE_CLIENT_ID, (!secret.is_empty()).then_some(secret))
     };
 
-    let params = vec![
+    let mut params = vec![
         ("code", code),
         ("client_id", client_id),
-        ("client_secret", client_secret),
         ("grant_type", "authorization_code"),
         ("redirect_uri", redirect_uri),
     ];
+    if let Some(secret) = client_secret {
+        params.push(("client_secret", secret));
+    }
+    if let Some(verifier) = code_verifier.filter(|v| !v.is_empty()) {
+        params.push(("code_verifier", verifier));
+    }
 
     let res = client
         .post(token_endpoint)
@@ -432,108 +476,105 @@ pub fn exchange_google_auth_code(
     Err("Google не повернув необхідних токенів авторизації".into())
 }
 
-/// Verifies a Google ID token (JWT) via Google's tokeninfo API or internal payload decoding
+/// Verifies a Google ID token (JWT) via Google's tokeninfo endpoint.
+/// Never accepts an unverified JWT payload if remote verification fails.
 pub fn verify_google_id_token(client: &Client, id_token: &str) -> CoreResult<GoogleUserSession> {
-    // 1. Try Google TokenInfo endpoint
-    let tokeninfo_url = format!("https://oauth2.googleapis.com/tokeninfo?id_token={}", id_token);
-    if let Ok(res) = client.get(&tokeninfo_url).send() {
-        if res.status().is_success() {
-            if let Ok(val) = res.json::<Value>() {
-                if let Some(email) = val["email"].as_str() {
-                    let name = val["name"]
-                        .as_str()
-                        .unwrap_or_else(|| email.split('@').next().unwrap_or("Користувач"))
-                        .to_string();
-                    let avatar_url = val["picture"].as_str().unwrap_or("").to_string();
-                    let id = val["sub"].as_str().unwrap_or("").to_string();
-                    return Ok(GoogleUserSession {
-                        id: if id.is_empty() { format!("usr_{}", uuid::Uuid::new_v4().simple()) } else { format!("usr_google_{id}") },
-                        email: email.to_string(),
-                        name,
-                        avatar_url,
-                        token: id_token.to_string(),
-                        provider_token: Some(id_token.to_string()),
-                    });
-                }
-            }
-        }
+    let id_token = id_token.trim();
+    if id_token.is_empty() {
+        return Err("Порожній Google ID токен".into());
     }
-
-    // 2. Fallback: decode JWT claims payload
-    decode_jwt_claims(id_token)
-}
-
-/// Decodes the payload claims of a JWT without network requests
-pub fn decode_jwt_claims(token: &str) -> CoreResult<GoogleUserSession> {
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() < 2 {
-        return Err("Недійсний формат JWT токена".into());
+    let encoded_token: String = url::form_urlencoded::byte_serialize(id_token.as_bytes()).collect();
+    let tokeninfo_url = format!(
+        "https://oauth2.googleapis.com/tokeninfo?id_token={}",
+        encoded_token
+    );
+    let res = client
+        .get(&tokeninfo_url)
+        .send()
+        .map_err(|_| "Не вдалося перевірити Google ID токен".to_string())?;
+    if !res.status().is_success() {
+        return Err("Google ID токен недійсний або прострочений".into());
     }
-    let payload_b64 = parts[1];
-    let decoded_bytes = base64url_decode(payload_b64)
-        .map_err(|e| format!("Помилка декодування JWT: {e}"))?;
-    let val: Value = serde_json::from_slice(&decoded_bytes)
-        .map_err(|e| format!("Недійсний JSON у payload токена: {e}"))?;
-
-    let email = val["email"].as_str().ok_or("Email відсутній у токені Google")?;
+    let val: Value = res
+        .json()
+        .map_err(|_| "Недійсна відповідь перевірки Google ID токена")?;
+    if val["email_verified"] == json!(false) || val["email_verified"].as_str() == Some("false") {
+        return Err("Email акаунта Google не підтверджено".into());
+    }
+    let email = val["email"]
+        .as_str()
+        .filter(|e| !e.is_empty())
+        .ok_or("Email відсутній у перевіреному токені Google")?;
     let name = val["name"]
         .as_str()
         .unwrap_or_else(|| email.split('@').next().unwrap_or("Користувач"))
         .to_string();
     let avatar_url = val["picture"].as_str().unwrap_or("").to_string();
     let id = val["sub"].as_str().unwrap_or("").to_string();
-
     Ok(GoogleUserSession {
-        id: if id.is_empty() { format!("usr_{}", uuid::Uuid::new_v4().simple()) } else { format!("usr_google_{id}") },
+        id: if id.is_empty() {
+            format!("usr_{}", uuid::Uuid::new_v4().simple())
+        } else {
+            format!("usr_google_{id}")
+        },
         email: email.to_string(),
         name,
         avatar_url,
-        token: token.to_string(),
-        provider_token: Some(token.to_string()),
+        token: id_token.to_string(),
+        provider_token: Some(id_token.to_string()),
     })
 }
 
-fn base64url_decode(input: &str) -> Result<Vec<u8>, &'static str> {
-    let mut standard = input.replace('-', "+").replace('_', "/");
-    while standard.len() % 4 != 0 {
-        standard.push('=');
+fn base64url_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity((input.len() * 4).div_ceil(3));
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 63) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((triple >> 6) & 63) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(triple & 63) as usize] as char);
+        }
     }
-    let chars: Vec<u8> = standard.bytes().collect();
-    let mut out = Vec::with_capacity(chars.len() * 3 / 4);
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == b'=' {
-            break;
-        }
-        let c1 = b64_val(chars[i])?;
-        let c2 = if i + 1 < chars.len() && chars[i + 1] != b'=' { b64_val(chars[i + 1])? } else { 0 };
-        let c3 = if i + 2 < chars.len() && chars[i + 2] != b'=' { b64_val(chars[i + 2])? } else { 0 };
-        let c4 = if i + 3 < chars.len() && chars[i + 3] != b'=' { b64_val(chars[i + 3])? } else { 0 };
-
-        let b0 = (c1 << 2) | (c2 >> 4);
-        out.push(b0);
-        if i + 2 < chars.len() && chars[i + 2] != b'=' {
-            let b1 = ((c2 & 0x0F) << 4) | (c3 >> 2);
-            out.push(b1);
-        }
-        if i + 3 < chars.len() && chars[i + 3] != b'=' {
-            let b2 = ((c3 & 0x03) << 6) | c4;
-            out.push(b2);
-        }
-        i += 4;
-    }
-    Ok(out)
+    out
 }
 
-fn b64_val(c: u8) -> Result<u8, &'static str> {
-    match c {
-        b'A'..=b'Z' => Ok(c - b'A'),
-        b'a'..=b'z' => Ok(c - b'a' + 26),
-        b'0'..=b'9' => Ok(c - b'0' + 52),
-        b'+' => Ok(62),
-        b'/' => Ok(63),
-        _ => Err("Invalid base64 character"),
+fn random_url_token(num_bytes: usize) -> String {
+    let mut bytes = vec![0u8; num_bytes];
+    OsRng.fill_bytes(&mut bytes);
+    base64url_encode(&bytes)
+}
+
+fn pkce_challenge(verifier: &str) -> String {
+    base64url_encode(&Sha256::digest(verifier.as_bytes()))
+}
+
+fn escape_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#x27;"),
+            _ => out.push(ch),
+        }
     }
+    out
+}
+
+fn valid_oauth_state(received: Option<&str>, expected: &str) -> bool {
+    let Some(received) = received else {
+        return false;
+    };
+    !expected.is_empty() && received.len() == expected.len() && received == expected
 }
 
 /// Global helper to sync an account using default or loaded configuration
@@ -566,10 +607,11 @@ pub fn sync_one_account(user_id: &str, provider: &str, identifier: &str) {
 pub fn fetch_connected_accounts(user_id: &str) -> CoreResult<Value> {
     let config = active_config();
     let client = Client::builder().timeout(Duration::from_secs(5)).build().unwrap_or_default();
+    let encoded_user: String = url::form_urlencoded::byte_serialize(user_id.as_bytes()).collect();
     let url = format!(
         "{}/rest/v1/connected_accounts?user_id=eq.{}",
         config.supabase_url.trim_end_matches('/'),
-        user_id
+        encoded_user
     );
 
     let res = with_api_key(client.get(&url), &config)
@@ -615,6 +657,9 @@ fn run_oauth_listener(
     client: Client,
     _port: u16,
     redirect_uri: String,
+    expected_state: String,
+    code_verifier: String,
+    code_challenge: String,
     _data_dir: PathBuf,
 ) {
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
@@ -638,7 +683,11 @@ fn run_oauth_listener(
 
                 if method == "GET" && (path == "/" || path.starts_with("/login")) {
                     // Forward immediately to Google's authorization endpoint
-                    let auth_url = config.build_google_oauth_url(&redirect_uri, &uuid::Uuid::new_v4().simple().to_string());
+                    let auth_url = config.build_google_oauth_url(
+                        &redirect_uri,
+                        &expected_state,
+                        Some(&code_challenge),
+                    );
                     let response = format!(
                         "HTTP/1.1 302 Found\r\nLocation: {}\r\nConnection: close\r\n\r\n",
                         auth_url
@@ -655,8 +704,21 @@ fn run_oauth_listener(
                         return;
                     }
 
+                    let received_state = params.get("state").map(String::as_str);
                     if let Some(code) = params.get("code") {
-                        match exchange_google_auth_code(&client, &config, code, &redirect_uri) {
+                        if !valid_oauth_state(received_state, &expected_state) {
+                            let err = "Недійсний параметр безпеки OAuth (state). Повторіть вхід.".to_string();
+                            send_html_response(reader.get_mut(), false, &err, None);
+                            let _ = tx.send(Err(err));
+                            return;
+                        }
+                        match exchange_google_auth_code(
+                            &client,
+                            &config,
+                            code,
+                            &redirect_uri,
+                            Some(&code_verifier),
+                        ) {
                             Ok(session) => {
                                 send_html_response(
                                     reader.get_mut(),
@@ -676,6 +738,12 @@ fn run_oauth_listener(
                     }
 
                     if let Some(token) = params.get("id_token").or_else(|| params.get("access_token")).or_else(|| params.get("token")) {
+                        if !valid_oauth_state(received_state, &expected_state) {
+                            let err = "Недійсний параметр безпеки OAuth (state). Повторіть вхід.".to_string();
+                            send_html_response(reader.get_mut(), false, &err, None);
+                            let _ = tx.send(Err(err));
+                            return;
+                        }
                         match verify_google_id_token(&client, token).or_else(|_| SupabaseClient::fetch_user_info(&config, &client, token)) {
                             Ok(session) => {
                                 send_html_response(
@@ -700,10 +768,22 @@ fn run_oauth_listener(
                 } else if method == "POST" && path.starts_with("/callback-token") {
                     let body = read_http_body(&mut reader);
                     if let Ok(json_body) = serde_json::from_slice::<Value>(&body) {
+                        if !valid_oauth_state(json_body["state"].as_str(), &expected_state) {
+                            let err = "Недійсний параметр безпеки OAuth (state). Повторіть вхід.".to_string();
+                            send_json_response(reader.get_mut(), json!({ "success": false, "error": err }));
+                            let _ = tx.send(Err(err));
+                            return;
+                        }
                         // Check if OAuth code is passed for exchange
                         if let Some(code) = json_body["code"].as_str() {
                             if !code.trim().is_empty() {
-                                match exchange_google_auth_code(&client, &config, code.trim(), &redirect_uri) {
+                                match exchange_google_auth_code(
+                                    &client,
+                                    &config,
+                                    code.trim(),
+                                    &redirect_uri,
+                                    Some(&code_verifier),
+                                ) {
                                     Ok(session) => {
                                         send_json_response(reader.get_mut(), json!({
                                             "success": true,
@@ -774,8 +854,9 @@ fn send_html_response(stream: &mut TcpStream, success: bool, msg: &str, email: O
     }
     let title = "Помилка авторизації";
     let color = "#ef4444";
+    let safe_msg = escape_html(msg);
     let email_badge = if let Some(e) = email {
-        format!(r#"<div style="display:inline-block;padding:6px 14px;background:#1e293b;border:1px solid #334155;border-radius:20px;color:#38bdf8;font-size:14px;margin-bottom:16px;">📧 {}</div>"#, e)
+        format!(r#"<div style="display:inline-block;padding:6px 14px;background:#1e293b;border:1px solid #334155;border-radius:20px;color:#38bdf8;font-size:14px;margin-bottom:16px;">📧 {}</div>"#, escape_html(e))
     } else {
         "".to_string()
     };
@@ -794,7 +875,7 @@ p {{ color: #94a3b8; font-size: 15px; margin: 0 0 20px; line-height: 1.6; }}
 <div class="card">
   <h1>{title}</h1>
   {email_badge}
-  <p>{msg}</p>
+  <p>{safe_msg}</p>
   <p style="font-size:13px;color:#64748b;">Поверніться у SoundFlow і спробуйте ще раз. Цю вкладку можна закрити.</p>
 </div>
 </body>
@@ -868,6 +949,7 @@ p { color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.6; }
     const params = new URLSearchParams(hash || search);
     const token = params.get('access_token') || params.get('id_token') || params.get('token');
     const code = params.get('code');
+    const state = params.get('state') || new URLSearchParams(search).get('state') || '';
     const providerToken = params.get('provider_token') || '';
     const error = params.get('error_description') || params.get('error');
 
@@ -880,7 +962,7 @@ p { color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.6; }
       fetch('/callback-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token, id_token: token, code: code, provider_token: providerToken })
+        body: JSON.stringify({ token: token, id_token: token, code: code, state: state, provider_token: providerToken })
       }).then(r => r.json()).then(res => {
         document.getElementById('loader').style.display = 'none';
         if (res.success) {
@@ -925,9 +1007,59 @@ p { color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.6; }
 fn send_json_response(stream: &mut TcpStream, value: Value) {
     let body = serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string());
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
     let _ = stream.write_all(response.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escapes_html_in_error_responses() {
+        assert_eq!(
+            escape_html(r#"<script>alert("x&'y'")</script>"#),
+            "&lt;script&gt;alert(&quot;x&amp;&#x27;y&#x27;&quot;)&lt;/script&gt;"
+        );
+    }
+
+    #[test]
+    fn validates_oauth_state_strictly() {
+        assert!(valid_oauth_state(Some("abc123"), "abc123"));
+        assert!(!valid_oauth_state(None, "abc123"));
+        assert!(!valid_oauth_state(Some("wrong"), "abc123"));
+        assert!(!valid_oauth_state(Some(""), ""));
+    }
+
+    #[test]
+    fn builds_pkce_s256_challenge_and_oauth_url() {
+        // RFC 7636 Appendix B test vector
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        assert_eq!(
+            pkce_challenge(verifier),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+        let cfg = SupabaseConfig::default();
+        let url = cfg.build_google_oauth_url(
+            "http://127.0.0.1:43821/callback",
+            "state-xyz",
+            Some("challenge-123"),
+        );
+        assert!(url.contains("state=state-xyz"));
+        assert!(url.contains("code_challenge=challenge-123"));
+        assert!(url.contains("code_challenge_method=S256"));
+    }
+
+    #[test]
+    fn rejects_empty_or_unverified_google_id_token() {
+        let client = Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap();
+        assert!(verify_google_id_token(&client, "").is_err());
+        assert!(verify_google_id_token(&client, "   ").is_err());
+    }
 }

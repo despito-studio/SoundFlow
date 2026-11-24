@@ -115,6 +115,11 @@ class Core extends ChangeNotifier {
   late final _Free _free;
   late final void Function() _close;
   Timer? _timer, _volumeCommit, _updateExit;
+  bool _windowVisible = true;
+  int _pollIntervalMs = 250;
+  String _lastIslandKey = '';
+  Object? _cachedLibraryRef;
+  List<Json>? _cachedRecent, _cachedLiked, _cachedPlaylists, _cachedAllTracks, _cachedHomeTracks;
   double? _volumeIntent;
   VoidCallback? openConnections;
   String _assetsKey = "";
@@ -177,16 +182,38 @@ class Core extends ChangeNotifier {
     });
   }
 
+  void _syncLibraryCache() {
+    final raw = state['library'];
+    if (identical(raw, _cachedLibraryRef)) return;
+    _cachedLibraryRef = raw;
+    _cachedRecent = null;
+    _cachedLiked = null;
+    _cachedPlaylists = null;
+    _cachedAllTracks = null;
+    _cachedHomeTracks = null;
+  }
+
   Json get library => object(state['library']);
   Json get current => object(playback.value['track']);
-  List<Json> get recent =>
-      objects(library['history']).where(onlineTrack).toList();
-  List<Json> get liked =>
-      objects(library['liked_tracks']).where(onlineTrack).toList();
-  List<Json> get playlists => object(library['playlists']).values.map((value) {
-    final p = object(value);
-    return {...p, 'tracks': objects(p['tracks']).where(onlineTrack).toList()};
-  }).toList();
+  List<Json> get recent {
+    _syncLibraryCache();
+    return _cachedRecent ??=
+        objects(library['history']).where(onlineTrack).toList();
+  }
+
+  List<Json> get liked {
+    _syncLibraryCache();
+    return _cachedLiked ??=
+        objects(library['liked_tracks']).where(onlineTrack).toList();
+  }
+
+  List<Json> get playlists {
+    _syncLibraryCache();
+    return _cachedPlaylists ??= object(library['playlists']).values.map((value) {
+      final p = object(value);
+      return {...p, 'tracks': objects(p['tracks']).where(onlineTrack).toList()};
+    }).toList();
+  }
   List<Json> get queue => objects(state['queue']);
   int get queueIndex => (state['queue_index'] as num?)?.toInt() ?? 0;
   String get selectedPlaylist => state['selected_playlist']?.toString() ?? '';
@@ -195,7 +222,8 @@ class Core extends ChangeNotifier {
     return {...p, 'tracks': objects(p['tracks']).where(onlineTrack).toList()};
   }
 
-  String get language => settings['language'] == 'en' ? 'en' : 'uk';
+  String _previewLanguage = 'en';
+  String get language => _previewLanguage;
   String get scheme => settings['theme']?.toString() ?? 'dark';
   bool get dark => scheme != 'light';
   bool get reduced => settings['reduced_motion'] == true;
@@ -205,24 +233,30 @@ class Core extends ChangeNotifier {
   bool get canBack => _history.isNotEmpty;
   int get pending => (state['pending'] as num?)?.toInt() ?? 0;
   List<Json> get allTracks {
-    final seen = <String>{};
-    return [
-          ...liked,
-          ...playlists.expand((p) => objects(p['tracks'])),
-          ...object(library['track_catalog']).values.map(object),
-        ]
-        .where(
-          (t) => onlineTrack(t) && t['id'] != null && seen.add(trackKey(t)),
-        )
-        .toList();
+    _syncLibraryCache();
+    return _cachedAllTracks ??= () {
+      final seen = <String>{};
+      return [
+            ...liked,
+            ...playlists.expand((p) => objects(p['tracks'])),
+            ...object(library['track_catalog']).values.map(object),
+          ]
+          .where(
+            (t) => onlineTrack(t) && t['id'] != null && seen.add(trackKey(t)),
+          )
+          .toList();
+    }();
   }
 
   List<Json> get homeTracks {
-    final seen = <String>{};
-    return (recent.isEmpty ? liked : recent)
-        .where((t) => seen.add(trackKey(t)))
-        .take(12)
-        .toList();
+    _syncLibraryCache();
+    return _cachedHomeTracks ??= () {
+      final seen = <String>{};
+      return (recent.isEmpty ? liked : recent)
+          .where((t) => seen.add(trackKey(t)))
+          .take(12)
+          .toList();
+    }();
   }
 
   List<Json> get tracks => switch (route) {
@@ -282,18 +316,34 @@ class Core extends ChangeNotifier {
         );
       }
       ready = true;
-      Future<void>.delayed(const Duration(milliseconds: 700), () {
-        if (ready) {
-          window.invokeMethod('prepare-island');
-          if (arguments.contains('--export-island')) {
+      // Release the startup portrait bitmap once the main workspace takes over.
+      const AssetImage('assets/backgrounds/portrait.png').evict();
+      if (arguments.contains('--export-island')) {
+        Future<void>.delayed(const Duration(milliseconds: 700), () {
+          if (ready) {
+            window.invokeMethod('prepare-island');
             Future<void>.delayed(const Duration(seconds: 2), () {
               if (ready) window.invokeMethod('show-island', true);
             });
           }
-        }
-      });
+        });
+      }
       window.setMethodCallHandler((call) async {
         if (call.method == 'core-command') command(object(call.arguments));
+        if (call.method == 'window-visibility') {
+          final visible = call.arguments != false;
+          if (_windowVisible != visible) {
+            _windowVisible = visible;
+            if (!visible) {
+              PaintingBinding.instance.imageCache
+                ..clear()
+                ..clearLiveImages();
+            } else {
+              _tick();
+            }
+            _updatePollCadence();
+          }
+        }
         if (call.method == 'closing') {
           _timer?.cancel();
           _close();
@@ -304,13 +354,33 @@ class Core extends ChangeNotifier {
       if (['library', 'profile', 'settings', 'search'].contains(initialView)) {
         nav(initialView);
       }
-      _timer = Timer.periodic(
-        const Duration(milliseconds: 250),
-        (_) => _tick(),
-      );
+      _schedulePoll(_desiredPollMs());
     } catch (e) {
       error = 'Не вдалося відкрити SoundFlow. $e';
       notifyListeners();
+    }
+  }
+
+  int _desiredPollMs() {
+    final active = playing || playback.value['loading'] == true || pending > 0;
+    if (_windowVisible) return active ? 250 : 600;
+    return active ? 1000 : 2000;
+  }
+
+  void _schedulePoll(int intervalMs) {
+    _pollIntervalMs = intervalMs;
+    _timer?.cancel();
+    _timer = Timer.periodic(
+      Duration(milliseconds: intervalMs),
+      (_) => _tick(),
+    );
+  }
+
+  void _updatePollCadence() {
+    if (!ready || _updateQuitting) return;
+    final desired = _desiredPollMs();
+    if (desired != _pollIntervalMs) {
+      _schedulePoll(desired);
     }
   }
 
@@ -423,11 +493,21 @@ class Core extends ChangeNotifier {
       _trayEnabled = tray;
       window.invokeMethod('close-to-tray', tray);
     }
-    window.invokeMethod('island-state', {
-      'player': {...playback.value, 'liked': isLiked(current)},
-      'reduced': reduced,
-      'language': language,
-    });
+    final islandLiked = isLiked(current);
+    final islandKey =
+        '${trackKey(current)}|${playing ? 1 : 0}|${playback.value['loading'] == true ? 1 : 0}|'
+        '${(playback.value['position'] as num?)?.toInt() ?? 0}|'
+        '${(playback.value['duration'] as num?)?.toInt() ?? 0}|'
+        '${islandLiked ? 1 : 0}|${reduced ? 1 : 0}|$language';
+    if (islandKey != _lastIslandKey) {
+      _lastIslandKey = islandKey;
+      window.invokeMethod('island-state', {
+        'player': {...playback.value, 'liked': islandLiked},
+        'reduced': reduced,
+        'language': language,
+      });
+    }
+    _updatePollCadence();
     if ((!_homeRequested ||
             (route == 'home' &&
                 feed['loaded'] != true &&
@@ -449,7 +529,7 @@ class Core extends ChangeNotifier {
         _assetsAttempts = 0;
       }
       if ((profileAssets['loaded'] != true || _assetsAttempts == 0) &&
-          _assetsAttempts < 30 &&
+          _assetsAttempts < 4 &&
           DateTime.now().difference(_assetsPoll).inMilliseconds > 1600) {
         _assetsPoll = DateTime.now();
         _assetsAttempts++;
@@ -489,6 +569,9 @@ class Core extends ChangeNotifier {
     if (value['type'] == 'volume') {
       setVolume((value['value'] as num).toDouble());
       return;
+    }
+    if (_windowVisible && _pollIntervalMs > 250) {
+      _schedulePoll(250);
     }
     final result = _request(_send, value);
     if (result['ok'] != true) {
@@ -538,6 +621,10 @@ class Core extends ChangeNotifier {
   void call(String method, [List<dynamic> args = const []]) =>
       command({'type': 'call', 'method': method, 'args': args});
   void setting(String key, dynamic value) {
+    if (key == 'language' && value != null) {
+      _previewLanguage = value.toString() == 'uk' ? 'uk' : 'en';
+      notifyListeners();
+    }
     command({
       'type': 'settings',
       'patch': {key: value},

@@ -140,6 +140,20 @@ pub extern "C" fn sf_poll() -> *mut c_char {
                 ShellEvent::Error(error) => events.push(json!({"type": "error", "message": error})),
             }
         }
+        if rt.transfer.enabled {
+            if let Some(previous) = rt.transfer.previous.as_mut().and_then(Value::as_object_mut) {
+                let (set, desktop_icon, hotkeys_enabled) = rt.session.diff_snapshot(previous);
+                rt.shell.set_icon_selection(&desktop_icon);
+                rt.shell
+                    .hotkeys_enabled
+                    .store(hotkeys_enabled, Ordering::Relaxed);
+                return Ok(json!({
+                    "ok": true,
+                    "state_patch": {"set": set, "remove": []},
+                    "events": events
+                }));
+            }
+        }
         let state = rt.session.snapshot_value();
         rt.shell.set_icon_selection(
             state["settings"]["desktop_icon"].as_str().unwrap_or("default"),

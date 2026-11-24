@@ -15,9 +15,12 @@ use std::{
 };
 
 const MAX_AUDIO_BYTES: u64 = 256 * 1024 * 1024;
-// Keep only short clips fully decoded. Ordinary songs use the existing
-// file-backed decoder instead of retaining up to 128 MiB of PCM per load.
-const MAX_PCM_SAMPLES: usize = 16 * 1024 * 1024 / size_of::<f32>();
+// Keep only short clips (< ~11.8s stereo 44.1 kHz f32) decoded in RAM.
+// Ordinary songs stream directly from the disk-backed decoder instead of
+// retaining 16+ MiB of PCM in memory.
+const MAX_PCM_SAMPLES: usize = 2 * 1024 * 1024 / size_of::<f32>();
+/// Fallback initial sample capacity (256 KiB) when container duration is unknown.
+const INITIAL_PCM_FALLBACK_SAMPLES: f64 = 65_536.0;
 /// One initial attempt plus three retries for transient network failures.
 pub const MAX_LOAD_ATTEMPTS: u32 = 4;
 const FIRST_RETRY_DELAY: Duration = Duration::from_millis(400);
@@ -142,7 +145,7 @@ fn decode_ahead(
     }
     let mut samples = Vec::with_capacity(
         estimate
-            .unwrap_or(480_000.0)
+            .unwrap_or(INITIAL_PCM_FALLBACK_SAMPLES)
             .clamp(0.0, MAX_PCM_SAMPLES as f64) as usize,
     );
     let mut energy = 0.0f64;
@@ -183,7 +186,7 @@ fn decode_ahead(
     })
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlayerState {
     pub track: Option<Value>,
     pub playing: bool,
@@ -708,8 +711,14 @@ fn audio_loop(
     let mut last_position = 0.0;
     let mut heartbeat = Instant::now();
     let mut speed = f32::from_bits(speed_store.load(Ordering::Relaxed));
+    let mut last_emitted: Option<PlayerState> = None;
     loop {
-        let command = input.recv_timeout(Duration::from_millis(200));
+        let poll_wait = if state.playing || state.loading || wanted_playing {
+            Duration::from_millis(200)
+        } else {
+            Duration::from_millis(1000)
+        };
+        let command = input.recv_timeout(poll_wait);
         let elapsed = clock.elapsed().as_secs_f64();
         clock = Instant::now();
         if let Some(output) = sink.as_ref() {
@@ -987,8 +996,11 @@ fn audio_loop(
             emit_listening(&mut session, &events);
             heartbeat = Instant::now();
         }
-        if events.send(AudioEvent::State(state.clone())).is_err() {
-            break;
+        if last_emitted.as_ref() != Some(&state) {
+            last_emitted = Some(state.clone());
+            if events.send(AudioEvent::State(state.clone())).is_err() {
+                break;
+            }
         }
     }
 }

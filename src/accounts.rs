@@ -290,6 +290,7 @@ impl AccountsStore {
             if acc.subscription.is_valid() {
                 return acc.subscription.clone();
             }
+            return SubscriptionState::default();
         }
         if self.config.guest_subscription.is_valid() {
             return self.config.guest_subscription.clone();
@@ -398,11 +399,9 @@ impl AccountsStore {
         let sub = SubscriptionState::default();
         if let Some(acc) = self.active_account_mut() {
             acc.subscription = sub.clone();
+        } else {
+            self.config.guest_subscription = sub.clone();
         }
-        for acc in &mut self.config.accounts {
-            acc.subscription = sub.clone();
-        }
-        self.config.guest_subscription = sub.clone();
         self.save()?;
         Ok(json!({
             "ok": true,
@@ -777,5 +776,38 @@ mod tests {
         store.sign_out().unwrap();
         assert!(store.local_sign_in("alice@example.com", "password123").is_err());
         assert_eq!(store.active_id(), "guest");
+    }
+
+    #[test]
+    fn cancel_subscription_affects_only_active_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AccountsStore::open(dir.path()).unwrap();
+        store.buy_subscription("lifetime").unwrap();
+        assert!(store.get_subscription().is_valid());
+
+        store
+            .local_sign_up("Alice", "alice@example.com", "password123")
+            .unwrap();
+        store
+            .local_sign_up("Bob", "bob@example.com", "password123")
+            .unwrap();
+        assert!(store.get_subscription().is_valid());
+
+        // Cancel Bob's subscription; Alice and Guest must keep theirs.
+        store.cancel_subscription().unwrap();
+        assert!(!store.get_subscription().is_valid());
+
+        store.sign_out().unwrap();
+        assert!(store.get_subscription().is_valid());
+
+        store
+            .local_sign_in("alice@example.com", "password123")
+            .unwrap();
+        assert!(store.get_subscription().is_valid());
+
+        store
+            .local_sign_in("bob@example.com", "password123")
+            .unwrap();
+        assert!(!store.get_subscription().is_valid());
     }
 }

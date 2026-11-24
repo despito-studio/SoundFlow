@@ -4,8 +4,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'cider_shell.dart';
 import 'core.dart';
 import 'design.dart';
+import 'visualizer.dart';
 
 class DiscoveryPage extends StatefulWidget {
   const DiscoveryPage(this.core, {super.key});
@@ -44,7 +46,7 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
               final count = math.max(3, (box.maxWidth / 210).floor());
               final width = (box.maxWidth - (count - 1) * 16) / count;
               return SizedBox(
-                height: width * 1.22,
+                height: width * 1.28,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: tracks.length,
@@ -85,31 +87,101 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
         artists.putIfAbsent('${t['source']}:${trackArtist(t, context)}', () => t);
       }
     }
+    final p = context.paints;
+    final allHeroPool = <Json>[
+      if (c.hasTrack) c.current,
+      ...recent,
+      ...recommendations,
+      ...youtube,
+      ...soundcloud,
+    ];
+    final heroTrack = allHeroPool.isNotEmpty ? allHeroPool.first : null;
+    final heroQueue = allHeroPool.isNotEmpty ? allHeroPool : <Json>[];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (heroTrack != null) ...[
+          CiderHeroHeader(
+            core: c,
+            cover: trackCover(heroTrack),
+            title: trackTitle(heroTrack, context),
+            subtitle: trackArtist(heroTrack, context),
+            ambientKey: trackKey(heroTrack),
+            pills: [
+              'Single',
+              sourceName(heroTrack, context),
+              if (heroTrack['duration_formatted'] != null)
+                heroTrack['duration_formatted'].toString(),
+            ],
+            onPlay: () => c.play(heroTrack, heroQueue),
+            onShuffle: () {
+              final shuffled = [...heroQueue]..shuffle();
+              if (shuffled.isNotEmpty) c.play(shuffled.first, shuffled);
+            },
+            onAdd: () => c.action('like', heroTrack),
+            onMore: redesignPrefs.toggleImmersive,
+          ),
+          const SizedBox(height: 22),
+        ],
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: p.surface,
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(color: p.ink.withValues(alpha: .08)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final s in [
+                    ('all', 'Усе'.tr(context)),
+                    ('youtube', 'YouTube'),
+                    ('soundcloud', 'SoundCloud'),
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1),
+                      child: Material(
+                        color: source == s.$1
+                            ? p.ink.withValues(alpha: .11)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                        child: InkWell(
+                          onTap: () => setState(() => source = s.$1),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            child: Text(
+                              s.$2,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: source == s.$1
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                                color: source == s.$1 ? p.ink : p.muted,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
             ActionButton(
               'Інші треки'.tr(context),
               compact: true,
-              flat: true,
               onTap: c.pending > 0
                   ? null
                   : () => c.call('get_home_feed', [true]),
             ),
-            for (final s in [
-              ('all', 'Усе'.tr(context)),
-              ('youtube', 'YouTube'),
-              ('soundcloud', 'SoundCloud'),
-            ])
-              ChoiceChip(
-                label: Text(s.$2),
-                selected: source == s.$1,
-                onSelected: (_) => setState(() => source = s.$1),
-              ),
           ],
         ),
         if (recent.isNotEmpty) ...[
@@ -122,65 +194,117 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
               onTap: () => c.nav('history'),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           LayoutBuilder(
             builder: (context, box) {
-              final columns = box.maxWidth > 960 ? 3 : 2;
+              final columns = box.maxWidth > 940 ? 3 : 2;
               return GridView.count(
                 crossAxisCount: columns,
                 childAspectRatio:
-                    (box.maxWidth - (columns - 1) * 12) / columns / 72,
+                    (box.maxWidth - (columns - 1) * 12) / columns / 68,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
                   for (final t in recent)
-                    Material(
-                      color: context.paints.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      child: InkWell(
-                        onTap: () => c.play(t, recent),
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: Row(
-                            children: [
-                              Artwork(trackCover(t), size: 52, radius: 8),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                    Builder(
+                      builder: (context) {
+                        final isCurrent = trackKey(c.current) == trackKey(t);
+                        final isPlaying = isCurrent && c.playing;
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: isCurrent ? p.hover : p.surface,
+                            borderRadius: BorderRadius.circular(13),
+                            border: Border.all(
+                              color: isCurrent
+                                  ? p.accent.withValues(alpha: .45)
+                                  : p.ink.withValues(alpha: .06),
+                            ),
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(13),
+                            child: InkWell(
+                              onTap: () => c.play(t, recent),
+                              borderRadius: BorderRadius.circular(13),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  9,
+                                  8,
+                                  12,
+                                  8,
+                                ),
+                                child: Row(
                                   children: [
-                                    Text(
-                                      trackTitle(t, context),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 14,
+                                    Artwork(trackCover(t), size: 50, radius: 9),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            trackTitle(t, context),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 13.5,
+                                              color: isCurrent
+                                                  ? p.accent
+                                                  : p.ink,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            trackArtist(t, context),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: p.muted,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      trackArtist(t, context),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: context.paints.muted,
+                                    const SizedBox(width: 8),
+                                    if (isPlaying)
+                                      MiniEqBars(
+                                        playing: true,
+                                        color: p.accent,
+                                      )
+                                    else
+                                      Container(
+                                        width: 30,
+                                        height: 30,
+                                        decoration: BoxDecoration(
+                                          color: isCurrent
+                                              ? p.accent.withValues(alpha: .16)
+                                              : p.ink.withValues(alpha: .05),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Center(
+                                          child: Glyph(
+                                            'play',
+                                            filled: true,
+                                            size: 14,
+                                            color: isCurrent
+                                                ? p.accent
+                                                : p.ink.withValues(alpha: .82),
+                                          ),
+                                        ),
                                       ),
-                                    ),
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              const Glyph('play', size: 18),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                 ],
               );
